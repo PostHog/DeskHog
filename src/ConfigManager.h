@@ -22,6 +22,8 @@
 class ConfigManager {
 public:
     static const int NO_TEAM_ID = -1;  // Sentinel value for no team ID
+    static constexpr const char* DEFAULT_BASE_URL = "https://us.posthog.com";  // Sentinel value for no base url
+    static constexpr const char* PROJECTS_ENDPOINT = "/api/projects/";  // Endpoint for projects
 
     /**
      * @brief Default constructor
@@ -114,6 +116,24 @@ public:
     void clearApiKey();
 
     /**
+     * @brief Store base url
+     * @param baseUrl The base url to store
+     * @return true if saved successfully, false otherwise
+     */
+    bool setBaseUrl(const String& baseUrl);
+
+    /**
+     * @brief Retrieve stored base url
+     * @return The base url or DEFAULT_BASE_URL if not set
+     */
+    String getBaseUrl();
+
+    /**
+     * @brief Remove stored base url
+     */
+    void clearBaseUrl();
+
+    /**
      * @brief Store insight configuration
      * @param id Unique insight identifier
      * @param title Insight title/configuration
@@ -188,6 +208,7 @@ private:
     // Storage keys for API configuration
     const char* _teamIdKey = "team_id";           ///< Key for stored team ID
     const char* _apiKeyKey = "api_key";           ///< Key for stored API key
+    const char* _baseUrlKey = "base_url";         ///< Key for stored base url
 
     // Storage size limits
     /** @brief Maximum length for WiFi SSID (per IEEE 802.11 spec) */
@@ -198,6 +219,8 @@ private:
     static const size_t MAX_INSIGHT_LENGTH = 1024;
     /** @brief Maximum length for API key */
     static const size_t MAX_API_KEY_LENGTH = 64;
+    /** @brief Maximum length for base url */
+    static const size_t MAX_BASE_URL_LENGTH = 1024;
     /** @brief Maximum length for insight identifier */
     static const size_t MAX_INSIGHT_ID_LENGTH = 64;
 

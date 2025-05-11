@@ -244,3 +244,40 @@ void ConfigManager::clearApiKey() {
     
     SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
 }
+
+bool ConfigManager::setBaseUrl(const String& baseUrl) {
+    if (baseUrl.length() == 0 || baseUrl.length() > MAX_BASE_URL_LENGTH) {
+        SystemController::setApiState(ApiState::API_CONFIG_INVALID);
+        return false;
+    }
+
+    if (!baseUrl.endsWith(PROJECTS_ENDPOINT)) {
+        SystemController::setApiState(ApiState::API_CONFIG_INVALID);
+        return false;
+    }
+
+    _preferences.putString(_baseUrlKey, baseUrl);
+    
+    // Commit changes
+    commit();
+    
+    updateApiConfigurationState();
+    return true;
+}
+
+String ConfigManager::getBaseUrl() {
+    String baseUrl = String(DEFAULT_BASE_URL) + String(PROJECTS_ENDPOINT);   
+    if (!_preferences.isKey(_baseUrlKey)) {
+        return baseUrl;
+    }
+    return _preferences.getString(_baseUrlKey, baseUrl);
+}
+
+void ConfigManager::clearBaseUrl() {
+    _preferences.remove(_baseUrlKey);
+    
+    // Commit changes
+    commit();
+    
+    SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
+}

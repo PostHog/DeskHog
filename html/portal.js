@@ -19,50 +19,54 @@ function showScreen(screenId) {
 }
 
 // Handle WiFi form submission
-function saveWifiConfig() {
-    const form = document.getElementById('wifi-form');
-    const formData = new FormData(form);
+async function saveWifiConfig(event) {
+    event.preventDefault(); // Prevent form submission immediately
     
-    fetch('/save-wifi', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        const form = document.getElementById('wifi-form');
+        const formData = new FormData(form);
+        
+        const response = await fetch('/save-wifi', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        
         if (data.success) {
             showScreen('success-screen');
         } else {
             showScreen('error-screen');
         }
-    })
-    .catch(() => {
+    } catch (error) {
+        console.error('Error saving WiFi config:', error);
         showScreen('error-screen');
-    });
-    
-    return false; // Prevent default form submission
+    }
+    return false;
 }
 
 // Handle device config form submission
-function saveDeviceConfig() {
-    const form = document.getElementById('device-form');
-    const formData = new FormData(form);
+async function saveDeviceConfig(event) {
+    event.preventDefault(); // Prevent form submission immediately
     
-    fetch('/save-device-config', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        const form = document.getElementById('device-form');
+        const formData = new FormData(form);
+        
+        const response = await fetch('/save-device-config', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        
         if (data.success) {
             showScreen('success-screen');
         } else {
             showScreen('error-screen');
         }
-    })
-    .catch(() => {
+    } catch (error) {
+        console.error('Error saving device config:', error);
         showScreen('error-screen');
-    });
-    
+    }
     return false;
 }
 
@@ -73,61 +77,65 @@ function toggleApiKeyVisibility() {
 }
 
 // Add new insight
-function addInsight() {
-    const form = document.getElementById('insight-form');
-    const formData = new FormData(form);
+async function addInsight(event) {
+    event.preventDefault(); // Prevent form submission immediately
     
-    fetch('/save-insight', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        const form = document.getElementById('insight-form');
+        const formData = new FormData(form);
+        
+        const response = await fetch('/save-insight', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        
         if (data.success) {
             form.reset();
-            loadInsights();
+            await loadInsights();
         } else {
             showScreen('error-screen');
         }
-    })
-    .catch(() => {
+    } catch (error) {
+        console.error('Error adding insight:', error);
         showScreen('error-screen');
-    });
-    
+    }
     return false;
 }
 
 // Delete insight
-function deleteInsight(id) {
+async function deleteInsight(id) {
     if (!confirm('Are you sure you want to delete this insight?')) {
         return;
     }
     
-    fetch('/delete-insight', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ id: id })
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        const response = await fetch('/delete-insight', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ id: id })
+        });
+        const data = await response.json();
+        
         if (data.success) {
-            loadInsights();
+            await loadInsights();
         } else {
             showScreen('error-screen');
         }
-    })
-    .catch(() => {
+    } catch (error) {
+        console.error('Error deleting insight:', error);
         showScreen('error-screen');
-    });
+    }
 }
 
 // Load insights list
-function loadInsights() {
-    fetch('/get-insights')
-    .then(response => response.json())
-    .then(data => {
+async function loadInsights() {
+    try {
+        const response = await fetch('/get-insights');
+        const data = await response.json();
+        
         const container = document.getElementById('insights-list');
         container.innerHTML = '';
         
@@ -149,17 +157,20 @@ function loadInsights() {
         });
         
         container.appendChild(list);
-    })
-    .catch(error => {
+    } catch (error) {
         console.error('Error loading insights:', error);
-    });
+        const container = document.getElementById('insights-list');
+        container.innerHTML = '<p>Error loading insights</p>';
+    }
 }
 
 // Refresh network list
-function refreshNetworks() {
-    fetch('/scan-networks')
-    .then(response => response.json())
-    .then(data => {
+async function refreshNetworks(config) {
+    try {
+        const response = await fetch('/scan-networks');
+        const data = await response.json();
+        
+        const { ssid } = config;
         const select = document.getElementById('ssid');
         select.innerHTML = '<option value="">Select a network</option>';
         
@@ -189,16 +200,19 @@ function refreshNetworks() {
             if (network.encrypted) {
                 label += ' 🔒';
             }
+
+            if (ssid === network.ssid) {
+                option.selected = true;
+            }
             
             option.textContent = label;
             select.appendChild(option);
         });
-    })
-    .catch(error => {
+    } catch (error) {
         console.error('Error refreshing networks:', error);
         const select = document.getElementById('ssid');
         select.innerHTML = '<option value="">Error loading networks</option>';
-    });
+    }
 }
 
 // Start countdown on success screen
@@ -218,24 +232,29 @@ function startCountdown() {
 }
 
 // Load current configuration
-function loadCurrentConfig() {
-    fetch('/get-device-config')
-    .then(response => response.json())
-    .then(data => {
+async function loadCurrentConfig() {
+    try {
+        const response = await fetch('/get-device-config');
+        const data = await response.json();
+        
         if (data.teamId !== undefined) {
             document.getElementById('teamId').value = data.teamId;
         }
         if (data.apiKey) {
             document.getElementById('apiKey').value = data.apiKey;
         }
-    })
-    .catch(error => {
+        if (data.baseUrl) {
+            document.getElementById('baseUrl').value = data.baseUrl;
+        }
+        return data;
+    } catch (error) {
         console.error('Error loading device config:', error);
-    });
+        throw error;
+    }
 }
 
 // Initialize page
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     // Check if we need to show a specific screen based on URL hash
     const hash = window.location.hash.substr(1);
     if (hash && ['config-screen', 'success-screen', 'error-screen'].includes(hash)) {
@@ -243,11 +262,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Load current configuration
-    loadCurrentConfig();
+    const config = await loadCurrentConfig();
     
     // Load insights list
-    loadInsights();
+    await loadInsights();
 
     // Populate the networks list
-    refreshNetworks();
+    await refreshNetworks(config);
 });
