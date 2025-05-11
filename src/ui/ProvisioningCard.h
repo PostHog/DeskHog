@@ -2,7 +2,7 @@
 
 #include <lvgl.h>  // LVGL core library
 #include <string>  // For String class (or could be Arduino's String)
-#include "hardware/WiFiInterface.h"  // Custom WiFi interface class
+#include "hardware/WifiInterface.h"  // Custom WiFi interface class
 
 /**
  * @class ProvisioningCard
