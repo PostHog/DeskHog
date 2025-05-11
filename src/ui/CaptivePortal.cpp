@@ -87,6 +87,14 @@ void CaptivePortal::handleGetDeviceConfig() {
     }
     doc["apiKey"] = truncatedKey;
     doc["baseUrl"] = _configManager.getBaseUrl();
+
+    // Stored credentials
+    String _ssid;
+    String _password;
+    if (_configManager.getWiFiCredentials(_ssid, _password)) {
+        doc["ssid"] = _ssid;
+        doc["password"] = "********"; // Hide the password
+    }
     
     String response;
     serializeJson(doc, response);
