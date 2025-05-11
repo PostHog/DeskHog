@@ -86,6 +86,7 @@ void CaptivePortal::handleGetDeviceConfig() {
         truncatedKey = truncatedKey.substring(0, 12) + "...";
     }
     doc["apiKey"] = truncatedKey;
+    doc["baseUrl"] = _configManager.getBaseUrl();
     
     String response;
     serializeJson(doc, response);
@@ -112,6 +113,12 @@ void CaptivePortal::handleSaveDeviceConfig() {
             success = false;
             message = "Invalid API key";
         }
+    }
+
+    // Handle base url
+    if (_server.hasArg("baseUrl")) {
+        String baseUrl = _server.arg("baseUrl");
+        _configManager.setBaseUrl(baseUrl);
     }
     
     // Create JSON response

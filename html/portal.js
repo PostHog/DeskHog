@@ -228,6 +228,9 @@ function loadCurrentConfig() {
         if (data.apiKey) {
             document.getElementById('apiKey').value = data.apiKey;
         }
+        if (data.baseUrl) {
+            document.getElementById('baseUrl').value = data.baseUrl;
+        }
     })
     .catch(error => {
         console.error('Error loading device config:', error);

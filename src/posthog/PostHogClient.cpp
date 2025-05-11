@@ -1,8 +1,6 @@
 #include "PostHogClient.h"
 #include "../ConfigManager.h"
 
-const char* PostHogClient::BASE_URL = "https://us.posthog.com/api/projects/";
-
 PostHogClient::PostHogClient(ConfigManager& config, EventQueue& eventQueue) 
     : _config(config)
     , _eventQueue(eventQueue)
@@ -26,7 +24,8 @@ void PostHogClient::requestInsightData(const String& insight_id) {
 bool PostHogClient::isReady() const {
     return SystemController::isSystemFullyReady() && 
            _config.getTeamId() != ConfigManager::NO_TEAM_ID && 
-           _config.getApiKey().length() > 0;
+           _config.getApiKey().length() > 0 &&
+           _config.getBaseUrl().length() > 0;
 }
 
 void PostHogClient::process() {
@@ -127,7 +126,7 @@ void PostHogClient::checkRefreshes() {
 }
 
 String PostHogClient::buildInsightUrl(const String& insight_id, const char* refresh_mode) const {
-    String url = String(BASE_URL);
+    String url = String(_config.getBaseUrl());
     url += String(_config.getTeamId());
     url += "/insights/?refresh=";
     url += refresh_mode;
