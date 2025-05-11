@@ -19,7 +19,9 @@ function showScreen(screenId) {
 }
 
 // Handle WiFi form submission
-async function saveWifiConfig() {
+async function saveWifiConfig(event) {
+    event.preventDefault(); // Prevent form submission immediately
+    
     try {
         const form = document.getElementById('wifi-form');
         const formData = new FormData(form);
@@ -39,11 +41,13 @@ async function saveWifiConfig() {
         console.error('Error saving WiFi config:', error);
         showScreen('error-screen');
     }
-    return false; // Prevent default form submission
+    return false;
 }
 
 // Handle device config form submission
-async function saveDeviceConfig() {
+async function saveDeviceConfig(event) {
+    event.preventDefault(); // Prevent form submission immediately
+    
     try {
         const form = document.getElementById('device-form');
         const formData = new FormData(form);
@@ -73,7 +77,9 @@ function toggleApiKeyVisibility() {
 }
 
 // Add new insight
-async function addInsight() {
+async function addInsight(event) {
+    event.preventDefault(); // Prevent form submission immediately
+    
     try {
         const form = document.getElementById('insight-form');
         const formData = new FormData(form);

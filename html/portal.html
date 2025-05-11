@@ -17,7 +17,7 @@
         <h2>WiFi</h2>
         <div class="config-section">
             
-            <form id="wifi-form" onsubmit="return saveWifiConfig()">
+            <form id="wifi-form" onsubmit="return saveWifiConfig(event)">
                 <div class="form-group">
                     <select name="ssid" id="ssid" required>
                         <option value="">Select a network</option>
@@ -44,7 +44,7 @@
         <h2>API configuration</h2>
 
         <div class="config-section">
-            <form id="device-form" onsubmit="return saveDeviceConfig()">
+            <form id="device-form" onsubmit="return saveDeviceConfig(event)">
                 <div class="form-group">
                     <label for="teamId">Team ID</label>
                     <input type="text" name="teamId" id="teamId" min="-1" required>
@@ -69,7 +69,7 @@
         <h2>Insights</h2>
 
         <div class="config-section">
-            <form id="insight-form" onsubmit="return addInsight()">
+            <form id="insight-form" onsubmit="return addInsight(event)">
                 <div class="form-group">
                     <label for="insightId">Add new insight ID</label>
                     <input type="text" name="insightId" id="insightId"  required>
