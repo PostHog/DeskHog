@@ -242,7 +242,7 @@ void PostHogClient::publishInsightDataEvent(const String& insight_id, const Stri
     }
     
     // Publish the event with the raw JSON response
-    _eventQueue.publishEvent(EventType::INSIGHT_DATA_RECEIVED, insight_id, response);
+    _eventQueue.publishEvent(Event(EventType::INSIGHT_DATA_RECEIVED, insight_id, "", response));
     
     // Log for debugging
     Serial.printf("Published raw JSON data for %s\n", insight_id.c_str());
