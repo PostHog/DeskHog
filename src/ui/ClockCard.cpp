@@ -171,12 +171,16 @@ void ClockCard::updateTimerDisplay() {
     if (!isValidObject(_timeLabel)) return;
 
     unsigned long elapsedMillis = millis() - _timerStartTimeMillis;
+    // int milliseconds = elapsedMillis % 1000;
+    int hundredths = (elapsedMillis / 10) % 100; // Calculate hundredths of a second
     unsigned long totalSeconds = elapsedMillis / 1000;
     int seconds = totalSeconds % 60;
     int minutes = (totalSeconds / 60) % 60;
     int hours = totalSeconds / 3600;
 
-    char timerStr[9]; // HH:MM:SS + null
-    sprintf(timerStr, "%02d:%02d:%02d", hours, minutes, seconds);
+    // char timerStr[13]; // HH:MM:SS.mmm + null
+    // sprintf(timerStr, "%02d:%02d:%02d.%03d", hours, minutes, seconds, milliseconds);
+    char timerStr[12]; // HH:MM:SS.ss + null
+    sprintf(timerStr, "%02d:%02d:%02d.%02d", hours, minutes, seconds, hundredths);
     lv_label_set_text(_timeLabel, timerStr);
 } 

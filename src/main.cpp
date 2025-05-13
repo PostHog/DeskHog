@@ -152,7 +152,7 @@ void neoPixelTaskFunction(void* parameter) {
 // Task to periodically update and publish the time
 void timeUpdateTaskFunction(void* parameter) {
     TickType_t lastTimeUpdate = xTaskGetTickCount();
-    const TickType_t timeUpdateInterval = pdMS_TO_TICKS(3000); // Update every 3 seconds
+    const TickType_t timeUpdateInterval = pdMS_TO_TICKS(1000); // Update every 1 second
 
     while (1) {
         TickType_t currentTime = xTaskGetTickCount();
