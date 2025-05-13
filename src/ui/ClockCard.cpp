@@ -2,12 +2,17 @@
 #include "Style.h"
 #include "fonts.h"
 #include <time.h> // For time functions
+#include <stdio.h> // For sprintf
+#include "hardware/Input.h"
 
 ClockCard::ClockCard(lv_obj_t* parent)
     : _card(nullptr),
       _timeLabel(nullptr),
       _dayBackgroundColor(lv_color_hex(0x87CEEB)),   // Sky Blue
-      _nightBackgroundColor(lv_color_hex(0x131862))  // Dark Blue
+      _nightBackgroundColor(lv_color_hex(0x131862)),  // Dark Blue
+      _currentMode(DisplayMode::CLOCK), // Start in clock mode
+      _timerStartTimeMillis(0),
+      _lastTimerUpdateMillis(0)
 {
 
     _card = lv_obj_create(parent);
@@ -56,6 +61,11 @@ lv_obj_t* ClockCard::getCard() {
 }
 
 void ClockCard::updateTime(const String& newTime) {
+    // Only update time display if we are in CLOCK mode
+    if (_currentMode != DisplayMode::CLOCK) {
+        return;
+    }
+
     if (!_timeLabel) return;
     lv_label_set_text(_timeLabel, newTime.c_str());
 
@@ -70,9 +80,49 @@ void ClockCard::updateTime(const String& newTime) {
     }
 }
 
+void ClockCard::updateIfTimerRunning() {
+    if (_currentMode != DisplayMode::TIMER_RUNNING) {
+        return;
+    }
+
+    unsigned long now = millis();
+    // Update the display roughly 10 times per second (every 100ms)
+    if (now - _lastTimerUpdateMillis >= 100) { 
+        updateTimerDisplay();
+        _lastTimerUpdateMillis = now;
+    }
+}
+
 bool ClockCard::handleButtonPress(uint8_t button_index) {
-    // Clock card does not respond to button presses
-    return false;
+    if (button_index == Input::BUTTON_CENTER) {
+        switch (_currentMode) {
+            case DisplayMode::CLOCK:
+                // Switch to Timer mode (stopped)
+                _currentMode = DisplayMode::TIMER_STOPPED;
+                resetTimer();
+                Serial.println("ClockCard: Switched to TIMER_STOPPED");
+                return true; // Handled
+
+            case DisplayMode::TIMER_STOPPED:
+                // Start the timer
+                _currentMode = DisplayMode::TIMER_RUNNING;
+                _timerStartTimeMillis = millis();
+                _lastTimerUpdateMillis = _timerStartTimeMillis; // Reset last update time too
+                updateTimerDisplay(); // Show initial 00:00:00 immediately
+                Serial.println("ClockCard: Switched to TIMER_RUNNING");
+                return true; // Handled
+
+            case DisplayMode::TIMER_RUNNING:
+                // Stop timer, reset, switch back to Clock mode
+                _currentMode = DisplayMode::CLOCK;
+                resetTimer(); // Resets display to 00:00:00
+                // Optionally, immediately request a time update or display placeholder
+                updateTime("--:--"); // Show placeholder until next updateTime event
+                Serial.println("ClockCard: Switched back to CLOCK");
+                return true; // Handled
+        }
+    }
+    return false; // Did not handle button press
 }
 
 bool ClockCard::isValidObject(lv_obj_t* obj) const {
@@ -81,6 +131,13 @@ bool ClockCard::isValidObject(lv_obj_t* obj) const {
 
 // Helper function to update background color based on hour
 void ClockCard::updateBackgroundColor(int currentHour) {
+    // Only update background if in CLOCK mode
+    if (_currentMode != DisplayMode::CLOCK) {
+        // Optionally set a default/neutral background for timer mode
+        // lv_obj_set_style_bg_color(_card, lv_color_black(), 0); 
+        return; 
+    }
+
     if (!_card) return;
 
     // Define day as 6 AM (6) to 5 PM (17)
@@ -95,4 +152,31 @@ void ClockCard::updateBackgroundColor(int currentHour) {
     }
     // It might be good to invalidate the card to ensure it redraws, if LVGL doesn't do it automatically on style change.
     // lv_obj_invalidate(_card); 
+}
+
+// Add implementations for timer methods
+void ClockCard::resetTimer() {
+    _timerStartTimeMillis = 0;
+    _lastTimerUpdateMillis = 0;
+    if (isValidObject(_timeLabel)) {
+        lv_label_set_text(_timeLabel, "00:00:00");
+    }
+    // Optionally reset background color if timer mode should have a specific background
+    // if(isValidObject(_card)) {
+    //     lv_obj_set_style_bg_color(_card, lv_color_black(), 0);
+    // }
+}
+
+void ClockCard::updateTimerDisplay() {
+    if (!isValidObject(_timeLabel)) return;
+
+    unsigned long elapsedMillis = millis() - _timerStartTimeMillis;
+    unsigned long totalSeconds = elapsedMillis / 1000;
+    int seconds = totalSeconds % 60;
+    int minutes = (totalSeconds / 60) % 60;
+    int hours = totalSeconds / 3600;
+
+    char timerStr[9]; // HH:MM:SS + null
+    sprintf(timerStr, "%02d:%02d:%02d", hours, minutes, seconds);
+    lv_label_set_text(_timeLabel, timerStr);
 } 

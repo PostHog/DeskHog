@@ -164,7 +164,7 @@ void CardController::createClockCard() {
     // Add to navigation stack
     if (clockCard && clockCard->getCard()) {
         cardStack->addCard(clockCard->getCard());
-        // ClockCard does not handle input, so no need to register input handler
+        cardStack->registerInputHandler(clockCard->getCard(), clockCard);
     } else {
         Serial.println("[CardCtrl-ERROR] Failed to create ClockCard or its LVGL object.");
         delete clockCard; // Clean up if partially created
@@ -281,4 +281,9 @@ void CardController::handleWiFiEvent(const Event& event) {
     }
     
     displayInterface->giveMutex();
+}
+
+ClockCard* CardController::getClockCard() {
+    // Assume access is thread-safe or called from the UI thread
+    return clockCard;
 } 

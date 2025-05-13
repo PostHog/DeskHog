@@ -99,6 +99,19 @@ public:
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
 
+    /**
+     * @brief Get the insight card object by its ID
+     * @param insightId The ID of the insight card
+     * @return Pointer to the InsightCard or nullptr if not found
+     */
+    InsightCard* getInsightCard(const String& insightId);
+
+    /**
+     * @brief Get the clock card object
+     * @return Pointer to the ClockCard or nullptr if not created
+     */
+    ClockCard* getClockCard();
+
 private:
     // Screen reference
     lv_obj_t* screen;              ///< Main LVGL screen object

@@ -6,6 +6,13 @@
 #include <string>
 #include "ui/InputHandler.h"
 
+// Enum for the card's display mode
+enum class DisplayMode {
+    CLOCK,
+    TIMER_STOPPED,
+    TIMER_RUNNING
+};
+
 /**
  * @class ClockCard
  * @brief UI component for displaying the current time
@@ -36,6 +43,12 @@ public:
     void updateTime(const String& newTime);
 
     /**
+     * @brief Updates the timer display if the timer is currently running.
+     *        Should be called frequently (e.g., from the main UI loop).
+     */
+    void updateIfTimerRunning();
+
+    /**
      * @brief Handle button press events (does nothing for clock card)
      * @param button_index The index of the button pressed
      * @return false as clock card doesn't handle buttons
@@ -52,8 +65,14 @@ private:
 
     // UI Elements
     lv_obj_t* _card;        ///< Main container card
-    lv_obj_t* _timeLabel;   ///< Label to display the time
+    lv_obj_t* _timeLabel;   ///< Label to display the time/timer
 
+    // State Management
+    DisplayMode _currentMode; ///< Current display mode (clock or timer)
+    unsigned long _timerStartTimeMillis; ///< Timestamp when the timer was started
+    unsigned long _lastTimerUpdateMillis; ///< Timestamp of the last timer label update
+
+    // Background Colors
     lv_color_t _dayBackgroundColor;   ///< Background color for daytime
     lv_color_t _nightBackgroundColor; ///< Background color for nighttime
 
@@ -62,4 +81,14 @@ private:
      * @param currentHour The current hour (0-23).
      */
     void updateBackgroundColor(int currentHour);
+
+    /**
+     * @brief Resets the timer state and display to 00:00:00.
+     */
+    void resetTimer();
+
+    /**
+     * @brief Updates the time label with the current elapsed timer value.
+     */
+    void updateTimerDisplay();
 }; 

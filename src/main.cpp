@@ -111,6 +111,14 @@ void lvglHandlerTask(void* parameter) {
         // Handle LVGL tasks
         displayInterface->handleLVGLTasks();
 
+        // Update ClockCard timer if active
+        if (cardController) {
+            ClockCard* cc = cardController->getClockCard();
+            if (cc) {
+                cc->updateIfTimerRunning();
+            }
+        }
+
         InsightCard::processUIQueue();
         
         // Poll buttons at regular intervals
@@ -144,7 +152,7 @@ void neoPixelTaskFunction(void* parameter) {
 // Task to periodically update and publish the time
 void timeUpdateTaskFunction(void* parameter) {
     TickType_t lastTimeUpdate = xTaskGetTickCount();
-    const TickType_t timeUpdateInterval = pdMS_TO_TICKS(10000); // Update every 10 seconds
+    const TickType_t timeUpdateInterval = pdMS_TO_TICKS(3000); // Update every 3 seconds
 
     while (1) {
         TickType_t currentTime = xTaskGetTickCount();
