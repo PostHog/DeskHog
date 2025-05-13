@@ -69,6 +69,7 @@ TaskHandle_t wifiTask;
 TaskHandle_t portalTask;
 TaskHandle_t insightTask;
 TaskHandle_t neoPixelTask;
+TaskHandle_t timeUpdateTask; // <-- Add handle for time update task
 
 // WiFi connection timeout in milliseconds
 #define WIFI_TIMEOUT 30000
@@ -137,6 +138,31 @@ void neoPixelTaskFunction(void* parameter) {
     while (1) {
         neoPixelController->update();
         vTaskDelay(pdMS_TO_TICKS(5));  // Small delay to prevent task starvation
+    }
+}
+
+// Task to periodically update and publish the time
+void timeUpdateTaskFunction(void* parameter) {
+    TickType_t lastTimeUpdate = xTaskGetTickCount();
+    const TickType_t timeUpdateInterval = pdMS_TO_TICKS(10000); // Update every 10 seconds
+
+    while (1) {
+        TickType_t currentTime = xTaskGetTickCount();
+        if ((currentTime - lastTimeUpdate) >= timeUpdateInterval) {
+            lastTimeUpdate = currentTime;
+
+            if (otaManager && otaManager->isTimeSynced() && eventQueue) {
+                time_t now = time(nullptr);
+                struct tm timeinfo;
+                gmtime_r(&now, &timeinfo); // Use gmtime_r for thread-safety
+
+                char timeStr[6]; // HH:MM + null terminator
+                sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+                
+                eventQueue->publishEvent(Event(EventType::TIME_UPDATE, "", String(timeStr)));
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Check every second if it's time to update
     }
 }
 
@@ -300,6 +326,17 @@ void setup() {
         1,
         &neoPixelTask,
         0
+    );
+    
+    // Create Time Update Task
+    xTaskCreatePinnedToCore(
+        timeUpdateTaskFunction,
+        "timeUpdateTask",
+        2048, // Stack size
+        NULL, // Parameters
+        1,    // Priority
+        &timeUpdateTask,
+        0     // Core ID (0 for Protocol CPU, 1 for Application CPU)
     );
     
     // Check if we have WiFi credentials and publish the appropriate event

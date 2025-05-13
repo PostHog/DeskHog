@@ -116,7 +116,7 @@ InsightCard::InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& ev
     lv_obj_set_style_pad_all(_content_container, 0, 0);
 
     _event_queue.subscribe([this](const Event& event) {
-        if (event.type == EventType::INSIGHT_DATA_RECEIVED && event.insightId == _insight_id) {
+        if (event.type == EventType::INSIGHT_DATA_RECEIVED && event.id == _insight_id) {
             this->onEvent(event);
         }
     });
@@ -136,12 +136,10 @@ InsightCard::~InsightCard() {
 
 void InsightCard::onEvent(const Event& event) {
     std::shared_ptr<InsightParser> parser = nullptr;
-    if (event.jsonData.length() > 0) {
-        parser = std::make_shared<InsightParser>(event.jsonData.c_str());
-    } else if (event.parser) {
-        parser = event.parser;
+    if (!event.payload.isEmpty()) {
+        parser = std::make_shared<InsightParser>(event.payload.c_str());
     } else {
-        Serial.printf("[InsightCard-%s] Event received with no JSON data or pre-parsed object.\n", _insight_id.c_str());
+        Serial.printf("[InsightCard-%s] Event received with no JSON payload.\n", _insight_id.c_str());
         handleParsedData(nullptr);
         return;
     }

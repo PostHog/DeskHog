@@ -11,6 +11,7 @@
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
 #include "ui/FriendCard.h"
+#include "ui/ClockCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 
@@ -115,6 +116,7 @@ private:
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
     AnimationCard* animationCard;       ///< Card for animations
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
+    ClockCard* clockCard;               ///< Card for displaying time
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
@@ -135,4 +137,9 @@ private:
      * @param event Event containing WiFi state
      */
     void handleWiFiEvent(const Event& event);
+
+    /**
+     * @brief Create and initialize the clock card
+     */
+    void createClockCard();
 }; 
