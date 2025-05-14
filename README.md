@@ -59,6 +59,12 @@ If the board isn't responding:
 
 The board will restart in bootloader mode, where it can be re-flashed using PlatformIO.
 
+## Power modes
+
+If you want to turn the device off, simply press and hold the Page up and Page down buttons for 2 seconds. The device will enter deep sleep mode. 
+
+To wake the device, simply press Reset once. 
+
 ## UI progress
 
 - Status card: working

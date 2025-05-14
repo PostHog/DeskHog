@@ -34,6 +34,7 @@
 #include "EventQueue.h"
 #include "esp_partition.h" // Include for partition functions
 #include "OtaManager.h"
+#include <esp_sleep.h> // Added for deep sleep functionality
 
 // Display dimensions
 #define SCREEN_WIDTH 240
@@ -106,6 +107,10 @@ void lvglHandlerTask(void* parameter) {
     TickType_t lastButtonCheck = xTaskGetTickCount();
     const TickType_t buttonCheckInterval = pdMS_TO_TICKS(50); // Check buttons every 50ms
     
+    static unsigned long powerOffPressStartTime = 0;
+    // static bool upPressedState = false; // Unused
+    // static bool downPressedState = false; // Unused
+
     while (1) {
         // Handle LVGL tasks
         displayInterface->handleLVGLTasks();
@@ -117,13 +122,46 @@ void lvglHandlerTask(void* parameter) {
         if ((currentTime - lastButtonCheck) >= buttonCheckInterval) {
             lastButtonCheck = currentTime;
             
-            // Poll all buttons
+            // Update all buttons first
             for (int i = 0; i < NUM_BUTTONS; i++) {
                 buttons[i].update();
-                
-                if (buttons[i].pressed()) {
-                    // Process button directly in LVGL context
-                    cardController->getCardStack()->handleButtonPress(i);
+            }
+
+            // Get current state of UP and DOWN buttons
+            // BUTTON_UP is pressed when HIGH (INPUT_PULLDOWN)
+            // BUTTON_DOWN is pressed when LOW (INPUT_PULLUP)
+            bool upButtonHeld = (buttons[Input::BUTTON_UP].read() == HIGH);
+            bool downButtonHeld = (buttons[Input::BUTTON_DOWN].read() == LOW);
+
+            if (upButtonHeld && downButtonHeld) {
+                if (powerOffPressStartTime == 0) { // Both pressed, start timer
+                    powerOffPressStartTime = millis();
+                } else {
+                    if (millis() - powerOffPressStartTime >= 2000) { // Held for 2 seconds
+                        Serial.println("Simultaneous UP and DOWN hold for 2s detected. Entering deep sleep.");
+                        // Optional: Turn off display backlight or other peripherals before sleep
+                        // displayInterface->setBacklight(0); // Example if such a function exists
+                        esp_deep_sleep_start();
+                    }
+                }
+            } else {
+                // If either button is released or not simultaneously pressed, reset the timer
+                powerOffPressStartTime = 0;
+
+                // Process individual button presses if power-off sequence is not active or completed.
+                // Check .pressed() for single press actions (triggers on state change).
+                // This ensures that navigation still works if the power-off combo isn't fully executed.
+                if (buttons[Input::BUTTON_UP].pressed()) {
+                    // Ensure this doesn't trigger if it was part of the combo that just got released
+                    // However, .pressed() fires on the transition, so if it was held and released, 
+                    // it won't fire again here unless pressed again separately.
+                    cardController->getCardStack()->handleButtonPress(Input::BUTTON_UP);
+                }
+                if (buttons[Input::BUTTON_DOWN].pressed()) {
+                    cardController->getCardStack()->handleButtonPress(Input::BUTTON_DOWN);
+                }
+                if (buttons[Input::BUTTON_CENTER].pressed()) {
+                    cardController->getCardStack()->handleButtonPress(Input::BUTTON_CENTER);
                 }
             }
         }
