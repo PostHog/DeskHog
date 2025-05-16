@@ -39,7 +39,7 @@ public:
      * @brief Get the underlying LVGL card object
      * @return LVGL object pointer or nullptr if not created
      */
-    lv_obj_t* getCard();
+    lv_obj_t* getCardObject() const override;
     
     /**
      * @brief Start the sprite animation
@@ -89,6 +89,9 @@ public:
      * @return true if center button (cycles messages), false otherwise
      */
     bool handleButtonPress(uint8_t button_index) override;
+    
+    // Add override for update() from InputHandler
+    void update() override;
     
 private:
     // Animation timing

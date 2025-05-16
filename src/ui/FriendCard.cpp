@@ -30,7 +30,7 @@ AnimationCard::AnimationCard(lv_obj_t* parent)
     
     // Make green container fill parent completely
     lv_obj_set_style_radius(_background, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(_background, lv_color_hex(0x0E7A00), 0);
+    lv_obj_set_style_bg_color(_background, lv_color_hex(0x8B0000), 0);
     lv_obj_set_style_border_width(_background, 0, 0);
     lv_obj_set_style_pad_all(_background, 5, 0);
     
@@ -68,6 +68,7 @@ AnimationCard::AnimationCard(lv_obj_t* parent)
     addMessage("I ACCEPT YOUR LIMITATIONS");
     addMessage("YOUR DREAM IS ATTAINABLE");
     addMessage("YOU WILL DO THINGS");
+    addMessage("YOU SHOULD NOT BE AFRAID");
 
     // Display the first message
     if (!_messages.empty()) {
@@ -112,7 +113,7 @@ AnimationCard::~AnimationCard() {
     }
 }
 
-lv_obj_t* AnimationCard::getCard() {
+lv_obj_t* AnimationCard::getCardObject() const {
     return _card;
 }
 
@@ -172,6 +173,11 @@ bool AnimationCard::handleButtonPress(uint8_t button_index) {
     
     // We didn't handle the button press
     return false;
+}
+
+// Add empty implementation for update() from InputHandler
+void AnimationCard::update() {
+    // AnimationCard does not require continuous updates beyond LVGL animations
 }
 
 bool AnimationCard::isValidObject(lv_obj_t* obj) const {

@@ -269,6 +269,6 @@ void ProvisioningCard::toggleScreens(lv_obj_t* showScreen, lv_obj_t* hideScreen)
     }, 0, screens);
 }
 
-lv_obj_t* ProvisioningCard::getCard() const {
+lv_obj_t* ProvisioningCard::getCardObject() const {
     return _card;
 }
