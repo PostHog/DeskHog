@@ -13,6 +13,8 @@
 #include "ui/FriendCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
+#include "../flappy_bird.h"
+#include "../hardware/Input.h"
 
 /**
  * @class CardController
@@ -84,7 +86,7 @@ public:
      * @brief Get the animation card
      * @return Pointer to animation card
      */
-    AnimationCard* getAnimationCard() { return animationCard; }
+    AnimationCard* getAnimationCard() { return friendCard; }
 
     /**
      * @brief Get all insight cards
@@ -97,6 +99,10 @@ public:
      * @return Pointer to display interface
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
+
+    // Flappy Bird additions
+    FlappyBirdGame* getFlappyBirdGame() { return flappyBirdGame; }
+    bool isFlappyBirdCardActive() const;
 
 private:
     // Screen reference
@@ -113,16 +119,15 @@ private:
     // UI Components
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
-    AnimationCard* animationCard;       ///< Card for animations
+    AnimationCard* friendCard;             ///< Card for animations
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
+    
+    // Flappy Bird additions
+    FlappyBirdGame* flappyBirdGame;
+    lv_obj_t* flappyBirdCardContainer; // LVGL object for the Flappy Bird card
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
-    
-    /**
-     * @brief Create and initialize the animation card
-     */
-    void createAnimationCard();
     
     /**
      * @brief Handle insight-related events
@@ -135,4 +140,7 @@ private:
      * @param event Event containing WiFi state
      */
     void handleWiFiEvent(const Event& event);
+
+    void handleInput();
+    void createFriendCard();
 }; 

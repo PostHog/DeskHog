@@ -78,6 +78,19 @@ public:
     uint8_t getCurrentIndex() const;
     
     /**
+     * @brief Get LVGL object of a specific card
+     * @param index Zero-based index of target card
+     * @return LVGL object of the specified card
+     */
+    lv_obj_t* getCardObjectByIndex(uint8_t index) const;
+    
+    /**
+     * @brief Get number of cards in the stack
+     * @return Number of cards in the stack
+     */
+    uint8_t getCardCount() const;
+    
+    /**
      * @brief Set mutex for thread-safe button handling
      * @param mutex_ptr Pointer to FreeRTOS semaphore
      */
