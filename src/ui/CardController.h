@@ -11,6 +11,7 @@
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
 #include "ui/FriendCard.h"
+#include "ui/UltimaCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 
@@ -87,6 +88,12 @@ public:
     AnimationCard* getAnimationCard() { return animationCard; }
 
     /**
+     * @brief Get the Ultima game card
+     * @return Pointer to Ultima card
+     */
+    UltimaCard* getUltimaCard() { return ultimaCard; }
+
+    /**
      * @brief Get all insight cards
      * @return Reference to vector of insight card pointers
      */
@@ -97,6 +104,17 @@ public:
      * @return Pointer to display interface
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
+
+    /**
+     * @brief Check if the Ultima game card is currently active
+     * @return True if Ultima card is active, false otherwise
+     */
+    bool isUltimaCardActive();
+
+    /**
+     * @brief Exit the Ultima game, returning to a default card
+     */
+    void exitUltimaGame();
 
 private:
     // Screen reference
@@ -114,6 +132,7 @@ private:
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
     AnimationCard* animationCard;       ///< Card for animations
+    UltimaCard* ultimaCard;             ///< Card for the Ultima game
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
     
     // Display interface for thread safety
@@ -124,6 +143,11 @@ private:
      */
     void createAnimationCard();
     
+    /**
+     * @brief Create and initialize the Ultima game card
+     */
+    void createUltimaCard();
+
     /**
      * @brief Handle insight-related events
      * @param event Event containing insight data
