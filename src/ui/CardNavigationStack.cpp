@@ -167,38 +167,44 @@ void CardNavigationStack::handleButtonPress(uint8_t button_index) {
             return; // Could not acquire mutex, skip this button press
         }
     }
-    
-    // Handle center button (Button 1) - delegate to active card if it has an input handler
-    if (button_index == Input::BUTTON_CENTER) {
-        // Find the input handler for the current card
-        bool handled = false;
-        for (const auto& handler_pair : _input_handlers) {
-            if (handler_pair.first == lv_obj_get_child(_main_container, _current_card)) {
-                // Found a handler for the current card
-                if (handler_pair.second) {
-                    handled = handler_pair.second->handleButtonPress(button_index);
-                    if (handled) {
-                        // Handler processed the button press, don't do default behavior
-                        if (_mutex_ptr) {
-                            xSemaphoreGive(*_mutex_ptr);
-                        }
-                        return;
-                    }
+
+    bool event_handled_by_card = false;
+    lv_obj_t* current_card_obj = nullptr;
+    InputHandler* card_input_handler = nullptr;
+
+    // Get the current card and its handler, if any
+    if (lv_obj_get_child_cnt(_main_container) > _current_card) {
+        current_card_obj = lv_obj_get_child(_main_container, _current_card);
+        if (current_card_obj) {
+            for (const auto& handler_pair : _input_handlers) {
+                if (handler_pair.first == current_card_obj) {
+                    card_input_handler = handler_pair.second;
+                    break;
                 }
-                break;
             }
         }
-        // If not handled by card, fall through to default behavior (if any)
     }
-    
-    // Next card (Button 0)
-    if (button_index == Input::BUTTON_DOWN) {
+
+    // If the current card has an input handler, let it try to handle the event first
+    if (card_input_handler) {
+        event_handled_by_card = card_input_handler->handleButtonPress(button_index);
+    }
+
+    // If the card handled the event, we are done.
+    if (event_handled_by_card) {
+        if (_mutex_ptr) {
+            xSemaphoreGive(*_mutex_ptr);
+        }
+        return;
+    }
+
+    // If the event was NOT handled by the card, perform default stack navigation for UP/DOWN buttons
+    if (button_index == Input::BUTTON_DOWN) { // Default: Next card
         nextCard();
-    }
-    // Previous card (Button 2)
-    else if (button_index == Input::BUTTON_UP) {
+    } else if (button_index == Input::BUTTON_UP) { // Default: Previous card
         prevCard();
     }
+    // Note: BUTTON_CENTER has no default stack action if not handled by a card.
     
     // Release mutex if we acquired it
     if (_mutex_ptr) {
