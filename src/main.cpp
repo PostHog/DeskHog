@@ -111,6 +111,7 @@ void lvglHandlerTask(void* parameter) {
         displayInterface->handleLVGLTasks();
 
         InsightCard::processUIQueue();
+        cardController->update();
         
         // Poll buttons at regular intervals
         TickType_t currentTime = xTaskGetTickCount();

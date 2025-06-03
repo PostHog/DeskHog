@@ -1,4 +1,5 @@
 #include "ui/CardController.h"
+#include "ui/PongCard.h"
 
 CardController::CardController(
     lv_obj_t* screen,
@@ -18,6 +19,7 @@ CardController::CardController(
     cardStack(nullptr),
     provisioningCard(nullptr),
     animationCard(nullptr),
+    pongCard(nullptr),
     displayInterface(nullptr)
 {
 }
@@ -32,6 +34,9 @@ CardController::~CardController() {
     
     delete animationCard;
     animationCard = nullptr;
+    
+    delete pongCard;
+    pongCard = nullptr;
     
     // Use mutex if available before cleaning up insight cards
     if (displayInterface && displayInterface->getMutexPtr()) {
@@ -66,10 +71,13 @@ void CardController::initialize(DisplayInterface* display) {
     );
     
     // Add provisioning card to navigation stack
-    cardStack->addCard(provisioningCard->getCard());
+    cardStack->addCard(provisioningCard, "ProvisioningCard");
     
     // Create animation card
     createAnimationCard();
+    
+    // Create Pong card
+    createPongCard();
     
     // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();
@@ -122,11 +130,32 @@ void CardController::createAnimationCard() {
     );
     
     // Add to navigation stack
-    cardStack->addCard(animationCard->getCard());
+    cardStack->addCard(animationCard, "AnimationCard");
     
-    // Register the animation card as an input handler
-    cardStack->registerInputHandler(animationCard->getCard(), animationCard);
-    
+    displayInterface->giveMutex();
+}
+
+// Create a Pong card
+void CardController::createPongCard() {
+    // Use DisplayInterface mutex for thread safety
+    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+        Serial.println("[CardCtrl-ERROR] Failed to take mutex for PongCard creation.");
+        return;
+    }
+
+    if (!pongCard) { // Check if already created
+        pongCard = new PongCard(screen); 
+        if (!pongCard || !pongCard->getCardObject()) {
+            Serial.println("[CardCtrl-ERROR] Failed to create PongCard or its LVGL object.");
+            if (pongCard) delete pongCard;
+            pongCard = nullptr;
+            displayInterface->giveMutex();
+            return;
+        }
+        cardStack->addCard(pongCard, "PongCard"); // Name is optional
+        Serial.println("[CardCtrl-INFO] PongCard created and added to stack.");
+    }
+
     displayInterface->giveMutex();
 }
 
@@ -157,7 +186,7 @@ void CardController::createInsightCard(const String& insightId) {
             screenHeight
         );
 
-        if (!newCard || !newCard->getCard()) {
+        if (!newCard || !newCard->getCardObject()) {
             Serial.printf("[CardCtrl-ERROR] Failed to create InsightCard or its LVGL object for ID: %s\n", insightId.c_str());
             displayInterface->giveMutex();
             delete newCard; // Clean up if partially created
@@ -165,10 +194,9 @@ void CardController::createInsightCard(const String& insightId) {
         }
 
         // Add to navigation stack
-        cardStack->addCard(newCard->getCard());
+        cardStack->addCard(newCard, "InsightCard");
 
         // Add to our list of cards (ensure this is thread-safe if accessed elsewhere)
-        // The mutex taken above should protect this operation too.
         insightCards.push_back(newCard);
         
         Serial.printf("[CardCtrl-DEBUG] InsightCard for ID: %s created and added to stack.\n", insightId.c_str());
@@ -195,7 +223,7 @@ void CardController::handleInsightEvent(const Event& event) {
             InsightCard* card = *it;
             if (card->getInsightId() == event.insightId) {
                 // Remove from card stack
-                cardStack->removeCard(card->getCard());
+                cardStack->removeCard(card);
                 
                 // Remove from vector and delete
                 insightCards.erase(it);
@@ -237,4 +265,18 @@ void CardController::handleWiFiEvent(const Event& event) {
     }
     
     displayInterface->giveMutex();
-} 
+}
+
+void CardController::update() {
+    if (cardStack) {
+        InputHandler* currentCard = cardStack->getActiveCard();
+        if (currentCard) {
+            // Attempt to call update() if the InputHandler is a PongCard or any other card
+            // that is expected to have an update method for continuous polling.
+            // This relies on the specific card implementing update().
+            // A more robust way would be to have update() in the InputHandler interface
+            // or use dynamic_cast if not all InputHandlers have update().
+            currentCard->update(); 
+        }
+    }
+}

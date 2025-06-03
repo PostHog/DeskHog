@@ -11,6 +11,7 @@
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
 #include "ui/FriendCard.h"
+#include "ui/PongCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 
@@ -98,6 +99,11 @@ public:
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
 
+    /**
+     * @brief Update the active card and UI components
+     */
+    void update();
+
 private:
     // Screen reference
     lv_obj_t* screen;              ///< Main LVGL screen object
@@ -114,6 +120,7 @@ private:
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
     AnimationCard* animationCard;       ///< Card for animations
+    PongCard* pongCard;                ///< Card for Pong game
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
     
     // Display interface for thread safety
@@ -135,4 +142,9 @@ private:
      * @param event Event containing WiFi state
      */
     void handleWiFiEvent(const Event& event);
+
+    /**
+     * @brief Create and initialize the Pong card
+     */
+    void createPongCard();
 }; 

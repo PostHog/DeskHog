@@ -34,20 +34,26 @@ public:
     CardNavigationStack(lv_obj_t* parent, uint16_t width, uint16_t height);
     
     /**
-     * @brief Add an existing LVGL object as a card
-     * @param card LVGL object to add
-     * 
-     * Configures the card to fill the container and updates scroll indicators.
-     * First card added becomes the active card.
+     * @brief Destructor.
      */
-    void addCard(lv_obj_t* card);
+    ~CardNavigationStack();
     
     /**
-     * @brief Remove a card from the stack
-     * @param card LVGL object to remove
+     * @brief Add an InputHandler as a card
+     * @param handler The InputHandler object (e.g., PongCard)
+     * @param name Optional name for the card (for debugging or identification)
+     * 
+     * Configures the card's UI object to fill the container and updates scroll indicators.
+     * First card added becomes the active card.
+     */
+    void addCard(InputHandler* handler, const char* name = "");
+    
+    /**
+     * @brief Remove a card (InputHandler) from the stack
+     * @param handler InputHandler object to remove
      * @return true if card was found and removed
      */
-    bool removeCard(lv_obj_t* card);
+    bool removeCard(InputHandler* handler);
     
     /**
      * @brief Navigate to next card with animation
@@ -78,6 +84,12 @@ public:
     uint8_t getCurrentIndex() const;
     
     /**
+     * @brief Get the currently active InputHandler
+     * @return Pointer to the active InputHandler, or nullptr if no cards
+     */
+    InputHandler* getActiveCard();
+    
+    /**
      * @brief Set mutex for thread-safe button handling
      * @param mutex_ptr Pointer to FreeRTOS semaphore
      */
@@ -91,13 +103,6 @@ public:
      * to card-specific input handlers if registered.
      */
     void handleButtonPress(uint8_t button_index);
-    
-    /**
-     * @brief Register an input handler for a specific card
-     * @param card LVGL object to handle input for
-     * @param handler InputHandler implementation
-     */
-    void registerInputHandler(lv_obj_t* card, InputHandler* handler);
     
 private:
     /**
@@ -137,6 +142,10 @@ private:
     // Thread safety
     SemaphoreHandle_t* _mutex_ptr;  ///< Optional mutex for thread-safe updates
     
-    // Input handling
+    // Store InputHandlers directly
+    std::vector<InputHandler*> _handler_stack; ///< Stack of card input handlers
+
+    // _input_handlers might be deprecated if _handler_stack is sufficient.
+    // For now, keep it to see how handleButtonPress evolves.
     std::vector<std::pair<lv_obj_t*, InputHandler*>> _input_handlers;  ///< Card-specific input handlers
 }; 

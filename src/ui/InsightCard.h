@@ -8,6 +8,7 @@
 #include "EventQueue.h"
 #include "posthog/parsers/InsightParser.h"
 #include "UICallback.h"
+#include "ui/InputHandler.h"
 
 // Forward declaration for the renderer base class
 class InsightRendererBase;
@@ -27,7 +28,7 @@ class InsightRendererBase;
  * - Memory-safe LVGL object management
  * - Smart number formatting with unit scaling (K, M)
  */
-class InsightCard {
+class InsightCard : public InputHandler {
 public:
     /**
      * @brief Constructor
@@ -60,7 +61,7 @@ public:
      * 
      * @return LVGL object pointer for the main card container
      */
-    lv_obj_t* getCard() const { return _card; }
+    lv_obj_t* getCardObject() const override { return _card; }
 
     /**
      * @brief Get the insight ID
@@ -96,6 +97,15 @@ public:
      * Handles queue overflow by discarding updates if queue is full.
      */
     static void dispatchToLVGLTask(std::function<void()> update_func, bool to_front = false);
+
+    // InputHandler interface
+    bool handleButtonPress(uint8_t button_index) override {
+        // Insight cards do not handle direct button presses
+        return false; 
+    }
+    void update() override {
+        // No continuous update needed for InsightCard
+    }
 
 private:
     // Constants for UI layout and limits

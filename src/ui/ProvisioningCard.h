@@ -3,6 +3,7 @@
 #include <lvgl.h>  // LVGL core library
 #include <string>  // For String class (or could be Arduino's String)
 #include "hardware/WiFiInterface.h"  // Custom WiFi interface class
+#include "ui/InputHandler.h"
 
 /**
  * @class ProvisioningCard
@@ -14,7 +15,7 @@
  * - WiFi status table with custom fonts and styling
  * - QR code generation for WiFi network connection
  */
-class ProvisioningCard {
+class ProvisioningCard : public InputHandler {
 public:
     /**
      * @brief Construct a new WiFi provisioning card UI component
@@ -35,7 +36,7 @@ public:
      * 
      * @return lv_obj_t* Pointer to the LVGL card container
      */
-    lv_obj_t* getCard() const;
+    lv_obj_t* getCardObject() const override;
     
     /**
      * @brief Updates connection status text and shows status screen
@@ -78,6 +79,15 @@ public:
      * Thread-safe screen transition.
      */
     void showWiFiStatus();
+
+    // InputHandler interface
+    bool handleButtonPress(uint8_t button_index) override {
+        // Provisioning card doesn't handle direct button presses for now
+        return false; 
+    }
+    void update() override {
+        // No continuous update needed for ProvisioningCard
+    }
     
 private:
     /**
