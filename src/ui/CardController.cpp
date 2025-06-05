@@ -1,88 +1,102 @@
 #include "ui/CardController.h"
 
 CardController::CardController(
-    lv_obj_t* screen,
-    uint16_t screenWidth,
-    uint16_t screenHeight,
-    ConfigManager& configManager,
-    WiFiInterface& wifiInterface,
-    PostHogClient& posthogClient,
-    EventQueue& eventQueue
-) : screen(screen),
-    screenWidth(screenWidth),
-    screenHeight(screenHeight),
-    configManager(configManager),
-    wifiInterface(wifiInterface),
-    posthogClient(posthogClient),
-    eventQueue(eventQueue),
+    lv_obj_t* screen_obj,
+    uint16_t scrWidth,
+    uint16_t scrHeight,
+    ConfigManager& cfgManager,
+    WiFiInterface& wifi,
+    PostHogClient& phClient,
+    EventQueue& events
+) : screen(screen_obj),
+    screenWidth(scrWidth),
+    screenHeight(scrHeight),
+    configManager(cfgManager),
+    wifiInterface(wifi),
+    posthogClient(phClient),
+    eventQueue(events),
     cardStack(nullptr),
     provisioningCard(nullptr),
-    animationCard(nullptr),
+    friendCard(nullptr),
+    insightCards(),
+    flappyBirdGame(nullptr),
+    flappyBirdCardContainer(nullptr),
     displayInterface(nullptr)
 {
 }
 
 CardController::~CardController() {
-    // Clean up any allocated resources
     delete cardStack;
-    cardStack = nullptr;
-    
     delete provisioningCard;
-    provisioningCard = nullptr;
-    
-    delete animationCard;
-    animationCard = nullptr;
-    
-    // Use mutex if available before cleaning up insight cards
-    if (displayInterface && displayInterface->getMutexPtr()) {
-        xSemaphoreTake(*(displayInterface->getMutexPtr()), portMAX_DELAY);
+    delete friendCard;
+
+    if (flappyBirdGame) {
+        flappyBirdGame->cleanup();
+        delete flappyBirdGame;
     }
-    
-    // Clean up insight cards
-    for (auto* card : insightCards) {
-        delete card;
-    }
-    insightCards.clear();
-    
-    // Release mutex if we took it
+
     if (displayInterface && displayInterface->getMutexPtr()) {
-        xSemaphoreGive(*(displayInterface->getMutexPtr()));
+        if (xSemaphoreTake(*(displayInterface->getMutexPtr()), pdMS_TO_TICKS(1000)) == pdTRUE) {
+            for (auto* card : insightCards) {
+                delete card;
+            }
+            insightCards.clear();
+            xSemaphoreGive(*(displayInterface->getMutexPtr()));
+        } else {
+            Serial.println("[CardCtrl-WARN] Failed to take mutex in destructor for insightCards cleanup.");
+            for (auto* card : insightCards) { delete card; }
+            insightCards.clear();
+        }
+    } else {
+        for (auto* card : insightCards) {
+            delete card;
+        }
+        insightCards.clear();
     }
 }
 
-void CardController::initialize(DisplayInterface* display) {
-    // Set the display interface first
-    setDisplayInterface(display);
+void CardController::initialize(DisplayInterface* disp) {
+    setDisplayInterface(disp);
     
-    // Create card navigation stack
     cardStack = new CardNavigationStack(screen, screenWidth, screenHeight);
+    if (displayInterface) { 
+        cardStack->setMutex(displayInterface->getMutexPtr());
+    }
     
-    // Create provision UI
     provisioningCard = new ProvisioningCard(
         screen, 
         wifiInterface, 
         screenWidth, 
         screenHeight
     );
-    
-    // Add provisioning card to navigation stack
     cardStack->addCard(provisioningCard->getCard());
     
-    // Create animation card
-    createAnimationCard();
+    createFriendCard();
+
+    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+         Serial.println("[CardCtrl-ERROR] Failed to take mutex for Flappy Bird card creation.");
+    } else {
+        flappyBirdGame = new FlappyBirdGame();
+        flappyBirdGame->setup(screen);
+        flappyBirdCardContainer = flappyBirdGame->get_main_container();
+        if (flappyBirdCardContainer) {
+            cardStack->addCard(flappyBirdCardContainer);
+            Serial.println("[CardCtrl-INFO] Flappy Bird game card added to stack.");
+        } else {
+            Serial.println("[CardCtrl-ERROR] Failed to get Flappy Bird game container.");
+            delete flappyBirdGame;
+            flappyBirdGame = nullptr;
+        }
+        displayInterface->giveMutex();
+    }
     
-    // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();
-    
-    // Create and add insight cards
     for (const String& id : insightIds) {
         createInsightCard(id);
     }
     
-    // Connect WiFi manager to UI
     wifiInterface.setUI(provisioningCard);
     
-    // Subscribe to insight events
     eventQueue.subscribe([this](const Event& event) {
         if (event.type == EventType::INSIGHT_ADDED || 
             event.type == EventType::INSIGHT_DELETED) {
@@ -90,7 +104,6 @@ void CardController::initialize(DisplayInterface* display) {
         }
     });
     
-    // Subscribe to WiFi events
     eventQueue.subscribe([this](const Event& event) {
         if (event.type == EventType::WIFI_CONNECTING || 
             event.type == EventType::WIFI_CONNECTED ||
@@ -101,86 +114,67 @@ void CardController::initialize(DisplayInterface* display) {
     });
 }
 
-void CardController::setDisplayInterface(DisplayInterface* display) {
-    displayInterface = display;
-    
-    // Set the mutex for the card stack if we have a display interface
+void CardController::setDisplayInterface(DisplayInterface* disp) {
+    displayInterface = disp;
     if (cardStack && displayInterface) {
         cardStack->setMutex(displayInterface->getMutexPtr());
     }
 }
 
-// Create an animation card with the walking sprites
-void CardController::createAnimationCard() {
+void CardController::createFriendCard() {
     if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+        Serial.println("[CardCtrl-ERROR] Failed to take mutex for FriendCard creation.");
         return;
     }
-    
-    // Create new animation card
-    animationCard = new AnimationCard(
-        screen
-    );
-    
-    // Add to navigation stack
-    cardStack->addCard(animationCard->getCard());
-    
-    // Register the animation card as an input handler
-    cardStack->registerInputHandler(animationCard->getCard(), animationCard);
-    
+    friendCard = new AnimationCard(screen);
+    if (friendCard && friendCard->getCard()) {
+        cardStack->addCard(friendCard->getCard());
+        InputHandler* handler = dynamic_cast<InputHandler*>(friendCard);
+        if (handler) {
+             cardStack->registerInputHandler(friendCard->getCard(), handler);
+        }
+         Serial.println("[CardCtrl-INFO] FriendCard added to stack.");
+    } else {
+        Serial.println("[CardCtrl-ERROR] Failed to create FriendCard or its LVGL object.");
+        delete friendCard;
+        friendCard = nullptr;
+    }
     displayInterface->giveMutex();
 }
 
-// Create an insight card and add it to the UI
 void CardController::createInsightCard(const String& insightId) {
-    // Log current task and core
     Serial.printf("[CardCtrl-DEBUG] createInsightCard called from Core: %d, Task: %s\n", 
                   xPortGetCoreID(), 
                   pcTaskGetTaskName(NULL));
-
-    // Dispatch the actual card creation and LVGL work to the LVGL task
     InsightCard::dispatchToLVGLTask([this, insightId]() {
         Serial.printf("[CardCtrl-DEBUG] LVGL Task creating card for insight: %s from Core: %d, Task: %s\n", 
                       insightId.c_str(), xPortGetCoreID(), pcTaskGetTaskName(NULL));
-
         if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
             Serial.println("[CardCtrl-ERROR] Failed to take mutex in LVGL task for card creation.");
             return;
         }
-
-        // Create new insight card using full screen dimensions
         InsightCard* newCard = new InsightCard(
-            screen,         // LVGL parent object
-            configManager,  // Dependencies
+            screen, 
+            configManager, 
             eventQueue,
             insightId,
-            screenWidth,    // Dimensions
+            screenWidth,
             screenHeight
         );
-
         if (!newCard || !newCard->getCard()) {
             Serial.printf("[CardCtrl-ERROR] Failed to create InsightCard or its LVGL object for ID: %s\n", insightId.c_str());
             displayInterface->giveMutex();
-            delete newCard; // Clean up if partially created
+            delete newCard;
             return;
         }
-
-        // Add to navigation stack
         cardStack->addCard(newCard->getCard());
-
-        // Add to our list of cards (ensure this is thread-safe if accessed elsewhere)
-        // The mutex taken above should protect this operation too.
         insightCards.push_back(newCard);
-        
         Serial.printf("[CardCtrl-DEBUG] InsightCard for ID: %s created and added to stack.\n", insightId.c_str());
-
         displayInterface->giveMutex();
-
-        // Request immediate data for this insight now that it's set up
         posthogClient.requestInsightData(insightId);
     });
 }
 
-// Handle insight events
 void CardController::handleInsightEvent(const Event& event) {
     if (event.type == EventType::INSIGHT_ADDED) {
         createInsightCard(event.insightId);
@@ -189,52 +183,50 @@ void CardController::handleInsightEvent(const Event& event) {
         if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
             return;
         }
-        
-        // Find and remove the card
         for (auto it = insightCards.begin(); it != insightCards.end(); ++it) {
             InsightCard* card = *it;
             if (card->getInsightId() == event.insightId) {
-                // Remove from card stack
                 cardStack->removeCard(card->getCard());
-                
-                // Remove from vector and delete
                 insightCards.erase(it);
                 delete card;
                 break;
             }
         }
-        
         displayInterface->giveMutex();
     }
 }
 
-// Handle WiFi events
 void CardController::handleWiFiEvent(const Event& event) {
     if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
         return;
     }
-    
     switch (event.type) {
         case EventType::WIFI_CONNECTING:
             provisioningCard->updateConnectionStatus("Connecting to WiFi...");
             break;
-            
         case EventType::WIFI_CONNECTED:
             provisioningCard->updateConnectionStatus("Connected");
             provisioningCard->showWiFiStatus();
             break;
-            
         case EventType::WIFI_CONNECTION_FAILED:
             provisioningCard->updateConnectionStatus("Connection failed");
             break;
-            
         case EventType::WIFI_AP_STARTED:
             provisioningCard->showQRCode();
             break;
-            
         default:
             break;
     }
-    
     displayInterface->giveMutex();
+}
+
+bool CardController::isFlappyBirdCardActive() const {
+    if (!cardStack || !flappyBirdCardContainer) {
+        return false;
+    }
+    if (cardStack->getCardCount() > 0) {
+        lv_obj_t* currentCardObj = cardStack->getCardObjectByIndex(cardStack->getCurrentIndex());
+        return currentCardObj == flappyBirdCardContainer;
+    }
+    return false;
 } 

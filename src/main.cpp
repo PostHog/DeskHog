@@ -122,13 +122,31 @@ void lvglHandlerTask(void* parameter) {
                 buttons[i].update();
                 
                 if (buttons[i].pressed()) {
-                    // Process button directly in LVGL context
-                    cardController->getCardStack()->handleButtonPress(i);
+                    bool isFlappyActive = cardController && cardController->isFlappyBirdCardActive();
+
+                    if (isFlappyActive) {
+                        // If Flappy Bird is active, it handles its own center button for game actions.
+                        // Up/Down buttons should still navigate cards.
+                        if (i == Input::BUTTON_UP || i == Input::BUTTON_DOWN) {
+                            cardController->getCardStack()->handleButtonPress(i);
+                        }
+                        // The Flappy Bird game loop (called below) will independently check 
+                        // Input::isCenterPressed() for its own logic (flap, start, restart).
+                    } else {
+                        // If Flappy Bird is not active, card stack handles all button presses.
+                        cardController->getCardStack()->handleButtonPress(i);
+                    }
                 }
             }
         }
         
-        vTaskDelay(pdMS_TO_TICKS(5));
+        // Check if Flappy Bird card is active and call its loop
+        // This loop contains FlappyBirdGame::handle_input() which checks for Input::isCenterPressed()
+        if (cardController && cardController->isFlappyBirdCardActive()) {
+            cardController->getFlappyBirdGame()->loop();
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(5)); 
     }
 }
 

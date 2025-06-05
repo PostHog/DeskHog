@@ -360,3 +360,22 @@ bool CardNavigationStack::removeCard(lv_obj_t* card) {
     
     return true;
 }
+
+// Correct implementation for getCardCount
+uint8_t CardNavigationStack::getCardCount() const {
+    if (_main_container) {
+        return lv_obj_get_child_cnt(_main_container);
+    }
+    return 0;
+}
+
+// Correct implementation for getCardObjectByIndex
+lv_obj_t* CardNavigationStack::getCardObjectByIndex(uint8_t index) const {
+    if (_main_container) {
+        uint32_t count = lv_obj_get_child_cnt(_main_container);
+        if (index < count) {
+            return lv_obj_get_child(_main_container, index);
+        }
+    }
+    return nullptr;
+}
