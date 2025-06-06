@@ -414,7 +414,7 @@
 #define LV_WIDGETS_HAS_DEFAULT_VALUE  1 // Default
 
 #define LV_USE_ANIMIMG    1 // Migrated from old config (was 1)
-#define LV_USE_ARC        0 // Migrated from old config (was 0)
+#define LV_USE_ARC        1 // Migrated from old config (was 0)
 #define LV_USE_BAR        0 // Migrated from old config (was 0)
 #define LV_USE_BUTTON     0 // Migrated from old config (was 0, mapped from BTN)
 #define LV_USE_BUTTONMATRIX 1 // Enable for animation support
