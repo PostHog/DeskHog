@@ -88,6 +88,19 @@ public:
     UpdateInfo getLastCheckResult(); // Added to retrieve the result of the last check
 
     /**
+     * @brief Ensures that the system time is synchronized with an NTP server.
+     * This is a prerequisite for operations requiring accurate time, like checking OTA updates.
+     * @return true if time is synced or was successfully synced, false on failure.
+     */
+    bool syncTimeIfNeeded();
+
+    /**
+     * @brief Checks if the system time has been successfully synchronized with an NTP server.
+     * @return true if time is synced, false otherwise.
+     */
+    bool isTimeSynced();
+
+    /**
       * @brief Process loop for the OtaManager.
       * Should be called periodically to handle asynchronous operations like download/write.
       * If using tasks, this might not be strictly necessary, depends on implementation.

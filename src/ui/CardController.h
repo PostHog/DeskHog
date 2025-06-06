@@ -11,6 +11,7 @@
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
 #include "ui/FriendCard.h"
+#include "ui/ClockCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 
@@ -98,6 +99,19 @@ public:
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
 
+    /**
+     * @brief Get the insight card object by its ID
+     * @param insightId The ID of the insight card
+     * @return Pointer to the InsightCard or nullptr if not found
+     */
+    InsightCard* getInsightCard(const String& insightId);
+
+    /**
+     * @brief Get the clock card object
+     * @return Pointer to the ClockCard or nullptr if not created
+     */
+    ClockCard* getClockCard();
+
 private:
     // Screen reference
     lv_obj_t* screen;              ///< Main LVGL screen object
@@ -115,6 +129,7 @@ private:
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
     AnimationCard* animationCard;       ///< Card for animations
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
+    ClockCard* clockCard;               ///< Card for displaying time
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
@@ -135,4 +150,9 @@ private:
      * @param event Event containing WiFi state
      */
     void handleWiFiEvent(const Event& event);
+
+    /**
+     * @brief Create and initialize the clock card
+     */
+    void createClockCard();
 }; 

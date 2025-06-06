@@ -18,6 +18,7 @@ CardController::CardController(
     cardStack(nullptr),
     provisioningCard(nullptr),
     animationCard(nullptr),
+    clockCard(nullptr),
     displayInterface(nullptr)
 {
 }
@@ -32,6 +33,9 @@ CardController::~CardController() {
     
     delete animationCard;
     animationCard = nullptr;
+    
+    delete clockCard;
+    clockCard = nullptr;
     
     // Use mutex if available before cleaning up insight cards
     if (displayInterface && displayInterface->getMutexPtr()) {
@@ -71,6 +75,9 @@ void CardController::initialize(DisplayInterface* display) {
     // Create animation card
     createAnimationCard();
     
+    // Create clock card
+    createClockCard();
+    
     // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();
     
@@ -97,6 +104,21 @@ void CardController::initialize(DisplayInterface* display) {
             event.type == EventType::WIFI_CONNECTION_FAILED ||
             event.type == EventType::WIFI_AP_STARTED) {
             handleWiFiEvent(event);
+        }
+    });
+
+    // Subscribe to Time events
+    eventQueue.subscribe([this](const Event& event) {
+        if (event.type == EventType::TIME_UPDATE) {
+            if (clockCard && displayInterface) {
+                // Use displayInterface mutex instead of non-existent dispatch
+                if (displayInterface->takeMutex(portMAX_DELAY)) {
+                    clockCard->updateTime(event.data);
+                    displayInterface->giveMutex();
+                } else {
+                    Serial.println("[CardCtrl-ERROR] Failed to take mutex for time update.");
+                }
+            }
         }
     });
 }
@@ -126,6 +148,28 @@ void CardController::createAnimationCard() {
     
     // Register the animation card as an input handler
     cardStack->registerInputHandler(animationCard->getCard(), animationCard);
+    
+    displayInterface->giveMutex();
+}
+
+// Create a clock card
+void CardController::createClockCard() {
+    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+        return;
+    }
+    
+    // Create new clock card
+    clockCard = new ClockCard(screen);
+    
+    // Add to navigation stack
+    if (clockCard && clockCard->getCard()) {
+        cardStack->addCard(clockCard->getCard());
+        cardStack->registerInputHandler(clockCard->getCard(), clockCard);
+    } else {
+        Serial.println("[CardCtrl-ERROR] Failed to create ClockCard or its LVGL object.");
+        delete clockCard; // Clean up if partially created
+        clockCard = nullptr;
+    }
     
     displayInterface->giveMutex();
 }
@@ -183,7 +227,7 @@ void CardController::createInsightCard(const String& insightId) {
 // Handle insight events
 void CardController::handleInsightEvent(const Event& event) {
     if (event.type == EventType::INSIGHT_ADDED) {
-        createInsightCard(event.insightId);
+        createInsightCard(event.id);
     } 
     else if (event.type == EventType::INSIGHT_DELETED) {
         if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
@@ -193,7 +237,7 @@ void CardController::handleInsightEvent(const Event& event) {
         // Find and remove the card
         for (auto it = insightCards.begin(); it != insightCards.end(); ++it) {
             InsightCard* card = *it;
-            if (card->getInsightId() == event.insightId) {
+            if (card->getInsightId() == event.id) {
                 // Remove from card stack
                 cardStack->removeCard(card->getCard());
                 
@@ -237,4 +281,9 @@ void CardController::handleWiFiEvent(const Event& event) {
     }
     
     displayInterface->giveMutex();
+}
+
+ClockCard* CardController::getClockCard() {
+    // Assume access is thread-safe or called from the UI thread
+    return clockCard;
 } 

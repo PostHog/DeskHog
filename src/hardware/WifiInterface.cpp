@@ -1,10 +1,12 @@
 #include "WifiInterface.h"
 #include "ui/ProvisioningCard.h"
+#include "OtaManager.h"
 
 WiFiInterface* WiFiInterface::_instance = nullptr;
 WiFiStateCallback WiFiInterface::_stateCallback = nullptr;
 
-
+// Make otaManager accessible (assuming it's a global pointer defined in main.cpp)
+extern OtaManager* otaManager;
 
 WiFiInterface::WiFiInterface(ConfigManager& configManager, EventQueue& eventQueue)
     : _configManager(configManager),
@@ -52,18 +54,18 @@ void WiFiInterface::updateState(WiFiState newState) {
     if (_eventQueue != nullptr) {
         switch (newState) {
             case WiFiState::CONNECTING:
-                _eventQueue->publishEvent(EventType::WIFI_CONNECTING, "");
+                _eventQueue->publishEvent(Event(EventType::WIFI_CONNECTING));
                 break;
             case WiFiState::CONNECTED:
-                _eventQueue->publishEvent(EventType::WIFI_CONNECTED, "");
+                _eventQueue->publishEvent(Event(EventType::WIFI_CONNECTED));
                 break;
             case WiFiState::DISCONNECTED:
                 if (!_configManager.hasWiFiCredentials()) {
-                    _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS, "");
+                    _eventQueue->publishEvent(Event(EventType::NEED_WIFI_CREDENTIALS));
                 }
                 break;
             case WiFiState::AP_MODE:
-                _eventQueue->publishEvent(EventType::WIFI_AP_STARTED, "");
+                _eventQueue->publishEvent(Event(EventType::WIFI_AP_STARTED));
                 break;
         }
     }
@@ -196,7 +198,7 @@ void WiFiInterface::process() {
             }
             
             if (_eventQueue != nullptr) {
-                _eventQueue->publishEvent(EventType::WIFI_CONNECTION_FAILED, "");
+                _eventQueue->publishEvent(Event(EventType::WIFI_CONNECTION_FAILED));
             }
             
             startAccessPoint();
@@ -285,6 +287,14 @@ void WiFiInterface::onWiFiEvent(WiFiEvent_t event) {
                 Serial.println("STA successfully connected after portal config, stopping AP.");
                 _instance->stopAccessPoint();
                 _instance->_attemptingNewConnectionAfterPortal = false; // Reset flag
+            }
+
+            if (otaManager) {
+                if (otaManager->syncTimeIfNeeded()) {
+                    Serial.println("NTP time sync successful.");
+                } else {
+                    Serial.println("NTP time sync failed.");
+                }
             }
             break;
             

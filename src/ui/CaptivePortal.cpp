@@ -190,7 +190,7 @@ void CaptivePortal::handleSaveWifi(AsyncWebServerRequest *request) {
         Serial.printf("Received WiFi credentials for SSID: %s\n", ssid.c_str());
         if (_configManager.saveWiFiCredentials(ssid, password)) {
             // Trigger WiFi connection attempt via EventQueue or directly
-            _eventQueue.publishEvent(EventType::WIFI_CREDENTIALS_FOUND, ssid);
+            _eventQueue.publishEvent(Event(EventType::WIFI_CREDENTIALS_FOUND, ssid));
             success = true;
         }
     }
@@ -270,7 +270,7 @@ void CaptivePortal::handleSaveInsight(AsyncWebServerRequest *request) {
     if (request->hasParam("insightId", true)) {
         String id = request->getParam("insightId", true)->value();
         if (_configManager.saveInsight(id, "")) {
-            _eventQueue.publishEvent(EventType::INSIGHT_ADDED, id); // Corrected publish call
+            _eventQueue.publishEvent(Event(EventType::INSIGHT_ADDED, id));
             success = true;
         }
     }
@@ -289,7 +289,7 @@ void CaptivePortal::handleDeleteInsight(AsyncWebServerRequest *request) {
     if (request->hasParam("id", true)) {
         String id = request->getParam("id", true)->value();
          _configManager.deleteInsight(id); // deleteInsight doesn't return bool, assume success
-        _eventQueue.publishEvent(EventType::INSIGHT_DELETED, id); // Corrected publish call
+        _eventQueue.publishEvent(Event(EventType::INSIGHT_DELETED, id));
         success = true;
     }
 
@@ -476,7 +476,7 @@ void CaptivePortal::processAsyncOperations() {
                 if (!ssid.isEmpty()) {
                     Serial.printf("Saving WiFi credentials for SSID: %s\n", ssid.c_str());
                     if (_configManager.saveWiFiCredentials(ssid, password)) {
-                        _eventQueue.publishEvent(EventType::WIFI_CREDENTIALS_FOUND, ssid);
+                        _eventQueue.publishEvent(Event(EventType::WIFI_CREDENTIALS_FOUND, ssid));
                         currentActionSuccess = true;
                         currentActionMessage = "WiFi credentials saved for " + ssid;
                     } else {
@@ -508,7 +508,7 @@ void CaptivePortal::processAsyncOperations() {
                 String id = current_queued_action.param1;     // Use from QueuedAction
                 if (!id.isEmpty()) {
                     if (_configManager.saveInsight(id, "")) {
-                        _eventQueue.publishEvent(EventType::INSIGHT_ADDED, id);
+                        _eventQueue.publishEvent(Event(EventType::INSIGHT_ADDED, id));
                         currentActionSuccess = true;
                         currentActionMessage = "Insight '" + id + "' saved.";
                     } else {
@@ -524,7 +524,7 @@ void CaptivePortal::processAsyncOperations() {
                 String id = current_queued_action.param1; // Use from QueuedAction
                  if (!id.isEmpty()) {
                     _configManager.deleteInsight(id);
-                    _eventQueue.publishEvent(EventType::INSIGHT_DELETED, id);
+                    _eventQueue.publishEvent(Event(EventType::INSIGHT_DELETED, id));
                     currentActionSuccess = true;
                     currentActionMessage = "Insight '" + id + "' deleted.";
                 } else {

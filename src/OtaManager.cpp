@@ -293,6 +293,14 @@ UpdateInfo OtaManager::getLastCheckResult() {
     return lastCheckResultCopy;
 }
 
+bool OtaManager::syncTimeIfNeeded() {
+    return _ensureTimeSynced();
+}
+
+bool OtaManager::isTimeSynced() {
+    return _timeSynced;
+}
+
 void OtaManager::process() {
     // This method could be used if not using tasks, or for tasks to yield/delay.
     // For now, tasks handle themselves.
