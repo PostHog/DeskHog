@@ -1,6 +1,6 @@
 #include "ui/FriendCard.h"
 #include "Style.h"
-#include "sprites.h"
+#include "walking_animation.h"
 #include "hardware/Input.h"
 
 AnimationCard::AnimationCard(lv_obj_t* parent)
@@ -42,7 +42,7 @@ AnimationCard::AnimationCard(lv_obj_t* parent)
     if (!_anim_img) return;
     
     // Set the sprite array
-    lv_animimg_set_src(_anim_img, (const void**)walking_sprites, walking_sprites_count);
+    lv_animimg_set_src(_anim_img, (const void**)walking_animation, walking_animation_count);
     
     // Set animation duration and make it repeat infinitely
     lv_animimg_set_duration(_anim_img, ANIMATION_DURATION_MS);
