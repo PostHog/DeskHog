@@ -128,4 +128,8 @@ private:
     // Message management
     std::vector<std::string> _messages;        ///< List of cycling messages
     size_t _current_message_index;             ///< Index of current message
+
+    // Background color cycling
+    std::vector<lv_color_t> _background_colors; ///< List of background colors to cycle through
+    size_t _current_bg_color_index;            ///< Index of the current background color
 }; 
