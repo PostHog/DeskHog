@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <vector>
 #include "EventQueue.h"
+#include "config/CardConfig.h"
 
 /**
  * @class ConfigManager
@@ -140,6 +141,19 @@ public:
      */
     std::vector<String> getAllInsightIds();
 
+    /**
+     * @brief Get all configured cards from persistent storage
+     * @return Vector of CardConfig objects representing enabled cards
+     */
+    std::vector<CardConfig> getCardConfigs();
+
+    /**
+     * @brief Save card configurations to persistent storage
+     * @param configs Vector of CardConfig objects to save
+     * @return true if saved successfully, false otherwise
+     */
+    bool saveCardConfigs(const std::vector<CardConfig>& configs);
+
 private:
     /**
      * @brief Updates the internal list of insight IDs in preferences
@@ -175,10 +189,12 @@ private:
     // Preferences instances for persistent storage
     Preferences _preferences;      ///< Main preferences storage instance
     Preferences _insightsPrefs;   ///< Separate storage for insight data
+    Preferences _cardPrefs;       ///< Separate storage for card configurations
 
     // Namespace constants for preferences organization
     const char* _namespace = "wifi_config";        ///< Namespace for WiFi and general config
     const char* _insightsNamespace = "insights";   ///< Namespace for insight data
+    const char* _cardNamespace = "cards";          ///< Namespace for card configurations
 
     // Storage keys for WiFi configuration
     const char* _ssidKey = "ssid";                ///< Key for stored WiFi SSID

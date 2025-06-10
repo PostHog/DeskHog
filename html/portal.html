@@ -38,7 +38,7 @@
             </form>
             
             <div class="button-container">
-                <button type="button" id="refresh-networks-btn">Refresh Network List</button>
+                <button type="button" id="refresh-networks-btn">Refresh network list</button>
             </div>
         </div>
 
@@ -62,32 +62,21 @@
             </form>
         </div>
 
-        <h2>Insights</h2>
+        <h2>Card management</h2>
 
         <div class="config-section">
-            <form id="insight-form" onsubmit="return addInsight()">
-                <div class="form-group">
-                    <label for="insightId">Add new insight ID</label>
-                    <input type="text" name="insightId" id="insightId"  required>
-                </div>
-                
-                <div class="button-container">
-                    <button type="submit">Add Insight</button>
-                </div>
-            </form>
-
-        
+            <h3>Available cards</h3>
+            <div id="available-cards-list">
+                <!-- Will be populated by JavaScript -->
+                <p>Loading available card types...</p>
+            </div>
         </div>
 
         <div class="config-section">
-            <label for="insightId">Stored insights</label>
-            <div id="insights-list">
+            <h3>Configured cards</h3>
+            <div id="cards-list">
                 <!-- Will be populated by JavaScript -->
-                 <ul>
-                    <li>
-                        <button>Delete [an insight]</button>
-                    </li>
-                 </ul>
+                <p>Loading cards...</p>
             </div>
         </div>
 

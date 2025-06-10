@@ -13,6 +13,8 @@
 #include "ui/FriendCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
+#include "config/CardConfig.h"
+#include "UICallback.h"
 
 /**
  * @class CardController
@@ -84,7 +86,7 @@ public:
      * @brief Get the animation card
      * @return Pointer to animation card
      */
-    AnimationCard* getAnimationCard() { return animationCard; }
+    FriendCard* getAnimationCard() { return animationCard; }
 
     /**
      * @brief Get all insight cards
@@ -97,6 +99,51 @@ public:
      * @return Pointer to display interface
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
+
+    /**
+     * @brief Get available card definitions for the web UI
+     * @return Vector of CardDefinition objects representing available card types
+     */
+    std::vector<CardDefinition> getCardDefinitions() const;
+
+    /**
+     * @brief Register an available card type with its definition and factory function
+     * @param definition The card definition including metadata and factory function
+     */
+    void registerCardType(const CardDefinition& definition);
+
+    /**
+     * @brief Process card configuration changes from the web UI
+     * Called when CARD_CONFIG_CHANGED event is received
+     */
+    void handleCardConfigChanged();
+
+    /**
+     * @brief Initialize the UI update queue
+     * 
+     * Creates a FreeRTOS queue for handling UI updates across threads.
+     * Must be called once during CardController initialization.
+     */
+    void initUIQueue();
+
+    /**
+     * @brief Process pending UI updates
+     * 
+     * Processes all queued UI updates in the LVGL task context.
+     * Should be called regularly from the LVGL handler task.
+     */
+    void processUIQueue();
+    
+    /**
+     * @brief Thread-safe method to dispatch UI updates to the LVGL task
+     * 
+     * @param update_func Lambda function containing UI operations
+     * @param to_front If true, tries to add the callback to the front of the queue
+     * 
+     * Queues UI operations to be executed on the LVGL thread.
+     * Handles queue overflow by discarding updates if queue is full.
+     */
+    void dispatchToLVGLTask(std::function<void()> update_func, bool to_front = false);
 
 private:
     // Screen reference
@@ -113,11 +160,18 @@ private:
     // UI Components
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
-    AnimationCard* animationCard;       ///< Card for animations
+    FriendCard* animationCard;       ///< Card for animations
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
+    
+    // UI Threading
+    static QueueHandle_t uiQueue;  ///< Queue for thread-safe UI updates
+    
+    // Card registration and management
+    std::vector<CardDefinition> registeredCardTypes; ///< Available card types with factory functions
+    std::vector<CardConfig> currentCardConfigs;      ///< Current card configuration from storage
     
     /**
      * @brief Create and initialize the animation card
@@ -135,4 +189,23 @@ private:
      * @param event Event containing WiFi state
      */
     void handleWiFiEvent(const Event& event);
+
+    /**
+     * @brief Handle card title update events
+     * @param event Event containing insight ID and new title
+     */
+    void handleCardTitleUpdated(const Event& event);
+
+    /**
+     * @brief Initialize default card type registrations
+     * Registers built-in card types (INSIGHT, FRIEND) with their factory functions
+     */
+    void initializeCardTypes();
+
+    /**
+     * @brief Reconcile current cards with new configuration
+     * Diffs configuration, removes old cards, creates new ones, and reorders
+     * @param newConfigs New card configuration from storage
+     */
+    void reconcileCards(const std::vector<CardConfig>& newConfigs);
 }; 

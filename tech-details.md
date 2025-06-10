@@ -74,13 +74,79 @@ Open `html/portal.html` in your browser to preview changes. The contents of `htm
 
 **Web portal budget:** Right now the portal costs about 18KB. We'll allow up to **100KB**. All portal assets must be locally available, since the portal needs to work when the device doesn't have WiFi. If you want to try adding a more complex UI framework than hand-rolled JS and HTML, you're welcome to try as long as its build system is quick and the final static output is under 100KB.
 
-### Cards
+### Card system
+
+The DeskHog uses a dynamic card system that allows users to configure which cards appear on their device through a web UI. Cards are managed by the `CardController` and can be easily extended by developers.
+
+#### Built-in cards
 
 `ProvisioningCard` displays a QR code to connect to the device. If WiFi is connected, it displays connection stats.
 
 `InsightCard` visualizes PostHog data. Numeric card is working best. The rest need help.
 
 `FriendCard` lets Max the hedgehog visit with you and provide encouragement.
+
+#### Adding new card types
+
+To create a new card type, you need to:
+
+1. **Add to CardType enum** - Add your new type to the `CardType` enum in `src/ui/CardController.h`
+2. **Create the card class** - Implement your card UI using LVGL
+3. **Register the card type** - Add it to CardController's registration system
+4. **Add configuration support** (optional) - If your card needs user input
+
+**Example: Adding a simple "Hello World" card**
+
+```cpp
+// 1. Add to CardType enum (src/ui/CardController.h)
+enum class CardType {
+    INSIGHT = 0,
+    FRIEND = 1,
+    HELLO = 2  // Add your new type here
+};
+
+// 2. Create your card class (src/ui/HelloCard.h)
+class HelloCard {
+public:
+    HelloCard(lv_obj_t* parent);
+    lv_obj_t* getCard() const { return _card; }
+
+private:
+    lv_obj_t* _card;
+};
+
+// 3. Register in CardController::initializeCardTypes()
+CardDefinition helloDef;
+helloDef.type = CardType::HELLO;
+helloDef.name = "Hello world";
+helloDef.allowMultiple = true;
+helloDef.needsConfigInput = false;
+helloDef.uiDescription = "A simple greeting card";
+helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    HelloCard* newCard = new HelloCard(screen);
+    return newCard ? newCard->getCard() : nullptr;
+};
+registerCardType(helloDef);
+```
+
+**Card definition properties:**
+- `type`: Unique enum value for your card type
+- `name`: Display name in the web UI
+- `allowMultiple`: Whether users can add multiple instances
+- `needsConfigInput`: Whether the card requires configuration input
+- `configInputLabel`: Label for the config input field (if needed)
+- `uiDescription`: Description shown in the web UI
+- `factory`: Lambda function that creates card instances
+
+#### Web UI integration
+
+The web UI automatically displays available card types with:
+- Add buttons for cards that can be added
+- Configuration inputs for cards that need them
+- Status indicators showing how many instances are configured
+- Drag-and-drop reordering for configured cards
+
+No web UI changes are needed when adding new card types - everything is driven by the card registration system.
 
 ### Insight parser and PostHog client
 

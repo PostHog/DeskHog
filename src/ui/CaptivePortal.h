@@ -17,9 +17,11 @@
 #include "hardware/WifiInterface.h"
 #include "html_portal.h"  // Include generated HTML header
 #include "EventQueue.h"   // Include the event queue
+#include "config/CardConfig.h"  // Include card configuration structures
 // #include "OtaManager.h" // Will be included in .cpp, forward declare here
 
 class OtaManager; // Forward declaration
+class CardController; // Forward declaration
 
 // Enum to represent different asynchronous actions the portal can perform
 enum class PortalAction {
@@ -56,8 +58,9 @@ public:
      * @param wifiInterface Reference to WiFi management
      * @param eventQueue Reference to event system for state changes
      * @param otaManager Reference to OTA update manager
+     * @param cardController Reference to card controller for card definitions
      */
-    CaptivePortal(ConfigManager& configManager, WiFiInterface& wifiInterface, EventQueue& eventQueue, OtaManager& otaManager);
+    CaptivePortal(ConfigManager& configManager, WiFiInterface& wifiInterface, EventQueue& eventQueue, OtaManager& otaManager, CardController& cardController);
 
     /**
      * @brief Initialize the portal
@@ -81,6 +84,7 @@ private:
     String _cachedNetworks;         ///< Cached JSON of available networks
     unsigned long _lastScanTime;     ///< Timestamp of last WiFi scan
     OtaManager& _otaManager;         ///< OTA Update Manager reference
+    CardController& _cardController; ///< Card controller reference
 
     // Action queue structure (internal)
     struct QueuedAction {
@@ -146,6 +150,24 @@ private:
      * Accepts JSON with insight ID, publishes INSIGHT_DELETED event
      */
     void handleDeleteInsight(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Return list of available card types
+     * Returns JSON array of CardDefinition objects
+     */
+    void handleGetCardDefinitions(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Return current card configuration
+     * Returns JSON array of CardConfig objects
+     */
+    void handleGetConfiguredCards(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Handle card configuration updates
+     * Accepts JSON array of CardConfig objects
+     */
+    void handleSaveConfiguredCards(AsyncWebServerRequest *request);
 
     /**
      * @brief Handle captive portal detection

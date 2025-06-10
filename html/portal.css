@@ -228,3 +228,133 @@ select::-ms-expand {
     overflow-y: auto;           /* Enable vertical scroll */
     border-radius: var(--radius); /* Consistent border radius */
 }
+
+/* Available cards list styling */
+.available-card-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    background-color: var(--input-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.available-card-info {
+    flex: 1;
+}
+
+.available-card-name {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.available-card-description {
+    font-size: 0.9rem;
+    color: var(--label-color);
+    margin-bottom: 0.25rem;
+}
+
+.available-card-status {
+    font-size: 0.8rem;
+    color: var(--label-color);
+    font-style: italic;
+}
+
+.available-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 120px;
+}
+
+.add-card-btn {
+    background-color: var(--input-color);
+    color: #28a745;
+    border: 1px solid var(--button-border);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-weight: 600;
+    width: 100%;
+    box-shadow: 0 4px 0 0 var(--button-shadow),
+                0 5px 0 0 var(--button-border);
+}
+
+.add-card-btn:hover {
+    background-color: #DCDDD9;
+}
+
+.add-card-btn:active {
+    background-color: #DCDDD9;
+}
+
+.delete-card-btn {
+    background-color: var(--input-color);
+    color: #dc3545;
+    border: 1px solid var(--button-border);
+    padding: 5px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-weight: 600;
+    box-shadow: 0 2px 0 0 var(--button-shadow),
+                0 3px 0 0 var(--button-border);
+}
+
+.delete-card-btn:hover {
+    background-color: #DCDDD9;
+}
+
+.delete-card-btn:active {
+    background-color: #DCDDD9;
+}
+
+.config-input {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Drag and drop styling for configured cards */
+.card-item {
+    border: 1px solid var(--border-color);
+    padding: 10px;
+    margin: 5px 0;
+    border-radius: 5px;
+    background: #f9f9f9;
+    cursor: move;
+    transition: all 0.2s ease;
+}
+
+.card-item:hover {
+    background: #f0f0f0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card-item.dragging {
+    opacity: 0.5;
+    transform: rotate(2deg);
+}
+
+.card-item.drag-over {
+    border-color: #007bff;
+    background: #e3f2fd;
+    border-style: dashed;
+    border-width: 2px;
+}
+
+.drag-handle {
+    color: var(--label-color);
+    cursor: grab;
+    font-size: 1.2rem;
+    margin-right: 0.5rem;
+    user-select: none;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}

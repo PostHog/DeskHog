@@ -6,67 +6,20 @@
 #include "renderers/LineGraphRenderer.h"
 #include "renderers/FunnelRenderer.h"
 
-QueueHandle_t InsightCard::uiQueue = nullptr;
-
-void InsightCard::initUIQueue() {
-    if (uiQueue == nullptr) {
-        uiQueue = xQueueCreate(20, sizeof(UICallback*));
-        if (uiQueue == nullptr) {
-            Serial.println("[UI-CRITICAL] Failed to create UI task queue!");
-        }
-    }
-}
-
-void InsightCard::processUIQueue() {
-    if (uiQueue == nullptr) return;
-
-    UICallback* callback_ptr = nullptr;
-    while (xQueueReceive(uiQueue, &callback_ptr, 0) == pdTRUE) {
-        if (callback_ptr) {
-            callback_ptr->execute();
-            delete callback_ptr;
-        }
-    }
-}
-
-void InsightCard::dispatchToLVGLTask(std::function<void()> update_func, bool to_front) {
-    if (uiQueue == nullptr) {
-        Serial.println("[UI-ERROR] UI Queue not initialized, cannot dispatch UI update.");
-        return;
-    }
-
-    UICallback* callback = new UICallback(std::move(update_func));
-    if (!callback) {
-        Serial.println("[UI-CRITICAL] Failed to allocate UICallback for dispatch!");
-        return;
-    }
-
-    BaseType_t queue_send_result;
-    if (to_front) {
-        queue_send_result = xQueueSendToFront(uiQueue, &callback, (TickType_t)0); 
-    } else {
-        queue_send_result = xQueueSend(uiQueue, &callback, (TickType_t)0);
-    }
-
-    if (queue_send_result != pdTRUE) {
-        Serial.printf("[UI-WARN] UI queue full/error (send_to_front: %d), update discarded. Core: %d\n", 
-                      to_front, xPortGetCoreID());
-        delete callback;
-    }
-}
 
 InsightCard::InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& eventQueue,
                         const String& insightId, uint16_t width, uint16_t height)
     : _config(config)
     , _event_queue(eventQueue)
     , _insight_id(insightId)
+    , _current_title("")
     , _card(nullptr)
     , _title_label(nullptr)
     , _content_container(nullptr)
     , _active_renderer(nullptr)
     , _current_type(InsightParser::InsightType::INSIGHT_NOT_SUPPORTED) {
     
-    InsightCard::initUIQueue();
+    // NOTE: UI queue is now initialized by CardController
 
     _card = lv_obj_create(parent);
     if (!_card) {
@@ -124,14 +77,16 @@ InsightCard::InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& ev
 
 InsightCard::~InsightCard() {
     std::shared_ptr<InsightRendererBase> renderer_for_lambda = std::move(_active_renderer);
-    dispatchToLVGLTask([card_obj = _card, renderer = renderer_for_lambda]() mutable {
-        if (renderer) {
-            renderer->clearElements();
-        }
-        if (card_obj && lv_obj_is_valid(card_obj)) {
-            lv_obj_del_async(card_obj);
-        }
-    }, true);
+    if (globalUIDispatch) {
+        globalUIDispatch([card_obj = _card, renderer = renderer_for_lambda]() mutable {
+            if (renderer) {
+                renderer->clearElements();
+            }
+            if (card_obj && lv_obj_is_valid(card_obj)) {
+                lv_obj_del_async(card_obj);
+            }
+        }, true);
+    }
 }
 
 void InsightCard::onEvent(const Event& event) {
@@ -151,14 +106,16 @@ void InsightCard::onEvent(const Event& event) {
 void InsightCard::handleParsedData(std::shared_ptr<InsightParser> parser) {
     if (!parser || !parser->isValid()) {
         Serial.printf("[InsightCard-%s] Invalid data or parse error.\n", _insight_id.c_str());
-        dispatchToLVGLTask([this]() {
-            if(isValidObject(_title_label)) lv_label_set_text(_title_label, "Data Error");
-            if (_active_renderer) {
-                _active_renderer->clearElements();
-                _active_renderer.reset();
-            }
-            _current_type = InsightParser::InsightType::INSIGHT_NOT_SUPPORTED;
-        }, true);
+        if (globalUIDispatch) {
+            globalUIDispatch([this]() {
+                if(isValidObject(_title_label)) lv_label_set_text(_title_label, "Data Error");
+                if (_active_renderer) {
+                    _active_renderer->clearElements();
+                    _active_renderer.reset();
+                }
+                _current_type = InsightParser::InsightType::INSIGHT_NOT_SUPPORTED;
+            }, true);
+        }
         return;
     }
 
@@ -169,11 +126,15 @@ void InsightCard::handleParsedData(std::shared_ptr<InsightParser> parser) {
     }
     String new_title(title_buffer);
 
-    if (_config.getInsight(_insight_id).compareTo(new_title) != 0) {
-        _config.saveInsight(_insight_id, new_title);
+    // Only dispatch title update event if the title has actually changed
+    if (_current_title != new_title) {
+        _current_title = new_title;
+        _event_queue.publishEvent(Event::createTitleUpdateEvent(_insight_id, new_title));
+        Serial.printf("[InsightCard-%s] Title updated to: %s\n", _insight_id.c_str(), new_title.c_str());
     }
 
-    dispatchToLVGLTask([this, new_insight_type, new_title, parser, id = _insight_id]() mutable {
+    if (globalUIDispatch) {
+        globalUIDispatch([this, new_insight_type, new_title, parser, id = _insight_id]() mutable {
         if (isValidObject(_title_label)) {
             lv_label_set_text(_title_label, new_title.c_str());
         }
@@ -242,7 +203,8 @@ void InsightCard::handleParsedData(std::shared_ptr<InsightParser> parser) {
                 id.c_str(), (int)_current_type);
         }
 
-    }, true);
+        }, true);
+    }
 }
 
 void InsightCard::clearContentContainer() {

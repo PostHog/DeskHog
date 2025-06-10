@@ -3,6 +3,7 @@
 #include "hardware/WifiInterface.h"
 #include "EventQueue.h"
 #include "OtaManager.h" // Required for OtaManager interaction
+#include "ui/CardController.h" // Required for CardController interaction
 #include "html_portal.h"  // For portal HTML
 #include <ArduinoJson.h>  // For JSON responses
 #include <pgmspace.h> // For PROGMEM
@@ -37,12 +38,13 @@ const char* portalActionToString(PortalAction action) {
 }
 
 // Constructor
-CaptivePortal::CaptivePortal(ConfigManager& configManager, WiFiInterface& wifiInterface, EventQueue& eventQueue, OtaManager& otaManager)
+CaptivePortal::CaptivePortal(ConfigManager& configManager, WiFiInterface& wifiInterface, EventQueue& eventQueue, OtaManager& otaManager, CardController& cardController)
     : _server(80),
       _configManager(configManager),
       _wifiInterface(wifiInterface),
       _eventQueue(eventQueue),
       _otaManager(otaManager), // Initialize the OtaManager reference
+      _cardController(cardController), // Initialize the CardController reference
       _lastScanTime(0),
       _action_in_progress(PortalAction::NONE),
       _last_action_completed(PortalAction::NONE),
@@ -93,6 +95,21 @@ void CaptivePortal::begin() {
 
     // Insight actions
     _server.on("/get-insights", HTTP_GET, std::bind(&CaptivePortal::handleGetInsights, this, std::placeholders::_1));
+
+    // Card management actions
+    _server.on("/api/cards/definitions", HTTP_GET, std::bind(&CaptivePortal::handleGetCardDefinitions, this, std::placeholders::_1));
+    _server.on("/api/cards/configured", HTTP_GET, std::bind(&CaptivePortal::handleGetConfiguredCards, this, std::placeholders::_1));
+    _server.on("/api/cards/configured", HTTP_POST, 
+              std::bind(&CaptivePortal::handleSaveConfiguredCards, this, std::placeholders::_1),
+              NULL,
+              [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+                  // Store body data as a parameter for later processing
+                  request->_tempObject = malloc(len + 1);
+                  if(request->_tempObject != NULL){
+                      memcpy(request->_tempObject, data, len);
+                      ((char*)request->_tempObject)[len] = 0;
+                  }
+              });
 
     // OTA Update actions
     _server.on("/check-update", HTTP_GET, std::bind(&CaptivePortal::handleCheckUpdate, this, std::placeholders::_1));
@@ -593,7 +610,7 @@ void CaptivePortal::processAsyncOperations() {
 
 // --- New /api/status endpoint ---
 void CaptivePortal::handleApiStatus(AsyncWebServerRequest *request) {
-    Serial.println("/api/status HANDLER CALLED"); // You can keep this line if useful
+    // Serial.println("/api/status HANDLER CALLED"); // Removed to reduce log spam
     // REMOVE SIMPLIFIED TEST BLOCK
     // request->send(200, "text/plain", "API Status OK - Simplified"); 
     // return; 
@@ -781,4 +798,109 @@ void CaptivePortal::requestAction(PortalAction action, AsyncWebServerRequest *re
         response->addHeader("Access-Control-Allow-Origin", "*");
         request->send(response);
     }
+}
+
+void CaptivePortal::handleGetCardDefinitions(AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(2048);
+    JsonArray definitionsArray = doc.to<JsonArray>();
+
+    // Get card definitions from CardController
+    std::vector<CardDefinition> definitions = _cardController.getCardDefinitions();
+    
+    for (const CardDefinition& def : definitions) {
+        JsonObject defObj = definitionsArray.createNestedObject();
+        defObj["id"] = cardTypeToString(def.type);
+        defObj["name"] = def.name;
+        defObj["allowMultiple"] = def.allowMultiple;
+        defObj["needsConfigInput"] = def.needsConfigInput;
+        defObj["configInputLabel"] = def.configInputLabel;
+        defObj["description"] = def.uiDescription;
+    }
+
+    String responseJson;
+    serializeJson(doc, responseJson);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void CaptivePortal::handleGetConfiguredCards(AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(2048);
+    JsonArray cardsArray = doc.to<JsonArray>();
+
+    // Get configured cards from ConfigManager
+    std::vector<CardConfig> cardConfigs = _configManager.getCardConfigs();
+    for (const CardConfig& config : cardConfigs) {
+        JsonObject cardObj = cardsArray.createNestedObject();
+        cardObj["type"] = cardTypeToString(config.type);
+        cardObj["config"] = config.config;
+        cardObj["order"] = config.order;
+        cardObj["name"] = config.name;
+    }
+
+    String responseJson;
+    serializeJson(doc, responseJson);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void CaptivePortal::handleSaveConfiguredCards(AsyncWebServerRequest *request) {
+    bool success = false;
+    String message = "Failed to save card configuration";
+
+    // Check if we have body data stored by the body handler
+    if (request->_tempObject != NULL) {
+        String body = String((char*)request->_tempObject);
+        free(request->_tempObject); // Clean up the allocated memory
+        request->_tempObject = NULL;
+        
+        Serial.printf("Received card config body: %s\n", body.c_str());
+        
+        DynamicJsonDocument doc(2048);
+        DeserializationError error = deserializeJson(doc, body);
+        
+        if (!error && doc.is<JsonArray>()) {
+            JsonArray cardsArray = doc.as<JsonArray>();
+            std::vector<CardConfig> cardConfigs;
+            
+            // Parse each card configuration
+            for (JsonVariant v : cardsArray) {
+                JsonObject obj = v.as<JsonObject>();
+                if (obj.containsKey("type") && obj.containsKey("order")) {
+                    CardConfig config;
+                    config.type = stringToCardType(obj["type"].as<String>());
+                    config.config = obj.containsKey("config") ? obj["config"].as<String>() : "";
+                    config.order = obj["order"].as<int>();
+                    config.name = obj.containsKey("name") ? obj["name"].as<String>() : "";
+                    cardConfigs.push_back(config);
+                }
+            }
+            
+            // Save to ConfigManager
+            if (_configManager.saveCardConfigs(cardConfigs)) {
+                success = true;
+                message = "Card configuration saved successfully";
+                Serial.printf("Successfully saved %d card configurations\n", cardConfigs.size());
+            } else {
+                message = "Failed to save to storage";
+            }
+        } else {
+            message = "Invalid JSON format";
+            Serial.printf("JSON parse error: %s\n", error.c_str());
+        }
+    } else {
+        message = "No configuration data provided";
+        Serial.println("No body data received in card config save");
+    }
+
+    DynamicJsonDocument responseDoc(256);
+    responseDoc["success"] = success;
+    responseDoc["message"] = message;
+    
+    String responseJson;
+    serializeJson(responseDoc, responseJson);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
 }

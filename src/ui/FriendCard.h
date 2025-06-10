@@ -17,7 +17,7 @@
  * - Cycling messages
  * - Center button interaction for cycling messages
  */
-class AnimationCard : public InputHandler {
+class FriendCard : public InputHandler {
 public:
     /**
      * @brief Constructor
@@ -26,14 +26,14 @@ public:
      * 
      * Creates a full-width/height card
      */
-    AnimationCard(lv_obj_t* parent);
+    FriendCard(lv_obj_t* parent);
     
     /**
      * @brief Destructor - safely cleans up UI resources
      * 
      * Hides the card and schedules async deletion of all UI elements
      */
-    ~AnimationCard();
+    ~FriendCard();
     
     /**
      * @brief Get the underlying LVGL card object

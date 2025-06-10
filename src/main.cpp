@@ -115,7 +115,7 @@ void lvglHandlerTask(void* parameter) {
         // Handle LVGL tasks
         displayInterface->handleLVGLTasks();
 
-        InsightCard::processUIQueue();
+        cardController->processUIQueue();
         
         // Poll buttons at regular intervals
         TickType_t currentTime = xTaskGetTickCount();
@@ -216,7 +216,7 @@ void setup() {
     }
     Serial.println("--------------------------");
 
-    InsightCard::initUIQueue();
+    // UI queue will be initialized by CardController
 
 
     SystemController::begin();
@@ -271,7 +271,7 @@ void setup() {
     otaManager = new OtaManager(CURRENT_FIRMWARE_VERSION, "PostHog", "DeskHog");
     
     // Initialize captive portal
-    captivePortal = new CaptivePortal(*configManager, *wifiInterface, *eventQueue, *otaManager);
+    captivePortal = new CaptivePortal(*configManager, *wifiInterface, *eventQueue, *otaManager, *cardController);
     captivePortal->begin();
     
     // Create task for WiFi operations
