@@ -1,4 +1,5 @@
 #include "ui/CardController.h"
+// Potentially: #include "hardware/Input.h" // if direct button mapping needed beyond index
 
 CardController::CardController(
     lv_obj_t* screen,
@@ -18,6 +19,7 @@ CardController::CardController(
     cardStack(nullptr),
     provisioningCard(nullptr),
     animationCard(nullptr),
+    game_card(nullptr), // Initialize game_card
     displayInterface(nullptr)
 {
 }
@@ -32,6 +34,9 @@ CardController::~CardController() {
     
     delete animationCard;
     animationCard = nullptr;
+
+    delete game_card; // Delete game_card
+    game_card = nullptr;
     
     // Use mutex if available before cleaning up insight cards
     if (displayInterface && displayInterface->getMutexPtr()) {
@@ -56,6 +61,7 @@ void CardController::initialize(DisplayInterface* display) {
     
     // Create card navigation stack
     cardStack = new CardNavigationStack(screen, screenWidth, screenHeight);
+    Serial.println("[CardCtrl-DEBUG] CardNavigationStack created.");
     
     // Create provision UI
     provisioningCard = new ProvisioningCard(
@@ -67,9 +73,35 @@ void CardController::initialize(DisplayInterface* display) {
     
     // Add provisioning card to navigation stack
     cardStack->addCard(provisioningCard->getCard());
+    Serial.println("[CardCtrl-DEBUG] ProvisioningCard added to stack.");
     
     // Create animation card
-    createAnimationCard();
+    createAnimationCard(); // This already adds itself to the cardStack and registers input
+    Serial.println("[CardCtrl-DEBUG] AnimationCard creation called.");
+
+    // Create and add GameCard
+    if (displayInterface) displayInterface->takeMutex(portMAX_DELAY);
+    Serial.println("[CardCtrl-DEBUG] Attempting to create GameCard...");
+    game_card = new GameCard(); 
+    if (game_card) {
+        Serial.println("[CardCtrl-DEBUG] GameCard instance created.");
+        lv_obj_t* roguelike_card_obj = game_card->get_card();
+        Serial.printf("[CardCtrl-DEBUG] GameCard get_card() returned: %p\n", roguelike_card_obj);
+        if (roguelike_card_obj) {
+            Serial.println("[CardCtrl-DEBUG] Adding GameCard to cardStack...");
+            cardStack->addCard(roguelike_card_obj);
+            Serial.println("[CardCtrl-DEBUG] GameCard LVGL object added to stack.");
+            cardStack->registerInputHandler(roguelike_card_obj, game_card); 
+            Serial.println("[CardCtrl-DEBUG] GameCard input handler registered.");
+        } else {
+            Serial.println("[CardCtrl-ERROR] Failed to get GameCard lv_obj_t from get_card(). Deleting instance.");
+            delete game_card;
+            game_card = nullptr;
+        }
+    } else {
+        Serial.println("[CardCtrl-ERROR] Failed to create GameCard instance (new GameCard() returned null).");
+    }
+    if (displayInterface) displayInterface->giveMutex();
     
     // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();
