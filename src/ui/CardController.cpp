@@ -18,7 +18,8 @@ CardController::CardController(
     cardStack(nullptr),
     provisioningCard(nullptr),
     animationCard(nullptr),
-    displayInterface(nullptr)
+    displayInterface(nullptr),
+    questionCard(nullptr)
 {
 }
 
@@ -70,6 +71,13 @@ void CardController::initialize(DisplayInterface* display) {
     
     // Create animation card
     createAnimationCard();
+    
+    // Create question card
+    questionCard = new QuestionCard(screen);
+    cardStack->addCard(questionCard->getCard());
+    
+    // Register the question card as an input handler
+    cardStack->registerInputHandler(questionCard->getCard(), questionCard);
     
     // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();

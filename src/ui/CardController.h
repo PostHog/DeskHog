@@ -13,6 +13,7 @@
 #include "ui/FriendCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
+#include "ui/QuestionCard.h"
 
 /**
  * @class CardController
@@ -118,6 +119,8 @@ private:
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
+    
+    QuestionCard* questionCard;  ///< Card for displaying questions
     
     /**
      * @brief Create and initialize the animation card
