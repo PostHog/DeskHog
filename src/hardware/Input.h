@@ -32,6 +32,28 @@ public:
         buttons[BUTTON_DOWN].update();
         buttons[BUTTON_CENTER].update();
         buttons[BUTTON_UP].update();
+        
+        // Debug logging for button states
+        static bool last_up_state = false;
+        static bool last_center_state = false;
+        static bool last_down_state = false;
+        
+        bool current_up_state = buttons[BUTTON_UP].pressed();
+        bool current_center_state = buttons[BUTTON_CENTER].pressed();
+        bool current_down_state = buttons[BUTTON_DOWN].pressed();
+        
+        if (current_up_state != last_up_state) {
+            Serial.printf("[Input] UP button state changed: %d\n", current_up_state);
+            last_up_state = current_up_state;
+        }
+        if (current_center_state != last_center_state) {
+            Serial.printf("[Input] CENTER button state changed: %d\n", current_center_state);
+            last_center_state = current_center_state;
+        }
+        if (current_down_state != last_down_state) {
+            Serial.printf("[Input] DOWN button state changed: %d\n", current_down_state);
+            last_down_state = current_down_state;
+        }
     }
 
     static bool isDownPressed() { return buttons[BUTTON_DOWN].pressed(); }

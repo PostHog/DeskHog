@@ -78,6 +78,12 @@ public:
     uint8_t getCurrentIndex() const;
     
     /**
+     * @brief Get the main container for cards
+     * @return Pointer to the main LVGL container object for cards
+     */
+    lv_obj_t* getCardContainer() const { return _main_container; }
+    
+    /**
      * @brief Set mutex for thread-safe button handling
      * @param mutex_ptr Pointer to FreeRTOS semaphore
      */
