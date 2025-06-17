@@ -6,3 +6,4 @@
 .DS_Store
 test/json/
 test/test_insight_parser.cpp
+node_modules/

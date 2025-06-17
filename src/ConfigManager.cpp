@@ -66,7 +66,7 @@ bool ConfigManager::saveWiFiCredentials(const String& ssid, const String& passwo
     
     // Publish event if event queue is available
     if (_eventQueue != nullptr) {
-        _eventQueue->publishEvent(EventType::WIFI_CREDENTIALS_FOUND, "");
+        _eventQueue->publishEvent(Event(EventType::WIFI_CREDENTIALS_FOUND));
     }
     
     return true;
@@ -94,7 +94,7 @@ void ConfigManager::clearWiFiCredentials() {
     
     // Publish event if event queue is available
     if (_eventQueue != nullptr) {
-        _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS, "");
+        _eventQueue->publishEvent(Event(EventType::NEED_WIFI_CREDENTIALS));
     }
 }
 
@@ -107,9 +107,9 @@ bool ConfigManager::checkWiFiCredentialsAndPublish() {
     
     if (_eventQueue != nullptr) {
         if (hasCredentials) {
-            _eventQueue->publishEvent(EventType::WIFI_CREDENTIALS_FOUND, "");
+            _eventQueue->publishEvent(Event(EventType::WIFI_CREDENTIALS_FOUND));
         } else {
-            _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS, "");
+            _eventQueue->publishEvent(Event(EventType::NEED_WIFI_CREDENTIALS));
         }
     }
     
