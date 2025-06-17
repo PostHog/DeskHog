@@ -1,4 +1,5 @@
 #include "ui/CardController.h"
+#include "ui/PomodoroCard.h"
 
 CardController::CardController(
     lv_obj_t* screen,
@@ -70,6 +71,15 @@ void CardController::initialize(DisplayInterface* display) {
     
     // Create animation card
     createAnimationCard();
+    
+    // Create Pomodoro card
+    PomodoroCard* pomodoroCard = new PomodoroCard(screen);
+    
+    // Add Pomodoro card to navigation stack
+    cardStack->addCard(pomodoroCard->getCard());
+
+    // Register the Pomodoro card as an input handler
+    cardStack->registerInputHandler(pomodoroCard->getCard(), pomodoroCard);
     
     // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();
