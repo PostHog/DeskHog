@@ -18,6 +18,7 @@ CardController::CardController(
     cardStack(nullptr),
     provisioningCard(nullptr),
     animationCard(nullptr),
+    dvdSaverCard(nullptr),
     displayInterface(nullptr)
 {
 }
@@ -32,6 +33,9 @@ CardController::~CardController() {
     
     delete animationCard;
     animationCard = nullptr;
+    
+    delete dvdSaverCard;
+    dvdSaverCard = nullptr;
     
     // Use mutex if available before cleaning up insight cards
     if (displayInterface && displayInterface->getMutexPtr()) {
@@ -70,6 +74,9 @@ void CardController::initialize(DisplayInterface* display) {
     
     // Create animation card
     createAnimationCard();
+    
+    // Create and initialize the DVD Saver card
+    createDVDSaverCard();
     
     // Get count of insights to determine card count
     std::vector<String> insightIds = configManager.getAllInsightIds();
@@ -126,6 +133,24 @@ void CardController::createAnimationCard() {
     
     // Register the animation card as an input handler
     cardStack->registerInputHandler(animationCard->getCard(), animationCard);
+    
+    displayInterface->giveMutex();
+}
+
+// Create and initialize the DVD Saver card
+void CardController::createDVDSaverCard() {
+    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+        return;
+    }
+
+    dvdSaverCard = new DVDSaverCard(screen, screenWidth, screenHeight);
+
+    if (dvdSaverCard && dvdSaverCard->getCard()) {
+        cardStack->addCard(dvdSaverCard->getCard());
+    } else {
+        delete dvdSaverCard;
+        dvdSaverCard = nullptr;
+    }
     
     displayInterface->giveMutex();
 }

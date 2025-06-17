@@ -11,6 +11,7 @@
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
 #include "ui/FriendCard.h"
+#include "ui/DVDSaverCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 
@@ -114,6 +115,7 @@ private:
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
     AnimationCard* animationCard;       ///< Card for animations
+    DVDSaverCard* dvdSaverCard;         ///< Card for DVD-style logo animation
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
     
     // Display interface for thread safety
@@ -123,6 +125,11 @@ private:
      * @brief Create and initialize the animation card
      */
     void createAnimationCard();
+    
+    /**
+     * @brief Create and initialize the DVD Saver card
+     */
+    void createDVDSaverCard();
     
     /**
      * @brief Handle insight-related events

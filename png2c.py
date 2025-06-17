@@ -11,237 +11,156 @@ try:
 except ImportError:
     HAS_PIL = False
 
-def png_to_c_array(png_file, output_dir, var_name_override=None):
-    """Convert PNG file to LVGL compatible C array"""
+def process_png_file(png_file_path, output_directory, variable_name_override=None, is_for_walking_array=True):
+    """Converts a single PNG file to LVGL compatible C array and header file.
+    
+    Args:
+        png_file_path: Path to the source PNG file.
+        output_directory: Directory where the .c and .h files will be saved.
+        variable_name_override: If provided, use this as the C variable name.
+        is_for_walking_array: (Not used in this function directly but for caller logic)
+                              Indicates if this sprite is part of the walking animation.
+                              This function now primarily focuses on file generation.
+
+    Returns:
+        A tuple (variable_name, generated_h_filename) or (None, None) if failed.
+    """
+    base_name_no_ext = os.path.splitext(os.path.basename(png_file_path))[0]
+    var_name = variable_name_override if variable_name_override else base_name_no_ext.replace('-', '_').replace('.', '_')
+    
+    os.makedirs(output_directory, exist_ok=True)
+    output_h_filename = f"sprite_{var_name}.h"
+    output_c_filename = f"sprite_{var_name}.c"
+    output_h_filepath = os.path.join(output_directory, output_h_filename)
+    output_c_filepath = os.path.join(output_directory, output_c_filename)
+
     if not HAS_PIL:
-        print(f"Skipping {png_file} - PIL (Pillow) and numpy are required")
-        return None
-    
-    # Create a safe C variable name from the filename
-    base_name = os.path.splitext(os.path.basename(png_file))[0]
-    var_name = var_name_override if var_name_override else base_name.replace('-', '_').replace('.', '_')
-    
-    # Load the image
-    img = Image.open(png_file)
+        print(f"Skipping {png_file_path} - PIL (Pillow) and numpy are required. Generating DUMMY sprite.")
+        with open(output_h_filepath, 'w') as f:
+            f.write(f"""/** @file {output_h_filename} @brief Dummy LVGL sprite for {os.path.basename(png_file_path)} (PIL not found) */
+#pragma once
+#ifdef __cplusplus
+extern "C" {{
+#endif
+#include "lvgl.h"
+extern const lv_img_dsc_t sprite_{var_name};
+#ifdef __cplusplus
+}}
+#endif
+""")
+        with open(output_c_filepath, 'w') as f:
+            f.write(f"""/** @file {output_c_filename} @brief Dummy LVGL sprite for {os.path.basename(png_file_path)} (PIL not found) */
+#include "lvgl.h"
+#include "{output_h_filename}" // Include its own header
+static const uint8_t sprite_{var_name}_map[] = {{0x00, 0x00, 0xFF, 0xFF}}; // Minimal 1x1 red pixel
+const lv_img_dsc_t sprite_{var_name} = {{ .header = {{ .cf = LV_COLOR_FORMAT_ARGB8888, .w = 1, .h = 1 }}, .data_size = 4, .data = sprite_{var_name}_map }};
+""")
+        print(f"Generated DUMMY {output_c_filepath} and {output_h_filepath}")
+        return var_name, output_h_filename
+
+    img = Image.open(png_file_path)
     width, height = img.size
-    
-    # Convert to RGBA if not already
-    if img.mode != 'RGBA':
-        img = img.convert('RGBA')
-    
-    # Get pixel data as a numpy array
+    img = img.convert('RGBA') # Ensure RGBA
     pixels = np.array(img)
     
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Get all PNG files in sequence to determine array indices
-    output_c_file = os.path.join(output_dir, f"sprite_{var_name}.c")
-    output_h_file = os.path.join(output_dir, f"sprite_{var_name}.h")
-    
-    # Write C file with pixel data
-    with open(output_c_file, 'w') as f:
-        f.write(f"""/**
- * @file sprite_{var_name}.c
- * @brief LVGL sprite generated from {os.path.basename(png_file)}
- */
-
+    with open(output_c_filepath, 'w') as f:
+        f.write(f"""/** @file {output_c_filename} @brief LVGL sprite from {os.path.basename(png_file_path)} */
 #include "lvgl.h"
-#include "sprite_{var_name}.h"
+#include "{output_h_filename}" // Include its own header
 
-// Image data for {os.path.basename(png_file)}
 static const uint8_t sprite_{var_name}_map[] = {{
 """)
-        
-        # Process pixels
-        for y in range(height):
+        for y_coord in range(height):
             f.write("    ")
-            for x in range(width):
-                r, g, b, a = pixels[y, x]
-                
-                # Using BGRA order for LVGL ARGB8888 format (this works!)
-                # Each component is 8 bits (1 byte)
-                
-                # Output as individual bytes in BGRA order
-                f.write(f"{b}, {g}, {r}, {a},")
-                
-                if x < width - 1:
+            for x_coord in range(width):
+                r_val, g_val, b_val, a_val = pixels[y_coord, x_coord]
+                f.write(f"0x{b_val:02x}, 0x{g_val:02x}, 0x{r_val:02x}, 0x{a_val:02x},") # BGRA hex format
+                if x_coord < width - 1:
                     f.write(" ")
             f.write("\n")
-        
         f.write("};\n\n")
-        
-        # LVGL image descriptor - updated for LVGL 9.x
-        f.write(f"""// LVGL image descriptor
-const lv_img_dsc_t sprite_{var_name} = {{
-    .header = {{
-        .cf = LV_COLOR_FORMAT_ARGB8888,
-        .w = {width},
-        .h = {height},
-    }},
-    .data_size = {width * height * 4},
-    .data = sprite_{var_name}_map
-}};
+        f.write(f"""const lv_img_dsc_t sprite_{var_name} = {{
+    .header = {{ .cf = LV_COLOR_FORMAT_ARGB8888, .w = {width}, .h = {height} }},
+    .data_size = {width * height * 4}, .data = sprite_{var_name}_map }};
 """)
     
-    # Write header file
-    with open(output_h_file, 'w') as f:
-        f.write(f"""/**
- * @file sprite_{var_name}.h
- * @brief LVGL sprite generated from {os.path.basename(png_file)}
- */
-
+    with open(output_h_filepath, 'w') as f:
+        f.write(f"""/** @file {output_h_filename} @brief LVGL sprite from {os.path.basename(png_file_path)} */
 #pragma once
-
 #ifdef __cplusplus
 extern "C" {{
 #endif
-
 #include "lvgl.h"
-
-// Image descriptor declaration
 extern const lv_img_dsc_t sprite_{var_name};
-
 #ifdef __cplusplus
 }}
 #endif
 """)
-    
-    print(f"Generated {output_c_file} and {output_h_file}")
-    return var_name
-
-def create_dummy_sprite_files(output_dir, file_names):
-    """Create dummy sprite files when PIL is not installed"""
-    os.makedirs(output_dir, exist_ok=True)
-    sprite_names = []
-    
-    for file_name in file_names:
-        # Create a safe C variable name from the filename
-        base_name = os.path.splitext(os.path.basename(file_name))[0]
-        var_name = base_name.replace('-', '_').replace('.', '_')
-        sprite_names.append(var_name)
-        
-        # Create placeholder header file
-        output_h_file = os.path.join(output_dir, f"sprite_{var_name}.h")
-        with open(output_h_file, 'w') as f:
-            f.write(f"""/**
- * @file sprite_{var_name}.h
- * @brief LVGL sprite placeholder for {os.path.basename(file_name)}
- * This is a dummy sprite because PIL was not installed
- */
-
-#pragma once
-
-#ifdef __cplusplus
-extern "C" {{
-#endif
-
-#include "lvgl.h"
-
-// Dummy image descriptor declaration
-extern const lv_img_dsc_t sprite_{var_name};
-
-#ifdef __cplusplus
-}}
-#endif
-""")
-        
-        # Create placeholder C file with updated LVGL 9.x descriptor format
-        output_c_file = os.path.join(output_dir, f"sprite_{var_name}.c")
-        with open(output_c_file, 'w') as f:
-            f.write(f"""/**
- * @file sprite_{var_name}.c
- * @brief LVGL sprite placeholder for {os.path.basename(file_name)}
- * This is a dummy sprite because PIL was not installed
- */
-
-#include "lvgl.h"
-#include "sprite_{var_name}.h"
-
-// Dummy 16x16 image data (just a colored square)
-static const uint8_t sprite_{var_name}_map[] = {{
-    // 16x16 red square with alpha in BGRA format
-    0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,
-    0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,
-    0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,
-    0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF,  0x00, 0x00, 0xFF, 0xFF
-}};
-
-// LVGL image descriptor - updated for LVGL 9.x
-const lv_img_dsc_t sprite_{var_name} = {{
-    .header = {{
-        .cf = LV_COLOR_FORMAT_ARGB8888,
-        .w = 16,
-        .h = 16,
-    }},
-    .data_size = 16 * 16 * 4,
-    .data = sprite_{var_name}_map
-}};
-""")
-        
-        print(f"Generated placeholder {output_c_file} and {output_h_file}")
-    
-    return sprite_names
+    print(f"Generated {output_c_filepath} and {output_h_filepath}")
+    return var_name, output_h_filename
 
 def main():
-    print("PNG to LVGL Sprite Converter")
-    print("============================")
-    
-    # Check if PIL is installed and warn if not
+    print("PNG to LVGL Sprite Converter - v4 (Corrected String Formatting)")
+    print("===============================================================")
+
     if not HAS_PIL:
         print("\nWARNING: Python Imaging Library (PIL/Pillow) and numpy are not installed.")
         print("The script will create placeholder sprites instead of converting real images.")
-        print("\nTo install the required libraries, run:")
-        print("  python3 -m pip install --user pillow numpy")
-        print("or create a virtual environment:")
-        print("  python3 -m venv .venv")
-        print("  source .venv/bin/activate")
-        print("  pip install pillow numpy")
-        print("\nProceeding with placeholder sprites...\n")
-    
-    # Create output directory if it doesn't exist
-    output_dir = "include/sprites"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Find all PNG files in the sprites/walking directory
-    png_files = sorted(glob.glob("sprites/walking/*.png"))
-    
-    if not png_files:
-        print("No PNG files found in sprites/walking directory!")
-        sys.exit(1)
-    
-    print(f"Found {len(png_files)} PNG files to process")
-    
-    # Process each PNG file or create dummy files if PIL is not installed
-    sprite_names = []
-    if HAS_PIL:
-        for png_file in png_files:
-            var_name = png_to_c_array(png_file, output_dir)
-            if var_name:
-                sprite_names.append(var_name)
-    else:
-        sprite_names = create_dummy_sprite_files(output_dir, png_files)
-    
-    # Generate sprites.h file that includes all sprite headers
-    sprites_h_content = """/**
- * @file sprites.h
- * @brief Includes all LVGL sprite headers
- */
+        print("To install: python3 -m pip install --user pillow numpy\n")
 
-#ifndef LVGL_SPRITES_H
-#define LVGL_SPRITES_H
+    base_include_dir = "include/sprites"
+
+    # --- Walking Sprites ---
+    walking_sprites_output_dir = base_include_dir 
+    walking_png_source_dir = "sprites/walking"
+    walking_sprite_details = [] # List of (var_name, header_filename)
+
+    os.makedirs(walking_sprites_output_dir, exist_ok=True)
+    walking_png_files = sorted(glob.glob(os.path.join(walking_png_source_dir, "*.png")))
+
+    if not walking_png_files:
+        print(f"No PNG files found in {walking_png_source_dir} directory.")
+    else:
+        print(f"Processing {len(walking_png_files)} walking sprites from {walking_png_source_dir}...")
+        for png_file in walking_png_files:
+            var_name, header_filename = process_png_file(png_file, walking_sprites_output_dir)
+            if var_name:
+                walking_sprite_details.append((var_name, header_filename))
+
+    # --- Logo Sprite (Separate) ---
+    logo_sprite_output_dir = os.path.join(base_include_dir, "logo") # include/sprites/logo
+    logo_png_source_file = "sprites/logo/posthog-logo-white.png"
+    logo_var_name = None 
+
+    if os.path.exists(logo_png_source_file):
+        print(f"Processing logo sprite: {logo_png_source_file}...")
+        os.makedirs(logo_sprite_output_dir, exist_ok=True)
+        logo_var_name, _ = process_png_file(logo_png_source_file, logo_sprite_output_dir, "posthog_logo_white") 
+    else:
+        print(f"Logo file not found: {logo_png_source_file}. Skipping logo generation.")
+
+    # --- Generate sprites.h (for walking sprites ONLY) ---
+    walking_sprites_h_aggregator_path = os.path.join(walking_sprites_output_dir, "sprites.h")
+    
+    with open(walking_sprites_h_aggregator_path, 'w') as f:
+        f.write("""/** @file sprites.h @brief Includes headers for WALKING animation sprites ONLY. */
+#ifndef LVGL_WALKING_SPRITES_H
+#define LVGL_WALKING_SPRITES_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Include all sprite headers
-"""
-    for sprite_name in sprite_names:
-        sprites_h_content += f'#include "sprite_{sprite_name}.h"\n'
-    
-    # Add array of all sprites
-    sprites_h_content += """
+#include "lvgl.h"
+""") # This block is a raw string, no f-string needed.
+        if walking_sprite_details:
+            f.write("\n// Include walking sprite headers\n")
+            for _, header_filename in walking_sprite_details:
+                f.write(f'#include "{header_filename}"\n') # Simple f-string for include line
+        else:
+            f.write("\n// No walking sprites found or processed.\n")
+        
+        f.write("""
 // Array of all walking animation sprites
 extern const lv_img_dsc_t* walking_sprites[];
 extern const uint8_t walking_sprites_count;
@@ -250,38 +169,37 @@ extern const uint8_t walking_sprites_count;
 }
 #endif
 
-#endif /* LVGL_SPRITES_H */
-"""
-    
-    with open(os.path.join(output_dir, "sprites.h"), 'w') as f:
-        f.write(sprites_h_content)
-    
-    # Generate sprites.c file with the sprite array
-    sprites_c_content = """/**
- * @file sprites.c
- * @brief Contains arrays of sprite pointers
- */
+#endif /* LVGL_WALKING_SPRITES_H */
+""") # This block is also a raw string.
+    print(f"Generated walking sprites aggregator: {walking_sprites_h_aggregator_path}")
 
+    # --- Generate sprites.c (for walking sprites ONLY) ---
+    walking_sprites_c_aggregator_path = os.path.join(walking_sprites_output_dir, "sprites.c")
+    with open(walking_sprites_c_aggregator_path, 'w') as f:
+        f.write("""/** @file sprites.c @brief Defines the walking_sprites array (WALKING animation ONLY). */
 #include "sprites.h"
 
-// Array of all walking animation sprites
+""") # Raw string block.
+        if walking_sprite_details:
+            f.write("""// Define the walking_sprites array
 const lv_img_dsc_t* walking_sprites[] = {
-"""
+""") # Raw string block.
+            for var_name, _ in walking_sprite_details:
+                f.write(f"    &sprite_{var_name},\n") # Simple f-string
+            f.write("};\n\n") # Raw string
+            f.write(f"const uint8_t walking_sprites_count = {len(walking_sprite_details)};\n") # Simple f-string
+        else:
+            f.write("""// No walking sprites processed, array is empty.
+const lv_img_dsc_t* walking_sprites[] = { NULL };
+const uint8_t walking_sprites_count = 0;
+""") # Raw string block.
+    print(f"Generated walking sprites C source: {walking_sprites_c_aggregator_path}")
     
-    for sprite_name in sprite_names:
-        sprites_c_content += f'    &sprite_{sprite_name},\n'
-    
-    sprites_c_content += """};
+    total_sprites = len(walking_sprite_details) + (1 if logo_var_name else 0)
+    print(f"Successfully processed {total_sprites} sprites in total.")
+    if logo_var_name:
+        print(f"  - Logo sprite '{logo_var_name}' generated in {logo_sprite_output_dir}")
+    print(f"  - {len(walking_sprite_details)} walking sprites generated in {walking_sprites_output_dir}")
 
-// Number of sprites in the walking animation
-const uint8_t walking_sprites_count = sizeof(walking_sprites) / sizeof(walking_sprites[0]);
-"""
-    
-    with open(os.path.join(output_dir, "sprites.c"), 'w') as f:
-        f.write(sprites_c_content)
-    
-    print(f"Generated {output_dir}/sprites.h and {output_dir}/sprites.c")
-    print(f"Successfully processed {len(sprite_names)} sprites")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main() 
