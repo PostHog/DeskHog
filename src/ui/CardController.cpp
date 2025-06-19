@@ -13,6 +13,7 @@ CardController::CardController(
     ConfigManager& configManager,
     WiFiInterface& wifiInterface,
     PostHogClient& posthogClient,
+    HomeAssistantClient& homeAssistantClient,
     EventQueue& eventQueue
 ) : screen(screen),
     screenWidth(screenWidth),
@@ -20,6 +21,7 @@ CardController::CardController(
     configManager(configManager),
     wifiInterface(wifiInterface),
     posthogClient(posthogClient),
+    homeAssistantClient(homeAssistantClient),
     eventQueue(eventQueue),
     cardStack(nullptr),
     provisioningCard(nullptr),
@@ -205,6 +207,55 @@ void CardController::createInsightCard(const String& insightId) {
 
         // Request immediate data for this insight now that it's set up
         posthogClient.requestInsightData(insightId);
+    });
+}
+
+// Create a Home Assistant card and add it to the UI
+void CardController::createHomeAssistantCard(const String& entityId) {
+    // Log current task and core
+    Serial.printf("[CardCtrl-DEBUG] createHomeAssistantCard called from Core: %d, Task: %s\n", 
+                  xPortGetCoreID(), 
+                  pcTaskGetTaskName(NULL));
+
+    // Dispatch the actual card creation and LVGL work to the LVGL task
+    dispatchToLVGLTask([this, entityId]() {
+        Serial.printf("[CardCtrl-DEBUG] LVGL Task creating card for entity: %s from Core: %d, Task: %s\n", 
+                      entityId.c_str(), xPortGetCoreID(), pcTaskGetTaskName(NULL));
+
+        if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+            Serial.println("[CardCtrl-ERROR] Failed to take mutex in LVGL task for HA card creation.");
+            return;
+        }
+
+        // Create new Home Assistant card using full screen dimensions
+        HomeAssistantCard* newCard = new HomeAssistantCard(
+            screen,              // LVGL parent object
+            configManager,       // Dependencies
+            eventQueue,
+            entityId,
+            screenWidth,         // Dimensions
+            screenHeight
+        );
+
+        if (!newCard || !newCard->getCardObject()) {
+            Serial.printf("[CardCtrl-ERROR] Failed to create HomeAssistantCard or its LVGL object for ID: %s\n", entityId.c_str());
+            displayInterface->giveMutex();
+            delete newCard; // Clean up if partially created
+            return;
+        }
+
+        // Add to navigation stack
+        cardStack->addCard(newCard->getCardObject());
+
+        // Add to our list of Home Assistant cards
+        homeAssistantCards.push_back(newCard);
+        
+        Serial.printf("[CardCtrl-DEBUG] HomeAssistantCard for ID: %s created and added to stack.\n", entityId.c_str());
+
+        displayInterface->giveMutex();
+
+        // Request immediate data for this entity now that it's set up
+        homeAssistantClient.requestEntityState(entityId);
     });
 }
 
@@ -484,4 +535,4 @@ void CardController::handleCardTitleUpdated(const Event& event) {
             break;
         }
     }
-} 
+}

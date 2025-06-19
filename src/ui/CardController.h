@@ -7,9 +7,11 @@
 #include "ConfigManager.h"
 #include "hardware/WifiInterface.h"
 #include "posthog/PostHogClient.h"
+#include "homeassistant/HomeAssistantClient.h"
 #include "ui/CardNavigationStack.h"
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
+#include "ui/HomeAssistantCard.h"
 #include "ui/FriendCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
@@ -44,6 +46,7 @@ public:
         ConfigManager& configManager,
         WiFiInterface& wifiInterface,
         PostHogClient& posthogClient,
+        HomeAssistantClient& homeAssistantClient,
         EventQueue& eventQueue
     );
     
@@ -71,6 +74,12 @@ public:
     void createInsightCard(const String& insightId);
     
     /**
+     * @brief Create and add a new Home Assistant card to the UI
+     * @param entityId Home Assistant entity ID (e.g., "sensor.temperature")
+     */
+    void createHomeAssistantCard(const String& entityId);
+    
+    /**
      * @brief Get the card navigation stack
      * @return Pointer to card navigation stack
      */
@@ -93,6 +102,12 @@ public:
      * @return Reference to vector of insight card pointers
      */
     std::vector<InsightCard*>& getInsightCards() { return insightCards; }
+
+    /**
+     * @brief Get all Home Assistant cards
+     * @return Reference to vector of Home Assistant card pointers
+     */
+    std::vector<HomeAssistantCard*>& getHomeAssistantCards() { return homeAssistantCards; }
 
     /**
      * @brief Get the display interface
@@ -152,16 +167,18 @@ private:
     uint16_t screenHeight;         ///< Screen height in pixels
     
     // System components
-    ConfigManager& configManager;   ///< Configuration manager reference
-    WiFiInterface& wifiInterface;  ///< WiFi interface reference
-    PostHogClient& posthogClient;  ///< PostHog client reference
-    EventQueue& eventQueue;        ///< Event queue reference
+    ConfigManager& configManager;              ///< Configuration manager reference
+    WiFiInterface& wifiInterface;              ///< WiFi interface reference
+    PostHogClient& posthogClient;              ///< PostHog client reference
+    HomeAssistantClient& homeAssistantClient; ///< Home Assistant client reference
+    EventQueue& eventQueue;                   ///< Event queue reference
     
     // UI Components
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
     FriendCard* animationCard;       ///< Card for animations
     std::vector<InsightCard*> insightCards; ///< Collection of insight cards
+    std::vector<HomeAssistantCard*> homeAssistantCards; ///< Collection of Home Assistant cards
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
@@ -208,4 +225,4 @@ private:
      * @param newConfigs New card configuration from storage
      */
     void reconcileCards(const std::vector<CardConfig>& newConfigs);
-}; 
+};

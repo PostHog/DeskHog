@@ -28,6 +28,7 @@
 #include "ui/InsightCard.h"
 #include "hardware/Input.h"
 #include "posthog/PostHogClient.h"
+#include "homeassistant/HomeAssistantClient.h"
 #include "Style.h"
 #include "esp_heap_caps.h" // For PSRAM management
 #include "ui/CardController.h"

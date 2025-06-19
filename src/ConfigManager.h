@@ -114,6 +114,38 @@ public:
      */
     void clearApiKey();
 
+    // Home Assistant Configuration
+    /**
+     * @brief Store Home Assistant URL
+     * @param url The Home Assistant URL to store
+     * @return true if saved successfully, false otherwise
+     */
+    bool setHomeAssistantUrl(const String& url);
+
+    /**
+     * @brief Retrieve stored Home Assistant URL
+     * @return The Home Assistant URL or empty string if not set
+     */
+    String getHomeAssistantUrl();
+
+    /**
+     * @brief Store Home Assistant API key
+     * @param apiKey The Home Assistant API key to store
+     * @return true if saved successfully, false otherwise
+     */
+    bool setHomeAssistantApiKey(const String& apiKey);
+
+    /**
+     * @brief Retrieve stored Home Assistant API key
+     * @return The Home Assistant API key or empty string if not set
+     */
+    String getHomeAssistantApiKey();
+
+    /**
+     * @brief Remove stored Home Assistant configuration
+     */
+    void clearHomeAssistantConfig();
+
     /**
      * @brief Store insight configuration
      * @param id Unique insight identifier
@@ -205,6 +237,10 @@ private:
     const char* _teamIdKey = "team_id";           ///< Key for stored team ID
     const char* _apiKeyKey = "api_key";           ///< Key for stored API key
 
+    // Storage keys for Home Assistant configuration
+    const char* _haUrlKey = "ha_url";             ///< Key for stored Home Assistant URL
+    const char* _haApiKeyKey = "ha_api_key";      ///< Key for stored Home Assistant API key
+
     // Storage size limits
     /** @brief Maximum length for WiFi SSID (per IEEE 802.11 spec) */
     static const size_t MAX_SSID_LENGTH = 32;
@@ -214,6 +250,10 @@ private:
     static const size_t MAX_INSIGHT_LENGTH = 1024;
     /** @brief Maximum length for API key */
     static const size_t MAX_API_KEY_LENGTH = 64;
+    /** @brief Maximum length for Home Assistant URL */
+    static const size_t MAX_HA_URL_LENGTH = 256;
+    /** @brief Maximum length for Home Assistant API key */
+    static const size_t MAX_HA_API_KEY_LENGTH = 64;
     /** @brief Maximum length for insight identifier */
     static const size_t MAX_INSIGHT_ID_LENGTH = 64;
 
