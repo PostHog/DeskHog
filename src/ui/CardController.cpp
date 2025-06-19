@@ -52,6 +52,12 @@ CardController::~CardController() {
     }
     insightCards.clear();
     
+    // Clean up Home Assistant cards
+    for (auto* card : homeAssistantCards) {
+        delete card;
+    }
+    homeAssistantCards.clear();
+    
     // Release mutex if we took it
     if (displayInterface && displayInterface->getMutexPtr()) {
         xSemaphoreGive(*(displayInterface->getMutexPtr()));
@@ -385,6 +391,43 @@ void CardController::initializeCardTypes() {
         return nullptr;
     };
     registerCardType(friendDef);
+
+    // Register HOME_ASSISTANT card type
+    CardDefinition homeAssistantDef;
+    homeAssistantDef.type = CardType::HOME_ASSISTANT;
+    homeAssistantDef.name = "Home Assistant entity";
+    homeAssistantDef.allowMultiple = true;
+    homeAssistantDef.needsConfigInput = true;
+    homeAssistantDef.configInputLabel = "Entity ID";
+    homeAssistantDef.uiDescription = "Monitor Home Assistant sensors, switches, and devices";
+    homeAssistantDef.factory = [this](const String& configValue) -> lv_obj_t* {
+        // Create new Home Assistant card using the entity ID
+        HomeAssistantCard* newCard = new HomeAssistantCard(
+            screen,
+            configManager,
+            eventQueue,
+            configValue,
+            screenWidth,
+            screenHeight
+        );
+        
+        if (newCard && newCard->getCardObject()) {
+            // Add to our list of cards
+            homeAssistantCards.push_back(newCard);
+            
+            // Request data for this entity immediately
+            homeAssistantClient.requestEntityState(configValue);
+            Serial.printf("Requested Home Assistant entity data for: %s\n", configValue.c_str());
+            
+            return newCard->getCardObject();
+        }
+        
+        delete newCard;
+        return nullptr;
+    };
+    registerCardType(homeAssistantDef);
+
+    
 }
 
 void CardController::handleCardConfigChanged() {
@@ -423,6 +466,15 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
             delete card;
         }
         insightCards.clear();
+        
+        // Remove existing Home Assistant cards
+        for (auto* card : homeAssistantCards) {
+            if (card && card->getCardObject()) {
+                cardStack->removeCard(card->getCardObject());
+            }
+            delete card;
+        }
+        homeAssistantCards.clear();
         
         // Remove existing animation card
         if (animationCard && animationCard->getCard()) {
@@ -521,7 +573,8 @@ void CardController::dispatchToLVGLTask(std::function<void()> update_func, bool 
 void CardController::handleCardTitleUpdated(const Event& event) {
     // Find and update the card configuration with the new title
     for (auto& cardConfig : currentCardConfigs) {
-        if (cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) {
+        if ((cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) ||
+            (cardConfig.type == CardType::HOME_ASSISTANT && cardConfig.config == event.insightId)) {
             // Update the name with the new title
             if (cardConfig.name != event.title) {
                 cardConfig.name = event.title;
@@ -529,7 +582,8 @@ void CardController::handleCardTitleUpdated(const Event& event) {
                 // Save the updated configuration to persistent storage
                 configManager.saveCardConfigs(currentCardConfigs);
                 
-                Serial.printf("Updated card title for insight %s to: %s\n", 
+                Serial.printf("Updated card title for %s %s to: %s\n", 
+                             cardTypeToString(cardConfig.type).c_str(),
                              event.insightId.c_str(), event.title.c_str());
             }
             break;

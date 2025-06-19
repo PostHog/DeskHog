@@ -253,7 +253,7 @@ private:
     /** @brief Maximum length for Home Assistant URL */
     static const size_t MAX_HA_URL_LENGTH = 256;
     /** @brief Maximum length for Home Assistant API key */
-    static const size_t MAX_HA_API_KEY_LENGTH = 64;
+    static const size_t MAX_HA_API_KEY_LENGTH = 256;
     /** @brief Maximum length for insight identifier */
     static const size_t MAX_INSIGHT_ID_LENGTH = 64;
 

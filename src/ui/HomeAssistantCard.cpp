@@ -16,6 +16,9 @@ HomeAssistantCard::HomeAssistantCard(lv_obj_t* parent, ConfigManager& config, Ev
     , _content_container(nullptr)
     , _current_type(HomeAssistantParser::EntityType::ENTITY_NOT_SUPPORTED) {
     
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Creating HomeAssistant card with dimensions %dx%d\n", 
+                  _entity_id.c_str(), width, height);
+    
     _card = lv_obj_create(parent);
     if (!_card) {
         Serial.printf("[HomeAssistantCard-%s] CRITICAL: Failed to create card base object!\n", _entity_id.c_str());
@@ -92,6 +95,9 @@ HomeAssistantCard::HomeAssistantCard(lv_obj_t* parent, ConfigManager& config, Ev
             this->onEvent(event);
         }
     });
+    
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Card created successfully, subscribed to HA_ENTITY_STATE_RECEIVED events\n", 
+                  _entity_id.c_str());
 }
 
 HomeAssistantCard::~HomeAssistantCard() {
@@ -105,11 +111,17 @@ HomeAssistantCard::~HomeAssistantCard() {
 }
 
 void HomeAssistantCard::onEvent(const Event& event) {
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Event received - type: %d, entityId: %s, dataLength: %d\n", 
+                  _entity_id.c_str(), (int)event.type, event.insightId.c_str(), event.jsonData.length());
+    
     std::shared_ptr<HomeAssistantParser> parser = nullptr;
     if (event.jsonData.length() > 0) {
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: JSON data preview: %.100s%s\n", 
+                      _entity_id.c_str(), event.jsonData.c_str(), 
+                      event.jsonData.length() > 100 ? "..." : "");
         parser = std::make_shared<HomeAssistantParser>(event.jsonData.c_str());
     } else {
-        Serial.printf("[HomeAssistantCard-%s] Event received with no JSON data.\n", _entity_id.c_str());
+        Serial.printf("[HomeAssistantCard-%s] ERROR: Event received with no JSON data.\n", _entity_id.c_str());
         handleParsedData(nullptr);
         return;
     }
@@ -117,8 +129,13 @@ void HomeAssistantCard::onEvent(const Event& event) {
 }
 
 void HomeAssistantCard::handleParsedData(std::shared_ptr<HomeAssistantParser> parser) {
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: handleParsedData called\n", _entity_id.c_str());
+    
     if (!parser || !parser->isValid()) {
-        Serial.printf("[HomeAssistantCard-%s] Invalid data or parse error.\n", _entity_id.c_str());
+        Serial.printf("[HomeAssistantCard-%s] ERROR: Invalid data or parse error. Parser: %s, Valid: %s\n", 
+                      _entity_id.c_str(), 
+                      parser ? "exists" : "null",
+                      parser ? (parser->isValid() ? "true" : "false") : "N/A");
         if (globalUIDispatch) {
             globalUIDispatch([this]() {
                 if(isValidObject(_title_label)) lv_label_set_text(_title_label, "Data Error");
@@ -131,7 +148,7 @@ void HomeAssistantCard::handleParsedData(std::shared_ptr<HomeAssistantParser> pa
     }
 
     if (!parser->isAvailable()) {
-        Serial.printf("[HomeAssistantCard-%s] Entity is unavailable.\n", _entity_id.c_str());
+        Serial.printf("[HomeAssistantCard-%s] WARNING: Entity is unavailable.\n", _entity_id.c_str());
         if (globalUIDispatch) {
             globalUIDispatch([this]() {
                 if(isValidObject(_title_label)) lv_label_set_text(_title_label, "Unavailable");
@@ -143,9 +160,14 @@ void HomeAssistantCard::handleParsedData(std::shared_ptr<HomeAssistantParser> pa
     }
 
     HomeAssistantParser::EntityType new_entity_type = parser->getEntityType();
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Entity type detected: %d\n", _entity_id.c_str(), (int)new_entity_type);
+    
     char friendly_name_buffer[64];
     if (!parser->getFriendlyName(friendly_name_buffer, sizeof(friendly_name_buffer))) {
         strcpy(friendly_name_buffer, _entity_id.c_str());
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: No friendly name found, using entity ID\n", _entity_id.c_str());
+    } else {
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Friendly name: %s\n", _entity_id.c_str(), friendly_name_buffer);
     }
     String new_title(friendly_name_buffer);
 
@@ -153,30 +175,43 @@ void HomeAssistantCard::handleParsedData(std::shared_ptr<HomeAssistantParser> pa
     if (_current_title != new_title) {
         _current_title = new_title;
         _event_queue.publishEvent(Event::createTitleUpdateEvent(_entity_id, new_title));
-        Serial.printf("[HomeAssistantCard-%s] Title updated to: %s\n", _entity_id.c_str(), new_title.c_str());
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Title updated to: %s\n", _entity_id.c_str(), new_title.c_str());
+    } else {
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Title unchanged: %s\n", _entity_id.c_str(), new_title.c_str());
     }
+
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Dispatching UI update for entity type %d\n", 
+                  _entity_id.c_str(), (int)new_entity_type);
 
     if (globalUIDispatch) {
         globalUIDispatch([this, new_entity_type, new_title, parser, id = _entity_id]() mutable {
+            Serial.printf("[HomeAssistantCard-%s] DEBUG: UI update lambda executing\n", id.c_str());
+            
             if (isValidObject(_title_label)) {
                 lv_label_set_text(_title_label, new_title.c_str());
+                Serial.printf("[HomeAssistantCard-%s] DEBUG: Title label updated\n", id.c_str());
+            } else {
+                Serial.printf("[HomeAssistantCard-%s] ERROR: Title label is invalid!\n", id.c_str());
             }
 
             _current_type = new_entity_type;
 
             switch (new_entity_type) {
                 case HomeAssistantParser::EntityType::NUMERIC_SENSOR:
+                    Serial.printf("[HomeAssistantCard-%s] DEBUG: Updating numeric display\n", id.c_str());
                     updateNumericDisplay(*parser, new_title);
                     break;
                 case HomeAssistantParser::EntityType::BINARY_SENSOR:
+                    Serial.printf("[HomeAssistantCard-%s] DEBUG: Updating binary display\n", id.c_str());
                     updateBinaryDisplay(*parser, new_title);
                     break;
                 case HomeAssistantParser::EntityType::SWITCH:
                 case HomeAssistantParser::EntityType::LIGHT:
+                    Serial.printf("[HomeAssistantCard-%s] DEBUG: Updating switch/light display\n", id.c_str());
                     updateSwitchDisplay(*parser, new_title);
                     break;
                 default:
-                    Serial.printf("[HomeAssistantCard-%s] Unsupported entity type %d.\n", 
+                    Serial.printf("[HomeAssistantCard-%s] ERROR: Unsupported entity type %d.\n", 
                         id.c_str(), (int)new_entity_type);
                     if(isValidObject(_value_label)) lv_label_set_text(_value_label, "Unsupported");
                     if(isValidObject(_unit_label)) lv_label_set_text(_unit_label, "");
@@ -184,30 +219,49 @@ void HomeAssistantCard::handleParsedData(std::shared_ptr<HomeAssistantParser> pa
             }
 
         }, true);
+    } else {
+        Serial.printf("[HomeAssistantCard-%s] ERROR: globalUIDispatch is null!\n", _entity_id.c_str());
     }
 }
 
 void HomeAssistantCard::updateNumericDisplay(const HomeAssistantParser& parser, const String& friendly_name) {
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: updateNumericDisplay called\n", _entity_id.c_str());
+    
     if (parser.isNumericState()) {
         double value = parser.getNumericState();
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Numeric value: %f\n", _entity_id.c_str(), value);
+        
         char value_buffer[32];
         formatNumericValue(value, value_buffer, sizeof(value_buffer));
         
         char unit_buffer[16];
         parser.getUnitOfMeasurement(unit_buffer, sizeof(unit_buffer));
         
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Formatted value: '%s', unit: '%s'\n", 
+                      _entity_id.c_str(), value_buffer, unit_buffer);
+        
         if (isValidObject(_value_label)) {
             lv_label_set_text(_value_label, value_buffer);
+            Serial.printf("[HomeAssistantCard-%s] DEBUG: Value label updated\n", _entity_id.c_str());
+        } else {
+            Serial.printf("[HomeAssistantCard-%s] ERROR: Value label is invalid!\n", _entity_id.c_str());
         }
         if (isValidObject(_unit_label)) {
             lv_label_set_text(_unit_label, unit_buffer);
+            Serial.printf("[HomeAssistantCard-%s] DEBUG: Unit label updated\n", _entity_id.c_str());
+        } else {
+            Serial.printf("[HomeAssistantCard-%s] ERROR: Unit label is invalid!\n", _entity_id.c_str());
         }
         
-        Serial.printf("[HomeAssistantCard-%s] Updated numeric: %s %s\n", 
+        Serial.printf("[HomeAssistantCard-%s] INFO: Updated numeric: %s %s\n", 
                      _entity_id.c_str(), value_buffer, unit_buffer);
     } else {
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Non-numeric state, getting state string\n", _entity_id.c_str());
+        
         char state_buffer[32];
         parser.getStateString(state_buffer, sizeof(state_buffer));
+        
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: State string: '%s'\n", _entity_id.c_str(), state_buffer);
         
         if (isValidObject(_value_label)) {
             lv_label_set_text(_value_label, state_buffer);
@@ -219,8 +273,12 @@ void HomeAssistantCard::updateNumericDisplay(const HomeAssistantParser& parser, 
 }
 
 void HomeAssistantCard::updateBinaryDisplay(const HomeAssistantParser& parser, const String& friendly_name) {
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: updateBinaryDisplay called\n", _entity_id.c_str());
+    
     char state_buffer[32];
     parser.getStateString(state_buffer, sizeof(state_buffer));
+    
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Raw binary state: '%s'\n", _entity_id.c_str(), state_buffer);
     
     // Convert common binary states to more user-friendly display
     String display_state = String(state_buffer);
@@ -234,14 +292,19 @@ void HomeAssistantCard::updateBinaryDisplay(const HomeAssistantParser& parser, c
         display_state = "CLOSED";
     }
     
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Display state: '%s'\n", _entity_id.c_str(), display_state.c_str());
+    
     if (isValidObject(_value_label)) {
         lv_label_set_text(_value_label, display_state.c_str());
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Binary value label updated\n", _entity_id.c_str());
+    } else {
+        Serial.printf("[HomeAssistantCard-%s] ERROR: Binary value label is invalid!\n", _entity_id.c_str());
     }
     if (isValidObject(_unit_label)) {
         lv_label_set_text(_unit_label, "");
     }
     
-    Serial.printf("[HomeAssistantCard-%s] Updated binary: %s\n", 
+    Serial.printf("[HomeAssistantCard-%s] INFO: Updated binary: %s\n", 
                  _entity_id.c_str(), display_state.c_str());
 }
 

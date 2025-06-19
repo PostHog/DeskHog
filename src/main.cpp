@@ -62,6 +62,7 @@ WiFiInterface* wifiInterface;
 CaptivePortal* captivePortal;
 CardController* cardController; // Replace individual card objects with controller
 PostHogClient* posthogClient;
+HomeAssistantClient* homeAssistantClient;
 EventQueue* eventQueue; // Add global EventQueue
 NeoPixelController* neoPixelController;  // Renamed from neoPixelManager
 OtaManager* otaManager;
@@ -70,6 +71,7 @@ OtaManager* otaManager;
 TaskHandle_t wifiTask;
 TaskHandle_t portalTask;
 TaskHandle_t insightTask;
+TaskHandle_t homeAssistantTask;
 TaskHandle_t neoPixelTask;
 
 // WiFi connection timeout in milliseconds
@@ -99,6 +101,14 @@ void portalTaskFunction(void* parameter) {
 void insightTaskFunction(void* parameter) {
     while (1) {
         posthogClient->process();  // Use the global instance
+        vTaskDelay(pdMS_TO_TICKS(100));  // Check every 100ms
+    }
+}
+
+// HomeAssistant processing task
+void homeAssistantTaskFunction(void* parameter) {
+    while (1) {
+        homeAssistantClient->process();  // Use the global instance
         vTaskDelay(pdMS_TO_TICKS(100));  // Check every 100ms
     }
 }
@@ -239,6 +249,9 @@ void setup() {
     
     // Initialize PostHog client with event queue
     posthogClient = new PostHogClient(*configManager, *eventQueue);
+
+    // Initialize Home Assistant client
+    homeAssistantClient = new HomeAssistantClient(*configManager, *eventQueue);
     
     // Initialize display manager
     displayInterface = new DisplayInterface(
@@ -262,6 +275,7 @@ void setup() {
         *configManager,
         *wifiInterface,
         *posthogClient,
+        *homeAssistantClient,
         *eventQueue
     );
     
@@ -305,6 +319,17 @@ void setup() {
         NULL,
         1,
         &insightTask,
+        0
+    );
+
+    // Create task for Home Assistant processing
+    xTaskCreatePinnedToCore(
+        homeAssistantTaskFunction,
+        "homeAssistantTask",
+        8192,
+        NULL,
+        1,
+        &homeAssistantTask,
         0
     );
     

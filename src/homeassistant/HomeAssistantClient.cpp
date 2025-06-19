@@ -190,6 +190,7 @@ bool HomeAssistantClient::fetchEntityState(const String& entity_id, String& resp
     has_active_request = true;
     
     String url = buildEntityStateUrl(entity_id);
+    Serial.printf("Fetching entity state for %s from %s\n", entity_id.c_str(), url.c_str());
     
     _http.begin(url);
     _http.addHeader("Authorization", "Bearer " + _config.getHomeAssistantApiKey());

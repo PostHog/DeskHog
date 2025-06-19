@@ -135,6 +135,68 @@ function saveDeviceConfig() {
     return false;
 }
 
+// Handle Home Assistant config form submission
+function saveHomeAssistantConfig() {
+    const form = document.getElementById('ha-form');
+    const formData = new FormData(form);
+    const globalActionStatusEl = document.getElementById('global-action-status');
+    
+    fetch('/save-ha-config', { 
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data && data.success) {
+            console.log("Home Assistant config saved successfully");
+            if (globalActionStatusEl) {
+                globalActionStatusEl.textContent = "Home Assistant configuration saved successfully.";
+                globalActionStatusEl.className = 'status-message success';
+                globalActionStatusEl.style.display = 'block';
+                setTimeout(() => {
+                    if (globalActionStatusEl.textContent === "Home Assistant configuration saved successfully.") {
+                        globalActionStatusEl.style.display = 'none';
+                        globalActionStatusEl.textContent = '';
+                        globalActionStatusEl.className = 'status-message';
+                    }
+                }, 5000);
+            }
+        } else {
+            const errorMessage = (data && data.message) ? data.message : "Failed to save Home Assistant configuration.";
+            console.error("Failed to save Home Assistant config:", errorMessage);
+            if (globalActionStatusEl) {
+                globalActionStatusEl.textContent = errorMessage;
+                globalActionStatusEl.className = 'status-message error';
+                globalActionStatusEl.style.display = 'block';
+                setTimeout(() => {
+                    if (globalActionStatusEl.className.includes('error')) {
+                        globalActionStatusEl.style.display = 'none';
+                        globalActionStatusEl.textContent = '';
+                        globalActionStatusEl.className = 'status-message';
+                    }
+                }, 7000);
+            }
+        }
+    })
+    .catch(() => {
+        console.error("Communication error saving Home Assistant config.");
+        if (globalActionStatusEl) {
+            globalActionStatusEl.textContent = "Communication error saving Home Assistant config.";
+            globalActionStatusEl.className = 'status-message error';
+            globalActionStatusEl.style.display = 'block';
+            setTimeout(() => {
+                if (globalActionStatusEl.className.includes('error')) {
+                    globalActionStatusEl.style.display = 'none';
+                    globalActionStatusEl.textContent = '';
+                    globalActionStatusEl.className = 'status-message';
+                }
+            }, 7000);
+        }
+    });
+    
+    return false;
+}
+
 // Toggle API key visibility
 function toggleApiKeyVisibility() {
     const apiKeyInput = document.getElementById('apiKey');
@@ -775,6 +837,11 @@ function pollApiStatus() {
                 _updateDeviceConfigUI(data.device_config);
             }
 
+            // 3a. Update Home Assistant Config Info
+            if (data.ha_config) {
+                _updateHomeAssistantConfigUI(data.ha_config);
+            }
+
             // 4. Update Insights List (legacy - remove if cards are working)
             if (data.insights) {
                 _updateInsightsListUI(data.insights);
@@ -819,6 +886,20 @@ function _updateDeviceConfigUI(config) {
     }
 }
 
+// Load current Home Assistant configuration - UI update part will be in pollApiStatus
+let initialHaConfigLoaded = false;
+function _updateHomeAssistantConfigUI(config) {
+    if (!initialHaConfigLoaded) {
+        if (config.ha_url !== undefined) {
+            document.getElementById('haUrl').value = config.ha_url;
+        }
+        if (config.ha_api_key_display !== undefined) { 
+            document.getElementById('haApiKey').value = config.ha_api_key_display;
+        }
+        initialHaConfigLoaded = true;
+    }
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     const hash = window.location.hash.substr(1);
@@ -852,7 +933,7 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             loadConfiguredCards();
         }, 500);
-    }, 1000);
+    }, 10000);
 });
 
 // Enum for OtaManager::UpdateStatus::State (mirror from C++)
