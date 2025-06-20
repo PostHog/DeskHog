@@ -64,6 +64,9 @@ HomeAssistantParser::EntityType HomeAssistantParser::getEntityType() const {
     else if (strncmp(entity_id, "light.", 6) == 0) {
         return EntityType::LIGHT;
     }
+    else if (strncmp(entity_id, "cover.", 6) == 0) {
+        return EntityType::COVER;
+    }
 
     return EntityType::ENTITY_NOT_SUPPORTED;
 }
@@ -189,4 +192,64 @@ bool HomeAssistantParser::copyJsonString(const char* value, char* buffer, size_t
     
     strcpy(buffer, value);
     return true;
+}
+
+int HomeAssistantParser::getCoverPosition() const {
+    if (!_valid || getEntityType() != EntityType::COVER) return -1;
+    
+    // Check for current_position attribute
+    if (_doc["attributes"]["current_position"].is<int>()) {
+        return _doc["attributes"]["current_position"].as<int>();
+    }
+    
+    // Some covers use position instead of current_position
+    if (_doc["attributes"]["position"].is<int>()) {
+        return _doc["attributes"]["position"].as<int>();
+    }
+    
+    return -1;
+}
+
+int HomeAssistantParser::getCoverTiltPosition() const {
+    if (!_valid || getEntityType() != EntityType::COVER) return -1;
+    
+    // Check for current_tilt_position attribute
+    if (_doc["attributes"]["current_tilt_position"].is<int>()) {
+        return _doc["attributes"]["current_tilt_position"].as<int>();
+    }
+    
+    // Some covers use tilt_position instead of current_tilt_position
+    if (_doc["attributes"]["tilt_position"].is<int>()) {
+        return _doc["attributes"]["tilt_position"].as<int>();
+    }
+    
+    return -1;
+}
+
+bool HomeAssistantParser::isCoverOpening() const {
+    if (!_valid || getEntityType() != EntityType::COVER) return false;
+    
+    const char* state = _doc["state"];
+    return state && strcmp(state, "opening") == 0;
+}
+
+bool HomeAssistantParser::isCoverClosing() const {
+    if (!_valid || getEntityType() != EntityType::COVER) return false;
+    
+    const char* state = _doc["state"];
+    return state && strcmp(state, "closing") == 0;
+}
+
+bool HomeAssistantParser::isCoverOpen() const {
+    if (!_valid || getEntityType() != EntityType::COVER) return false;
+    
+    const char* state = _doc["state"];
+    return state && strcmp(state, "open") == 0;
+}
+
+bool HomeAssistantParser::isCoverClosed() const {
+    if (!_valid || getEntityType() != EntityType::COVER) return false;
+    
+    const char* state = _doc["state"];
+    return state && strcmp(state, "closed") == 0;
 }

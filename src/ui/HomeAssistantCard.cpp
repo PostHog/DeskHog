@@ -210,6 +210,10 @@ void HomeAssistantCard::handleParsedData(std::shared_ptr<HomeAssistantParser> pa
                     Serial.printf("[HomeAssistantCard-%s] DEBUG: Updating switch/light display\n", id.c_str());
                     updateSwitchDisplay(*parser, new_title);
                     break;
+                case HomeAssistantParser::EntityType::COVER:
+                    Serial.printf("[HomeAssistantCard-%s] DEBUG: Updating cover display\n", id.c_str());
+                    updateCoverDisplay(*parser, new_title);
+                    break;
                 default:
                     Serial.printf("[HomeAssistantCard-%s] ERROR: Unsupported entity type %d.\n", 
                         id.c_str(), (int)new_entity_type);
@@ -329,6 +333,53 @@ void HomeAssistantCard::updateSwitchDisplay(const HomeAssistantParser& parser, c
     
     Serial.printf("[HomeAssistantCard-%s] Updated switch/light: %s\n", 
                  _entity_id.c_str(), display_state.c_str());
+}
+
+void HomeAssistantCard::updateCoverDisplay(const HomeAssistantParser& parser, const String& friendly_name) {
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: updateCoverDisplay called\n", _entity_id.c_str());
+    
+    char state_buffer[32];
+    parser.getStateString(state_buffer, sizeof(state_buffer));
+    
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Raw cover state: '%s'\n", _entity_id.c_str(), state_buffer);
+    
+    // Check if we have position information
+    int position = parser.getCoverPosition();
+    String display_value;
+    
+    if (position >= 0) {
+        // Show position percentage if available
+        display_value = String(position) + "%";
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Cover position: %d%%\n", _entity_id.c_str(), position);
+    } else {
+        // Fall back to state display
+        String display_state = String(state_buffer);
+        if (display_state == "open") {
+            display_state = "OPEN";
+        } else if (display_state == "closed") {
+            display_state = "CLOSED";
+        } else if (display_state == "opening") {
+            display_state = "OPENING";
+        } else if (display_state == "closing") {
+            display_state = "CLOSING";
+        }
+        display_value = display_state;
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Cover state: '%s'\n", _entity_id.c_str(), display_state.c_str());
+    }
+    
+    if (isValidObject(_value_label)) {
+        lv_label_set_text(_value_label, display_value.c_str());
+        Serial.printf("[HomeAssistantCard-%s] DEBUG: Cover value label updated\n", _entity_id.c_str());
+    } else {
+        Serial.printf("[HomeAssistantCard-%s] ERROR: Cover value label is invalid!\n", _entity_id.c_str());
+    }
+    
+    if (isValidObject(_unit_label)) {
+        lv_label_set_text(_unit_label, "");
+    }
+    
+    Serial.printf("[HomeAssistantCard-%s] INFO: Updated cover: %s\n", 
+                 _entity_id.c_str(), display_value.c_str());
 }
 
 void HomeAssistantCard::formatNumericValue(double value, char* buffer, size_t bufferSize) {

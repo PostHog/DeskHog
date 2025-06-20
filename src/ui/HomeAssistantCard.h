@@ -16,6 +16,7 @@
  * - Numeric sensor values (temperature, humidity, power, etc.)
  * - Binary sensor states (motion, door, window states)
  * - Switch and light states
+ * - Cover states (blinds, curtains, garage doors with position display)
  * 
  * Features:
  * - Thread-safe UI updates via queue system
@@ -119,6 +120,13 @@ private:
      * @param friendly_name Entity friendly name
      */
     void updateSwitchDisplay(const HomeAssistantParser& parser, const String& friendly_name);
+    
+    /**
+     * @brief Update cover display (blinds, curtains, garage doors)
+     * @param parser Parser containing entity data
+     * @param friendly_name Entity friendly name
+     */
+    void updateCoverDisplay(const HomeAssistantParser& parser, const String& friendly_name);
     
     /**
      * @brief Format numeric value with appropriate precision

@@ -9,7 +9,8 @@
  * @brief Parser for Home Assistant entity state data
  * 
  * Handles parsing and data extraction from Home Assistant entity state JSON responses.
- * Supports numeric sensor data with unit extraction and state information.
+ * Supports various entity types including numeric sensors, binary sensors, switches, 
+ * lights, and cover entities with unit extraction and state information.
  * 
  * Example JSON structure:
  * {
@@ -35,6 +36,7 @@ public:
         BINARY_SENSOR,        ///< Binary sensor (on/off, true/false)
         SWITCH,               ///< Switch entity (on/off state)
         LIGHT,                ///< Light entity (on/off with brightness)
+        COVER,                ///< Cover entity (blinds, garage doors, curtains, etc.)
         ENTITY_NOT_SUPPORTED  ///< Unsupported or unrecognized entity type
     };
 
@@ -121,6 +123,42 @@ public:
      * @return true if state is not "unavailable" or "unknown"
      */
     bool isAvailable() const;
+
+    /**
+     * @brief Get cover position (0-100 percentage)
+     * @return Position percentage, -1 if not available or not a cover
+     */
+    int getCoverPosition() const;
+
+    /**
+     * @brief Get cover tilt position (0-100 percentage)
+     * @return Tilt position percentage, -1 if not available or not a cover
+     */
+    int getCoverTiltPosition() const;
+
+    /**
+     * @brief Check if cover is opening
+     * @return true if cover state is "opening"
+     */
+    bool isCoverOpening() const;
+
+    /**
+     * @brief Check if cover is closing
+     * @return true if cover state is "closing"
+     */
+    bool isCoverClosing() const;
+
+    /**
+     * @brief Check if cover is open
+     * @return true if cover state is "open"
+     */
+    bool isCoverOpen() const;
+
+    /**
+     * @brief Check if cover is closed
+     * @return true if cover state is "closed"
+     */
+    bool isCoverClosed() const;
 
 private:
     DynamicJsonDocument _doc;  ///< JSON document for parsing
