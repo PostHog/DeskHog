@@ -13,7 +13,32 @@
     --link-color: rgb(245 78 0);
     --default-font: system-ui, -apple-system, sans-serif; 
     font-family: var(--default-font);
+}
 
+.banner {
+    background-color: #1D4ED8;
+    color: white;
+    border: none;
+    padding: 1rem;
+    text-align: center;
+    margin: -1rem -1rem 1rem -1rem;
+    border-radius: 0;
+    font-weight: 600;
+    font-size: 1.1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.banner a {
+    color: white;
+    text-decoration: none;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.5);
+    padding-bottom: 2px;
+    transition: border-color 0.2s ease;
+}
+
+.banner a:hover {
+    border-bottom-color: white;
+    text-decoration: none;
 }
 
 body { 
