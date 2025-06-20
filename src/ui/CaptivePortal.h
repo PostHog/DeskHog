@@ -29,8 +29,6 @@ enum class PortalAction {
     SCAN_WIFI,
     SAVE_WIFI,
     SAVE_DEVICE_CONFIG,
-    SAVE_INSIGHT,
-    DELETE_INSIGHT,
     CHECK_OTA_UPDATE,
     START_OTA_UPDATE
 };
@@ -140,17 +138,7 @@ private:
      */
     void handleGetInsights(AsyncWebServerRequest *request);
 
-    /**
-     * @brief Handle new insight creation
-     * Accepts insight ID, publishes INSIGHT_ADDED event
-     */
-    void handleSaveInsight(AsyncWebServerRequest *request);
 
-    /**
-     * @brief Handle insight deletion
-     * Accepts JSON with insight ID, publishes INSIGHT_DELETED event
-     */
-    void handleDeleteInsight(AsyncWebServerRequest *request);
 
     /**
      * @brief Return list of available card types
@@ -216,8 +204,6 @@ private:
     void handleRequestWifiScan(AsyncWebServerRequest *request);
     void handleRequestSaveWifi(AsyncWebServerRequest *request);
     void handleRequestSaveDeviceConfig(AsyncWebServerRequest *request);
-    void handleRequestSaveInsight(AsyncWebServerRequest *request);
-    void handleRequestDeleteInsight(AsyncWebServerRequest *request);
     void handleRequestCheckOtaUpdate(AsyncWebServerRequest *request);
     void handleRequestStartOtaUpdate(AsyncWebServerRequest *request);
 

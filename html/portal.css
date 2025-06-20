@@ -48,35 +48,6 @@ a {
     border: 1px solid var(--border-color);
 }
 
-.form-group.region-group label:first-child {
-    margin-bottom: 0.5rem;
-    display: block;
-    font-weight: 600;
-    color: #333;
-}
-
-.region-options {
-    display: flex;
-    gap: 1.5rem; 
-    align-items: center;
-}
-
-.region-options label {
-    cursor: pointer;
-    user-select: none;
-    font-weight: 600;
-    color: #333;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-}
-
-.region-options input[type="radio"] {
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
-    accent-color: #cc7000;
-}
 
 
 h1, h2 { color: #000000;

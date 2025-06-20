@@ -83,31 +83,19 @@ void CardController::initialize(DisplayInterface* display) {
     // Load current card configuration and create cards
     currentCardConfigs = configManager.getCardConfigs();
     
-    // If no configuration exists, create default cards for backward compatibility
+    // If no configuration exists, create a default friend card
     if (currentCardConfigs.empty()) {
-        // Create default friend card
         createAnimationCard();
-        
-        // Create insight cards from legacy storage
-        std::vector<String> insightIds = configManager.getAllInsightIds();
-        for (const String& id : insightIds) {
-            createInsightCard(id);
-        }
-    } else {
-        // Create cards based on stored configuration
+    }
+    
+    // If we have card configurations now, reconcile them
+    if (!currentCardConfigs.empty()) {
         reconcileCards(currentCardConfigs);
     }
     
     // Connect WiFi manager to UI
     wifiInterface.setUI(provisioningCard);
     
-    // Subscribe to insight events (legacy support)
-    eventQueue.subscribe([this](const Event& event) {
-        if (event.type == EventType::INSIGHT_ADDED || 
-            event.type == EventType::INSIGHT_DELETED) {
-            handleInsightEvent(event);
-        }
-    });
     
     // Subscribe to card configuration changes
     eventQueue.subscribe([this](const Event& event) {
@@ -158,83 +146,7 @@ void CardController::createAnimationCard() {
     displayInterface->giveMutex();
 }
 
-// Create an insight card and add it to the UI
-void CardController::createInsightCard(const String& insightId) {
-    // Log current task and core
-    Serial.printf("[CardCtrl-DEBUG] createInsightCard called from Core: %d, Task: %s\n", 
-                  xPortGetCoreID(), 
-                  pcTaskGetTaskName(NULL));
 
-    // Dispatch the actual card creation and LVGL work to the LVGL task
-    dispatchToLVGLTask([this, insightId]() {
-        Serial.printf("[CardCtrl-DEBUG] LVGL Task creating card for insight: %s from Core: %d, Task: %s\n", 
-                      insightId.c_str(), xPortGetCoreID(), pcTaskGetTaskName(NULL));
-
-        if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-            Serial.println("[CardCtrl-ERROR] Failed to take mutex in LVGL task for card creation.");
-            return;
-        }
-
-        // Create new insight card using full screen dimensions
-        InsightCard* newCard = new InsightCard(
-            screen,         // LVGL parent object
-            configManager,  // Dependencies
-            eventQueue,
-            insightId,
-            screenWidth,    // Dimensions
-            screenHeight
-        );
-
-        if (!newCard || !newCard->getCard()) {
-            Serial.printf("[CardCtrl-ERROR] Failed to create InsightCard or its LVGL object for ID: %s\n", insightId.c_str());
-            displayInterface->giveMutex();
-            delete newCard; // Clean up if partially created
-            return;
-        }
-
-        // Add to navigation stack
-        cardStack->addCard(newCard->getCard());
-
-        // Add to our list of cards (ensure this is thread-safe if accessed elsewhere)
-        // The mutex taken above should protect this operation too.
-        insightCards.push_back(newCard);
-        
-        Serial.printf("[CardCtrl-DEBUG] InsightCard for ID: %s created and added to stack.\n", insightId.c_str());
-
-        displayInterface->giveMutex();
-
-        // Request immediate data for this insight now that it's set up
-        posthogClient.requestInsightData(insightId);
-    });
-}
-
-// Handle insight events
-void CardController::handleInsightEvent(const Event& event) {
-    if (event.type == EventType::INSIGHT_ADDED) {
-        createInsightCard(event.insightId);
-    } 
-    else if (event.type == EventType::INSIGHT_DELETED) {
-        if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-            return;
-        }
-        
-        // Find and remove the card
-        for (auto it = insightCards.begin(); it != insightCards.end(); ++it) {
-            InsightCard* card = *it;
-            if (card->getInsightId() == event.insightId) {
-                // Remove from card stack
-                cardStack->removeCard(card->getCard());
-                
-                // Remove from vector and delete
-                insightCards.erase(it);
-                delete card;
-                break;
-            }
-        }
-        
-        displayInterface->giveMutex();
-    }
-}
 
 // Handle WiFi events
 void CardController::handleWiFiEvent(const Event& event) {
@@ -299,6 +211,9 @@ void CardController::initializeCardTypes() {
             // Add to our list of cards
             insightCards.push_back(newCard);
             
+            // Register as input handler
+            cardStack->registerInputHandler(newCard->getCard(), newCard);
+            
             // Request data for this insight immediately
             posthogClient.requestInsightData(configValue);
             Serial.printf("Requested insight data for: %s\n", configValue.c_str());
@@ -339,27 +254,29 @@ void CardController::initializeCardTypes() {
 void CardController::handleCardConfigChanged() {
     // Load new configuration from storage
     std::vector<CardConfig> newConfigs = configManager.getCardConfigs();
+    currentCardConfigs = newConfigs;
     
     // Perform reconciliation
     reconcileCards(newConfigs);
     
-    // Update current configuration
-    currentCardConfigs = newConfigs;
 }
 
 void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
-    Serial.printf("Reconciling cards from Core: %d, Task: %s\n", 
-                  xPortGetCoreID(), pcTaskGetTaskName(NULL));
+    if (reconcileInProgress) {
+        return;
+    }
+    
+    // Track the number of cards before reconciliation
+    size_t oldCardCount = insightCards.size() + (animationCard ? 1 : 0);
+    
+    reconcileInProgress = true;
     
     // Dispatch the entire reconciliation to the LVGL task to ensure thread safety
-    dispatchToLVGLTask([this, newConfigs]() {
+    dispatchToLVGLTask([this, newConfigs, oldCardCount]() {
         if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-            Serial.println("Failed to take mutex for card reconciliation");
+            reconcileInProgress = false;  // Clear flag on failure
             return;
         }
-        
-        Serial.printf("Executing reconciliation on Core: %d, Task: %s\n", 
-                      xPortGetCoreID(), pcTaskGetTaskName(NULL));
         
         // Save current card index to restore after reconciliation
         uint8_t savedCardIndex = cardStack ? cardStack->getCurrentIndex() : 0;
@@ -397,7 +314,12 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         // Track how many cards we've created
         size_t cardsCreated = 0;
         
-        for (const CardConfig& config : sortedConfigs) {
+        // Check if we have a new card (more configs than before)
+        bool hasNewCard = (sortedConfigs.size() > oldCardCount);
+        size_t newCardPosition = 0;
+        
+        for (size_t i = 0; i < sortedConfigs.size(); i++) {
+            const CardConfig& config = sortedConfigs[i];
             // Find the registered card type
             auto it = std::find_if(registeredCardTypes.begin(), registeredCardTypes.end(),
                                   [&config](const CardDefinition& def) {
@@ -409,10 +331,13 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
                 lv_obj_t* cardObj = it->factory(config.config);
                 if (cardObj) {
                     cardStack->addCard(cardObj);
+                    
+                    // Track position of new card if this is likely the new one
+                    if (hasNewCard && i == sortedConfigs.size() - 1) {
+                        newCardPosition = cardsCreated + 1; // +1 for provisioning card
+                    }
+                    
                     cardsCreated++;
-                    Serial.printf("Created card %zu of type %s with config: %s\n", 
-                                 cardsCreated, cardTypeToString(config.type).c_str(), 
-                                 config.config.c_str());
                 } else {
                     Serial.printf("Failed to create card of type %s\n", 
                                  cardTypeToString(config.type).c_str());
@@ -430,26 +355,20 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         // This ensures the indicators are correct after bulk card operations
         cardStack->forceUpdateIndicators();
         
-        // Restore card position if possible (accounting for provisioning card at index 0)
-        // If we had cards before and still have cards now, try to maintain position
-        if (savedCardIndex > 0 && cardsCreated > 0) {
+        // Navigate to appropriate card
+        if (hasNewCard && newCardPosition > 0) {
+            // Navigate to the newly added card
+            cardStack->goToCard(newCardPosition);
+        } else if (savedCardIndex > 0 && cardsCreated > 0) {
+            // Restore previous position if no new card was added
             // Adjust for the provisioning card (always at index 0)
             uint8_t maxIndex = cardsCreated; // provisioning + created cards - 1
             uint8_t targetIndex = (savedCardIndex <= maxIndex) ? savedCardIndex : maxIndex;
             cardStack->goToCard(targetIndex);
         }
         
-        // Debug: Log final card count
-        uint32_t totalCards = cardStack->getCardCount();
-        Serial.printf("Card reconciliation complete. Created %zu cards. Total in stack: %u\n", 
-                     cardsCreated, totalCards);
-        
-        // Verify pip count matches card count
-        lv_obj_t* indicator = lv_obj_get_child(screen, 1); // Assuming indicator is second child
-        if (indicator) {
-            uint32_t pipCount = lv_obj_get_child_cnt(indicator);
-            Serial.printf("Pip count: %u (should match total cards: %u)\n", pipCount, totalCards);
-        }
+        // Clear the in-progress flag
+        reconcileInProgress = false;
         
         displayInterface->giveMutex();
     }, true); // Use to_front=true for immediate processing

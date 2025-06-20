@@ -519,98 +519,6 @@ function deleteCard(index) {
     }
 }
 
-// Delete insight (legacy function for backward compatibility)
-function deleteInsight(id) {
-    if (!confirm('Are you sure you want to delete this insight?')) {
-        return;
-    }
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    const formData = new FormData();
-    formData.append('id', id);
-
-    fetch('/api/actions/delete-insight', { 
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data && data.status === 'queued') {
-            console.log("Delete insight action successfully queued.", data.message);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = data.message || "Delete insight initiated.";
-                globalActionStatusEl.className = 'status-message info';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.textContent === (data.message || "Delete insight initiated.")) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 5000);
-            }
-        } else {
-            const errorMessage = (data && data.message) ? data.message : "Failed to initiate delete insight.";
-            console.error("Failed to initiate delete insight:", errorMessage);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = errorMessage;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.className.includes('error')) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 7000);
-            }
-        }
-    })
-    .catch(() => {
-        console.error("Communication error deleting insight.");
-        if (globalActionStatusEl) {
-            globalActionStatusEl.textContent = "Communication error deleting insight.";
-            globalActionStatusEl.className = 'status-message error';
-            globalActionStatusEl.style.display = 'block';
-            setTimeout(() => {
-                if (globalActionStatusEl.className.includes('error')) {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }
-            }, 7000);
-        }
-    });
-}
-
-// Load insights list - UI update part will be in pollApiStatus (legacy function)
-function _updateInsightsListUI(insights) {
-    const container = document.getElementById('insights-list');
-    if (!container) {
-        // Container doesn't exist in new UI, skip silently
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    if (!insights || insights.length === 0) {
-        container.innerHTML = '<p>No insights configured</p>';
-        return;
-    }
-    
-    const list = document.createElement('ul');
-    list.className = 'insights-list';
-    
-    insights.forEach(insight => {
-        const item = document.createElement('li');
-        item.className = 'insight-item';
-        item.innerHTML = `
-            <button onclick="deleteInsight('${insight.id}')" class="button danger">Delete ${insight.title}</button>
-        `;
-        list.appendChild(item);
-    });
-    
-    container.appendChild(list);
-}
 
 // Refresh network list - UI update part will be in pollApiStatus
 function _updateNetworksListUI(networks) {
@@ -810,10 +718,6 @@ function pollApiStatus() {
                 _updateDeviceConfigUI(data.device_config);
             }
 
-            // 4. Update Insights List (legacy - remove if cards are working)
-            if (data.insights) {
-                _updateInsightsListUI(data.insights);
-            }
             
             // 4a. Refresh card configuration periodically
             // Note: We refresh cards on successful completion of card-related actions
@@ -856,6 +760,20 @@ function _updateDeviceConfigUI(config) {
             // Only set value if field exists and is empty
             if (apiKeyField && !apiKeyField.value) {
                 apiKeyField.value = config.api_key_display;
+            }
+        }
+        if (config.region !== undefined) {
+            // Handle region - set radio button or dropdown depending on UI
+            const regionRadios = document.querySelectorAll('input[name="region"]');
+            regionRadios.forEach(radio => {
+                if (radio.value === config.region) {
+                    radio.checked = true;
+                }
+            });
+            // Also handle dropdown if it exists
+            const regionSelect = document.getElementById('region');
+            if (regionSelect) {
+                regionSelect.value = config.region;
             }
         }
         initialDeviceConfigLoaded = true;

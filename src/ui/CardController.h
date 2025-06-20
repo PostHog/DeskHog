@@ -64,11 +64,6 @@ public:
      */
     void setDisplayInterface(DisplayInterface* display);
     
-    /**
-     * @brief Create and add a new insight card to the UI
-     * @param insightId Unique identifier for the insight
-     */
-    void createInsightCard(const String& insightId);
     
     /**
      * @brief Get the card navigation stack
@@ -172,17 +167,13 @@ private:
     // Card registration and management
     std::vector<CardDefinition> registeredCardTypes; ///< Available card types with factory functions
     std::vector<CardConfig> currentCardConfigs;      ///< Current card configuration from storage
+    bool reconcileInProgress = false;                ///< Flag to prevent concurrent reconciliations
     
     /**
      * @brief Create and initialize the animation card
      */
     void createAnimationCard();
     
-    /**
-     * @brief Handle insight-related events
-     * @param event Event containing insight data
-     */
-    void handleInsightEvent(const Event& event);
 
     /**
      * @brief Handle WiFi-related events

@@ -8,6 +8,7 @@
 #include "EventQueue.h"
 #include "posthog/parsers/InsightParser.h"
 #include "UICallback.h"
+#include "ui/InputHandler.h"
 
 // Forward declaration for the renderer base class
 class InsightRendererBase;
@@ -27,7 +28,7 @@ class InsightRendererBase;
  * - Memory-safe LVGL object management
  * - Smart number formatting with unit scaling (K, M)
  */
-class InsightCard {
+class InsightCard : public InputHandler {
 public:
     /**
      * @brief Constructor
@@ -69,6 +70,15 @@ public:
      */
     String getInsightId() const { return _insight_id; }
 
+    /**
+     * @brief Handle button press events
+     * 
+     * @param button_index The index of the button that was pressed
+     * @return true if the event was handled, false otherwise
+     * 
+     * Handles center button (button 1) to force refresh insight data
+     */
+    bool handleButtonPress(uint8_t button_index) override;
 
 private:
     // Constants for UI layout and limits

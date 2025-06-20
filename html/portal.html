@@ -51,18 +51,13 @@
 
         <div class="config-section">
             <form id="device-form" onsubmit="return saveDeviceConfig()">
-                <div class="form-group region-group">
+                <div class="form-group">
                     <label for="region">Region</label>
-                    <div class="region-options">
-                        <label for="region-us">
-                            <input type="radio" name="region" id="region-us" value="us">
-                            US
-                        </label>
-                        <label for="region-eu">
-                            <input type="radio" name="region" id="region-eu" value="eu">
-                            EU
-                        </label>
-                    </div>
+                    <select name="region" id="region" required>
+                        <option value="">Select a region</option>
+                        <option value="us">US</option>
+                        <option value="eu">EU</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="teamId">Team ID</label>

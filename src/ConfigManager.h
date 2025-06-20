@@ -126,32 +126,6 @@ public:
      */
     void clearApiKey();
 
-    /**
-     * @brief Store insight configuration
-     * @param id Unique insight identifier
-     * @param title Insight title/configuration
-     * @return true if saved successfully, false otherwise
-     */
-    bool saveInsight(const String& id, const String& title);
-
-    /**
-     * @brief Retrieve stored insight configuration
-     * @param id Insight identifier to retrieve
-     * @return The insight configuration or empty string if not found
-     */
-    String getInsight(const String& id);
-
-    /**
-     * @brief Remove stored insight configuration
-     * @param id Insight identifier to remove
-     */
-    void deleteInsight(const String& id);
-
-    /**
-     * @brief Get all stored insight identifiers
-     * @return Vector of insight IDs
-     */
-    std::vector<String> getAllInsightIds();
 
     /**
      * @brief Get all configured cards from persistent storage
@@ -167,17 +141,6 @@ public:
     bool saveCardConfigs(const std::vector<CardConfig>& configs);
 
 private:
-    /**
-     * @brief Updates the internal list of insight IDs in preferences
-     * 
-     * Maintains a special "_id_list" key in preferences that stores all insight IDs
-     * as a comma-separated string. This list is used by getAllInsightIds() to track
-     * which insights are currently stored.
-     * 
-     * @param ids Vector of insight IDs to store
-     * @note Calls commit() after updating the list
-     */
-    void updateIdList(const std::vector<String>& ids);
     
     /**
      * @brief Validates and updates the API configuration state

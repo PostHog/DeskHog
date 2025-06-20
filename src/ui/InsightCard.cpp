@@ -5,6 +5,7 @@
 #include "renderers/NumericCardRenderer.h"
 #include "renderers/LineGraphRenderer.h"
 #include "renderers/FunnelRenderer.h"
+#include "hardware/Input.h"
 
 
 InsightCard::InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& eventQueue,
@@ -76,6 +77,7 @@ InsightCard::InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& ev
 }
 
 InsightCard::~InsightCard() {
+    Serial.printf("[InsightCard-%s] DESTRUCTOR called\n", _insight_id.c_str());
     std::shared_ptr<InsightRendererBase> renderer_for_lambda = std::move(_active_renderer);
     if (globalUIDispatch) {
         globalUIDispatch([card_obj = _card, renderer = renderer_for_lambda]() mutable {
@@ -148,8 +150,8 @@ void InsightCard::handleParsedData(std::shared_ptr<InsightParser> parser) {
         }
 
         if (needs_rebuild) {
-            Serial.printf("[InsightCard-%s] Rebuilding renderer. Old type: %d, New type: %d. Core: %d\n", 
-                id.c_str(), (int)_current_type, (int)new_insight_type, xPortGetCoreID());
+            Serial.printf("[InsightCard-%s] Rebuilding renderer START. Old type: %d, New type: %d. Core: %d, Card: %p, Container: %p\n", 
+                id.c_str(), (int)_current_type, (int)new_insight_type, xPortGetCoreID(), _card, _content_container);
 
             if (_active_renderer) {
                 _active_renderer->clearElements();
@@ -215,4 +217,29 @@ void InsightCard::clearContentContainer() {
 
 bool InsightCard::isValidObject(lv_obj_t* obj) const {
     return obj && lv_obj_is_valid(obj);
+}
+
+bool InsightCard::handleButtonPress(uint8_t button_index) {
+    // Check if it's the center button
+    if (button_index == Input::BUTTON_CENTER) {
+        // Publish event to request a forced refresh
+        Event refreshEvent;
+        refreshEvent.type = EventType::INSIGHT_FORCE_REFRESH;
+        refreshEvent.insightId = _insight_id;
+        _event_queue.publishEvent(refreshEvent);
+        
+        // Update UI to show we're refreshing
+        if (globalUIDispatch) {
+            globalUIDispatch([this]() {
+                if (isValidObject(_title_label)) {
+                    lv_label_set_text(_title_label, "Refreshing...");
+                }
+            }, true);
+        }
+        
+        Serial.printf("[InsightCard-%s] Force refresh requested\n", _insight_id.c_str());
+        return true; // Event handled
+    }
+    
+    return false; // Not handled, pass to default handler
 }

@@ -142,8 +142,8 @@ void CardNavigationStack::goToCard(uint8_t index) {
         return;
     }
     
-    // Calculate target scroll position based on child position
-    lv_coord_t target_y = index * _height;
+    // Get the actual position of the target card
+    lv_coord_t target_y = lv_obj_get_y(target_card);
     
     // Create a custom animation
     lv_anim_t a;
