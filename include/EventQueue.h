@@ -17,6 +17,8 @@ enum class EventType {
     INSIGHT_ADDED,
     INSIGHT_DELETED,
     INSIGHT_DATA_RECEIVED,
+    HA_ENTITY_STATE_RECEIVED,
+    HA_SERVICE_CALLED,
     WIFI_CREDENTIALS_FOUND,
     NEED_WIFI_CREDENTIALS,
     WIFI_CONNECTING,
@@ -138,4 +140,4 @@ public:
      * @brief Stop the event processing task
      */
     void end();
-}; 
+};

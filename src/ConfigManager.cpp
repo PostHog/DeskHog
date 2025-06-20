@@ -325,3 +325,48 @@ bool ConfigManager::saveCardConfigs(const std::vector<CardConfig>& configs) {
     
     return true;
 }
+
+// Home Assistant Configuration Methods
+bool ConfigManager::setHomeAssistantUrl(const String& url) {
+    if (url.length() > MAX_HA_URL_LENGTH) {
+        Serial.printf("Home Assistant URL too long: %u > %u\n", url.length(), MAX_HA_URL_LENGTH);
+        return false;
+    }
+    
+    _preferences.putString(_haUrlKey, url);
+    
+    // Commit changes
+    commit();
+    
+    return true;
+}
+
+String ConfigManager::getHomeAssistantUrl() {
+    return _preferences.getString(_haUrlKey, "");
+}
+
+bool ConfigManager::setHomeAssistantApiKey(const String& apiKey) {
+    if (apiKey.length() > MAX_HA_API_KEY_LENGTH) {
+        Serial.printf("Home Assistant API key too long: %u > %u\n", apiKey.length(), MAX_HA_API_KEY_LENGTH);
+        return false;
+    }
+    
+    _preferences.putString(_haApiKeyKey, apiKey);
+    
+    // Commit changes
+    commit();
+    
+    return true;
+}
+
+String ConfigManager::getHomeAssistantApiKey() {
+    return _preferences.getString(_haApiKeyKey, "");
+}
+
+void ConfigManager::clearHomeAssistantConfig() {
+    _preferences.remove(_haUrlKey);
+    _preferences.remove(_haApiKeyKey);
+    
+    // Commit changes
+    commit();
+}

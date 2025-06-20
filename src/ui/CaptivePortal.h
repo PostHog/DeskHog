@@ -134,6 +134,18 @@ private:
     void handleSaveDeviceConfig(AsyncWebServerRequest *request);
 
     /**
+     * @brief Return current Home Assistant configuration
+     * Returns Home Assistant URL and truncated API key
+     */
+    void handleGetHomeAssistantConfig(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Handle Home Assistant configuration updates
+     * Accepts Home Assistant URL and API key updates
+     */
+    void handleSaveHomeAssistantConfig(AsyncWebServerRequest *request);
+
+    /**
      * @brief Return list of configured insights
      * Returns JSON array of insight IDs and titles
      */

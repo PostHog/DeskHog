@@ -70,7 +70,7 @@ label {
     margin-bottom: 0.5rem; 
     font-weight: 600;
 }
-input[type='text'], input[type='password'] { 
+input[type='text'], input[type='password'], input[type='url'] { 
     width: 100%; 
     padding: 8px; 
     border: 1px solid #ddd; 

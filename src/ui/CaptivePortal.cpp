@@ -63,6 +63,7 @@ void CaptivePortal::begin() {
     // Needs to be defined before the actual GET/POST handlers for the same paths.
     _server.on("/save-wifi", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     _server.on("/save-device-config", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
+    _server.on("/save-ha-config", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     _server.on("/save-insight", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     _server.on("/delete-insight", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     _server.on("/start-update", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
@@ -92,6 +93,10 @@ void CaptivePortal::begin() {
 
     // Device config actions
     _server.on("/get-device-config", HTTP_GET, std::bind(&CaptivePortal::handleGetDeviceConfig, this, std::placeholders::_1));
+
+    // Home Assistant config actions
+    _server.on("/get-ha-config", HTTP_GET, std::bind(&CaptivePortal::handleGetHomeAssistantConfig, this, std::placeholders::_1));
+    _server.on("/save-ha-config", HTTP_POST, std::bind(&CaptivePortal::handleSaveHomeAssistantConfig, this, std::placeholders::_1));
 
     // Insight actions
     _server.on("/get-insights", HTTP_GET, std::bind(&CaptivePortal::handleGetInsights, this, std::placeholders::_1));
@@ -253,6 +258,45 @@ void CaptivePortal::handleSaveDeviceConfig(AsyncWebServerRequest *request) {
     }
 
     DynamicJsonDocument doc(256); // Switched to DynamicJsonDocument
+    doc["success"] = success;
+    String responseJson;
+    serializeJson(doc, responseJson);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void CaptivePortal::handleGetHomeAssistantConfig(AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(512);
+    String haUrl = _configManager.getHomeAssistantUrl();
+    String haApiKey = _configManager.getHomeAssistantApiKey();
+    
+    doc["haUrl"] = haUrl;
+    // Send a truncated or placeholder API key for security if it's set
+    doc["haApiKey"] = haApiKey.length() > 0 ? "********" + haApiKey.substring(haApiKey.length() - 4) : "";
+
+    String responseJson;
+    serializeJson(doc, responseJson);
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void CaptivePortal::handleSaveHomeAssistantConfig(AsyncWebServerRequest *request) {
+    bool success = false;
+    if (request->hasParam("haUrl", true) && request->hasParam("haApiKey", true)) {
+        String haUrl = request->getParam("haUrl", true)->value();
+        String haApiKey = request->getParam("haApiKey", true)->value();
+
+        _configManager.setHomeAssistantUrl(haUrl);
+        // Only update API key if it's not the placeholder
+        if (haApiKey.indexOf("********") == -1) {
+            _configManager.setHomeAssistantApiKey(haApiKey);
+        }
+        success = true;
+    }
+
+    DynamicJsonDocument doc(256);
     doc["success"] = success;
     String responseJson;
     serializeJson(doc, responseJson);
@@ -668,6 +712,13 @@ void CaptivePortal::handleApiStatus(AsyncWebServerRequest *request) {
     String apiKey = _configManager.getApiKey();
     deviceConfigObj["api_key_display"] = apiKey.length() > 0 ? "********" + apiKey.substring(apiKey.length() - 4) : "";
     deviceConfigObj["api_key_present"] = apiKey.length() > 0;
+
+    JsonObject haConfigObj = doc.createNestedObject("ha_config");
+    String haUrl = _configManager.getHomeAssistantUrl();
+    String haApiKey = _configManager.getHomeAssistantApiKey();
+    haConfigObj["ha_url"] = haUrl;
+    haConfigObj["ha_api_key_display"] = haApiKey.length() > 0 ? "********" + haApiKey.substring(haApiKey.length() - 4) : "";
+    haConfigObj["ha_api_key_present"] = haApiKey.length() > 0;
 
     JsonArray insightsArray = doc.createNestedArray("insights");
     std::vector<String> insightIds = _configManager.getAllInsightIds();

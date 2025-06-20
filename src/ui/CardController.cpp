@@ -13,6 +13,7 @@ CardController::CardController(
     ConfigManager& configManager,
     WiFiInterface& wifiInterface,
     PostHogClient& posthogClient,
+    HomeAssistantClient& homeAssistantClient,
     EventQueue& eventQueue
 ) : screen(screen),
     screenWidth(screenWidth),
@@ -20,6 +21,7 @@ CardController::CardController(
     configManager(configManager),
     wifiInterface(wifiInterface),
     posthogClient(posthogClient),
+    homeAssistantClient(homeAssistantClient),
     eventQueue(eventQueue),
     cardStack(nullptr),
     provisioningCard(nullptr),
@@ -49,6 +51,12 @@ CardController::~CardController() {
         delete card;
     }
     insightCards.clear();
+    
+    // Clean up Home Assistant cards
+    for (auto* card : homeAssistantCards) {
+        delete card;
+    }
+    homeAssistantCards.clear();
     
     // Release mutex if we took it
     if (displayInterface && displayInterface->getMutexPtr()) {
@@ -208,6 +216,59 @@ void CardController::createInsightCard(const String& insightId) {
     });
 }
 
+// Create a Home Assistant card and add it to the UI
+void CardController::createHomeAssistantCard(const String& entityId) {
+    // Log current task and core
+    Serial.printf("[CardCtrl-DEBUG] createHomeAssistantCard called from Core: %d, Task: %s\n", 
+                  xPortGetCoreID(), 
+                  pcTaskGetTaskName(NULL));
+
+    // Dispatch the actual card creation and LVGL work to the LVGL task
+    dispatchToLVGLTask([this, entityId]() {
+        Serial.printf("[CardCtrl-DEBUG] LVGL Task creating card for entity: %s from Core: %d, Task: %s\n", 
+                      entityId.c_str(), xPortGetCoreID(), pcTaskGetTaskName(NULL));
+
+        if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
+            Serial.println("[CardCtrl-ERROR] Failed to take mutex in LVGL task for HA card creation.");
+            return;
+        }
+
+        // Create new Home Assistant card using full screen dimensions
+        HomeAssistantCard* newCard = new HomeAssistantCard(
+            screen,              // LVGL parent object
+            configManager,       // Dependencies
+            eventQueue,
+            homeAssistantClient, // Home Assistant client reference
+            entityId,
+            screenWidth,         // Dimensions
+            screenHeight
+        );
+
+        if (!newCard || !newCard->getCardObject()) {
+            Serial.printf("[CardCtrl-ERROR] Failed to create HomeAssistantCard or its LVGL object for ID: %s\n", entityId.c_str());
+            displayInterface->giveMutex();
+            delete newCard; // Clean up if partially created
+            return;
+        }
+
+        // Add to navigation stack
+        cardStack->addCard(newCard->getCardObject());
+
+        // Register as input handler for button interactions
+        cardStack->registerInputHandler(newCard->getCardObject(), newCard);
+
+        // Add to our list of Home Assistant cards
+        homeAssistantCards.push_back(newCard);
+        
+        Serial.printf("[CardCtrl-DEBUG] HomeAssistantCard for ID: %s created and added to stack.\n", entityId.c_str());
+
+        displayInterface->giveMutex();
+
+        // Request immediate data for this entity now that it's set up
+        homeAssistantClient.requestEntityState(entityId);
+    });
+}
+
 // Handle insight events
 void CardController::handleInsightEvent(const Event& event) {
     if (event.type == EventType::INSIGHT_ADDED) {
@@ -334,6 +395,47 @@ void CardController::initializeCardTypes() {
         return nullptr;
     };
     registerCardType(friendDef);
+
+    // Register HOME_ASSISTANT card type
+    CardDefinition homeAssistantDef;
+    homeAssistantDef.type = CardType::HOME_ASSISTANT;
+    homeAssistantDef.name = "Home Assistant entity";
+    homeAssistantDef.allowMultiple = true;
+    homeAssistantDef.needsConfigInput = true;
+    homeAssistantDef.configInputLabel = "Entity ID";
+    homeAssistantDef.uiDescription = "Monitor Home Assistant sensors, switches, and devices";
+    homeAssistantDef.factory = [this](const String& configValue) -> lv_obj_t* {
+        // Create new Home Assistant card using the entity ID
+        HomeAssistantCard* newCard = new HomeAssistantCard(
+            screen,
+            configManager,
+            eventQueue,
+            homeAssistantClient,  // Add the HomeAssistant client reference
+            configValue,
+            screenWidth,
+            screenHeight
+        );
+        
+        if (newCard && newCard->getCardObject()) {
+            // Register as input handler for button interactions
+            cardStack->registerInputHandler(newCard->getCardObject(), newCard);
+            
+            // Add to our list of cards
+            homeAssistantCards.push_back(newCard);
+            
+            // Request data for this entity immediately
+            homeAssistantClient.requestEntityState(configValue);
+            Serial.printf("Requested Home Assistant entity data for: %s\n", configValue.c_str());
+            
+            return newCard->getCardObject();
+        }
+        
+        delete newCard;
+        return nullptr;
+    };
+    registerCardType(homeAssistantDef);
+
+    
 }
 
 void CardController::handleCardConfigChanged() {
@@ -377,7 +479,17 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         }
         insightCards.clear();
         
-        // Remove animation/friend card
+        // Remove existing Home Assistant cards
+        for (auto* card : homeAssistantCards) {
+            if (card && card->getCardObject()) {
+                cardStack->removeCard(card->getCardObject());
+            }
+            delete card;
+        }
+        homeAssistantCards.clear();
+        
+        // Remove existing animation card
+
         if (animationCard && animationCard->getCard()) {
             cardStack->removeCard(animationCard->getCard());
             delete animationCard;
@@ -510,7 +622,8 @@ void CardController::dispatchToLVGLTask(std::function<void()> update_func, bool 
 void CardController::handleCardTitleUpdated(const Event& event) {
     // Find and update the card configuration with the new title
     for (auto& cardConfig : currentCardConfigs) {
-        if (cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) {
+        if ((cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) ||
+            (cardConfig.type == CardType::HOME_ASSISTANT && cardConfig.config == event.insightId)) {
             // Update the name with the new title
             if (cardConfig.name != event.title) {
                 cardConfig.name = event.title;
@@ -518,10 +631,11 @@ void CardController::handleCardTitleUpdated(const Event& event) {
                 // Save the updated configuration to persistent storage
                 configManager.saveCardConfigs(currentCardConfigs);
                 
-                Serial.printf("Updated card title for insight %s to: %s\n", 
+                Serial.printf("Updated card title for %s %s to: %s\n", 
+                             cardTypeToString(cardConfig.type).c_str(),
                              event.insightId.c_str(), event.title.c_str());
             }
             break;
         }
     }
-} 
+}
