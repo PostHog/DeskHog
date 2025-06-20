@@ -46,42 +46,51 @@ void CardNavigationStack::_update_pip_count() {
     uint32_t card_count = lv_obj_get_child_cnt(_main_container);
     uint32_t pip_count = lv_obj_get_child_cnt(_scroll_indicator);
     
-    // Calculate pip height based on card count
-    // Height = (container height - (gaps between pips)) / number of pips
-    int32_t pip_height = (_height - ((card_count - 1) * 5)) / (card_count > 0 ? card_count : 1);
-    
-    // Add pips if needed
-    while (pip_count < card_count) {
-        lv_obj_t* pip = lv_obj_create(_scroll_indicator);
-        lv_obj_set_size(pip, 2, pip_height);  // 2px wide, height depends on card count
-        lv_obj_set_style_radius(pip, 0, 0);  // Rectangle shape, no rounded corners
-        lv_obj_set_style_bg_color(pip, lv_color_hex(0x808080), 0);
-        lv_obj_set_style_border_width(pip, 0, 0);
-        pip_count++;
+    // Ensure we have at least 1 card for calculations
+    if (card_count == 0) {
+        // Remove all pips if no cards
+        while (pip_count > 0) {
+            lv_obj_t* pip = lv_obj_get_child(_scroll_indicator, 0);
+            if (pip) {
+                lv_obj_del(pip);
+            }
+            pip_count--;
+        }
+        return;
     }
     
-    // Remove excess pips if needed
-    while (pip_count > card_count) {
-        lv_obj_t* last_pip = lv_obj_get_child(_scroll_indicator, pip_count - 1);
-        if (last_pip) {
-            lv_obj_del(last_pip);
+    // Calculate pip height based on card count
+    // Height = (container height - (gaps between pips)) / number of pips
+    int32_t total_gaps = (card_count > 1) ? ((card_count - 1) * 5) : 0;
+    int32_t pip_height = (_height - total_gaps) / card_count;
+    
+    // Ensure minimum pip height
+    if (pip_height < 2) pip_height = 2;
+    
+    // Remove all existing pips and recreate to ensure consistency
+    while (pip_count > 0) {
+        lv_obj_t* pip = lv_obj_get_child(_scroll_indicator, 0);
+        if (pip) {
+            lv_obj_del(pip);
         }
         pip_count--;
     }
     
-    // Resize all pips to fit evenly
-    for (uint32_t i = 0; i < pip_count; i++) {
-        lv_obj_t* pip = lv_obj_get_child(_scroll_indicator, i);
-        if (pip) {
-            lv_obj_set_height(pip, pip_height);
-        }
+    // Create new pips
+    for (uint32_t i = 0; i < card_count; i++) {
+        lv_obj_t* pip = lv_obj_create(_scroll_indicator);
+        lv_obj_set_size(pip, 2, pip_height);  // 2px wide
+        lv_obj_set_style_radius(pip, 0, 0);  // Rectangle shape
+        lv_obj_set_style_bg_color(pip, lv_color_hex(0x808080), 0);  // Gray by default
+        lv_obj_set_style_border_width(pip, 0, 0);
+        lv_obj_clear_flag(pip, LV_OBJ_FLAG_SCROLLABLE);
     }
     
-    // Make sure first pip is active if this is the first card
-    if (card_count == 1) {
-        lv_obj_t* first_pip = lv_obj_get_child(_scroll_indicator, 0);
-        if (first_pip) {
-            lv_obj_set_style_bg_color(first_pip, lv_color_white(), 0);
+    // Make the first pip active if we just created pips
+    if (_current_card < card_count) {
+        lv_obj_t* active_pip = lv_obj_get_child(_scroll_indicator, _current_card);
+        if (active_pip) {
+            lv_obj_set_style_bg_color(active_pip, lv_color_white(), 0);
         }
     }
 }
@@ -156,6 +165,10 @@ uint8_t CardNavigationStack::getCurrentIndex() const {
     return _current_card;
 }
 
+uint32_t CardNavigationStack::getCardCount() const {
+    return lv_obj_get_child_cnt(_main_container);
+}
+
 void CardNavigationStack::setMutex(SemaphoreHandle_t* mutex_ptr) {
     _mutex_ptr = mutex_ptr;
 }
@@ -221,6 +234,17 @@ void CardNavigationStack::registerInputHandler(lv_obj_t* card, InputHandler* han
     
     // Add new handler
     _input_handlers.push_back(std::make_pair(card, handler));
+}
+
+void CardNavigationStack::forceUpdateIndicators() {
+    // Force update pip count
+    _update_pip_count();
+    
+    // Force update active indicator
+    _update_scroll_indicator(_current_card);
+    
+    // Force LVGL to redraw the indicator container
+    lv_obj_invalidate(_scroll_indicator);
 }
 
 void CardNavigationStack::_scroll_event_cb(lv_event_t* e) {
@@ -336,10 +360,21 @@ bool CardNavigationStack::removeCard(lv_obj_t* card) {
         new_selection = _current_card - 1;
     }
     
+    // Remove input handler for this card if it exists
+    for (auto it = _input_handlers.begin(); it != _input_handlers.end(); ++it) {
+        if (it->first == card) {
+            _input_handlers.erase(it);
+            break;
+        }
+    }
+    
     // Delete the card from LVGL
     lv_obj_del(card);
     
-    // Update the scroll indicator
+    // Force LVGL to process the deletion
+    lv_refr_now(NULL);
+    
+    // Update the scroll indicator (this will recreate all pips)
     _update_pip_count();
     
     // Set the new selection - if there are any cards left
@@ -348,14 +383,17 @@ bool CardNavigationStack::removeCard(lv_obj_t* card) {
         new_selection = (new_selection >= new_count) ? (new_count - 1) : new_selection;
         _current_card = new_selection;
         
-        // Update scroll indicator and actually show the card
-        _update_scroll_indicator(_current_card);
-        
         // Force scrolling to the selected card to ensure it's visible
         lv_obj_t* selected_card = lv_obj_get_child(_main_container, _current_card);
         if (selected_card) {
             lv_obj_scroll_to_view(selected_card, LV_ANIM_ON);
         }
+        
+        // Update scroll indicator after scrolling
+        _update_scroll_indicator(_current_card);
+    } else {
+        // No cards left, reset current card index
+        _current_card = 0;
     }
     
     return true;

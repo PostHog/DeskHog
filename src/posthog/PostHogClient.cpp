@@ -8,6 +8,8 @@ PostHogClient::PostHogClient(ConfigManager& config, EventQueue& eventQueue)
     , _eventQueue(eventQueue)
     , has_active_request(false)
     , last_refresh_check(0) {
+    // Configure secure client for HTTPS
+    _secureClient.setInsecure(); // TODO: get proper cert baked into the firmware to verify these connections
     _http.setReuse(true);
 }
 
@@ -149,7 +151,7 @@ bool PostHogClient::fetchInsight(const String& insight_id, String& response) {
     // First, try to get cached data
     String url = buildInsightUrl(insight_id, "force_cache");
     
-    _http.begin(url);
+    _http.begin(_secureClient, url);
     int httpCode = _http.GET();
     
     bool success = false;
@@ -196,7 +198,7 @@ bool PostHogClient::fetchInsight(const String& insight_id, String& response) {
         url = buildInsightUrl(insight_id, "blocking");
         
         unsigned long refresh_start = millis();
-        _http.begin(url);
+        _http.begin(_secureClient, url);
         httpCode = _http.GET();
         
         if (httpCode == HTTP_CODE_OK) {

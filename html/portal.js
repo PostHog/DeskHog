@@ -189,16 +189,17 @@ function updateAvailableCardsList() {
     const container = document.getElementById('available-cards-list');
     if (!container) return;
     
-    container.innerHTML = '';
-    
+    // Handle empty state
     if (!availableCardTypes || availableCardTypes.length === 0) {
-        container.innerHTML = '<p>No card types available</p>';
+        if (container.innerHTML !== '<p>No card types available</p>') {
+            container.innerHTML = '<p>No card types available</p>';
+        }
         return;
     }
     
+    // Update existing items or create new ones
     availableCardTypes.forEach(cardDef => {
-        const cardItem = document.createElement('div');
-        cardItem.className = 'available-card-item';
+        let cardItem = container.querySelector(`[data-card-type="${cardDef.id}"]`);
         
         // Check if this card type is already configured and if it allows multiple instances
         const existingCount = configuredCards.filter(card => card.type === cardDef.id).length;
@@ -211,25 +212,50 @@ function updateAvailableCardsList() {
             statusText = `${existingCount} instance${existingCount > 1 ? 's' : ''} configured`;
         }
         
-        cardItem.innerHTML = `
-            <div class="available-card-info">
-                <div class="available-card-name">${cardDef.name}</div>
-                <div class="available-card-description">${cardDef.description || cardDef.uiDescription || ''}</div>
-                ${statusText ? `<div class="available-card-status">${statusText}</div>` : ''}
-            </div>
-            <div class="available-card-actions">
-                ${cardDef.needsConfigInput ? `
-                    <input type="text" class="config-input" placeholder="${cardDef.configInputLabel}" id="config-${cardDef.id}">
-                ` : ''}
-                ${canAdd ? `
-                    <button class="add-card-btn" onclick="addCardFromList('${cardDef.id}')">
+        if (!cardItem) {
+            // Create new item only if it doesn't exist
+            cardItem = document.createElement('div');
+            cardItem.className = 'available-card-item';
+            cardItem.setAttribute('data-card-type', cardDef.id);
+            
+            cardItem.innerHTML = `
+                <div class="available-card-info">
+                    <div class="available-card-name">${cardDef.name}</div>
+                    <div class="available-card-description">${cardDef.description || cardDef.uiDescription || ''}</div>
+                    <div class="available-card-status"></div>
+                </div>
+                <div class="available-card-actions">
+                    ${cardDef.needsConfigInput ? `
+                        <input type="text" class="config-input" placeholder="${cardDef.configInputLabel}" id="config-${cardDef.id}">
+                    ` : ''}
+                    <button class="add-card-btn" onclick="addCardFromList('${cardDef.id}')" ${!canAdd ? 'style="display:none"' : ''}>
                         + Add card
                     </button>
-                ` : ''}
-            </div>
-        `;
-        
-        container.appendChild(cardItem);
+                </div>
+            `;
+            
+            container.appendChild(cardItem);
+        } else {
+            // Update existing item without destroying input values
+            const statusEl = cardItem.querySelector('.available-card-status');
+            if (statusEl) {
+                statusEl.textContent = statusText;
+            }
+            
+            const addBtn = cardItem.querySelector('.add-card-btn');
+            if (addBtn) {
+                addBtn.style.display = canAdd ? '' : 'none';
+            }
+        }
+    });
+    
+    // Remove any cards that no longer exist in availableCardTypes
+    const existingItems = container.querySelectorAll('[data-card-type]');
+    existingItems.forEach(item => {
+        const cardType = item.getAttribute('data-card-type');
+        if (!availableCardTypes.find(def => def.id === cardType)) {
+            item.remove();
+        }
     });
 }
 
@@ -675,6 +701,8 @@ function requestScanNetworks() {
 let lastProcessedAction = null;
 let lastProcessedActionMessage = "";
 let initialDeviceConfigLoaded = false;
+let lastWifiUpdateTime = 0;
+const WIFI_UPDATE_INTERVAL = 10000; // Update WiFi list every 10 seconds
 
 function pollApiStatus() {
     fetch('/api/status')
@@ -757,7 +785,14 @@ function pollApiStatus() {
 
             // 2. Update WiFi Info
             if (data.wifi) {
-                _updateNetworksListUI(data.wifi.networks);
+                // Update WiFi networks list only if enough time has passed
+                const currentTime = Date.now();
+                if (currentTime - lastWifiUpdateTime >= WIFI_UPDATE_INTERVAL) {
+                    _updateNetworksListUI(data.wifi.networks);
+                    lastWifiUpdateTime = currentTime;
+                }
+                
+                // Always update connection status
                 const wifiStatusEl = document.getElementById('wifi-connection-status');
                 if (wifiStatusEl) {
                     if (data.wifi.is_connected) {
@@ -810,10 +845,18 @@ function pollApiStatus() {
 function _updateDeviceConfigUI(config) {
     if (!initialDeviceConfigLoaded) {
         if (config.team_id !== undefined) {
-            document.getElementById('teamId').value = config.team_id;
+            const teamIdField = document.getElementById('teamId');
+            // Only set value if field exists and is empty
+            if (teamIdField && !teamIdField.value) {
+                teamIdField.value = config.team_id;
+            }
         }
         if (config.api_key_display !== undefined) { 
-            document.getElementById('apiKey').value = config.api_key_display;
+            const apiKeyField = document.getElementById('apiKey');
+            // Only set value if field exists and is empty
+            if (apiKeyField && !apiKeyField.value) {
+                apiKeyField.value = config.api_key_display;
+            }
         }
         initialDeviceConfigLoaded = true;
     }
@@ -839,7 +882,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     pollApiStatus();
-    setInterval(pollApiStatus, 5000);
+    setInterval(pollApiStatus, 3000); // Poll every 3 seconds for responsiveness
 
     const refreshBtn = document.getElementById('refresh-networks-btn');
     if(refreshBtn) {
