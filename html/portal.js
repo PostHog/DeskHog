@@ -137,7 +137,7 @@ function saveDeviceConfig() {
 
 // Handle Home Assistant config form submission
 function saveHomeAssistantConfig() {
-    const form = document.getElementById('ha-form');
+    const form = document.getElementById('home-assistant-form');
     const formData = new FormData(form);
     const globalActionStatusEl = document.getElementById('global-action-status');
     
@@ -873,7 +873,7 @@ function pollApiStatus() {
             }
 
             // 3a. Update Home Assistant Config Info
-            if (data.ha_config) {
+            if (data.ha_config && document.getElementById('haUrl').value === '') {
                 _updateHomeAssistantConfigUI(data.ha_config);
             }
 

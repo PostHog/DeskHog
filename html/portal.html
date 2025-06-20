@@ -69,6 +69,27 @@
             </form>
         </div>
 
+        <h2>Home Assistant</h2>
+
+        <div class="config-section">
+            <form id="home-assistant-form" onsubmit="return saveHomeAssistantConfig()">
+                <div class="form-group
+                    <label for="haUrl">Home Assistant URL</label>
+                    <input type="url" name="haUrl" id="haUrl" placeholder="http://homeassistant.local:8123" required>
+                    <p class="tip">This is the URL of your Home Assistant instance.</p>
+                </div>
+                <div class="form-group
+                    <label for="haToken">Long-lived access token</label>
+                    <input type="text" name="haApiKey" id="haApiKey" required>
+                    <p class="tip">Create a <a href="https://www.home-assistant.io/docs/authentication/long-lived-access-token/" target="_blank">long-lived access token</a> in your Home Assistant user profile.</p>
+                </div>
+                <div class="button-container">
+                    <button type="submit">Save Home Assistant configuration</button>
+                </div>
+            </form>
+        </div>
+
+
         <h2>Add cards</h2>
 
         <div class="config-section">

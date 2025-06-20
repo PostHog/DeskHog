@@ -57,7 +57,7 @@ bool HomeAssistantClient::callService(const String& domain, const String& servic
 }
 
 bool HomeAssistantClient::isReady() const {
-    return SystemController::isSystemFullyReady() && 
+    return SystemController::getWifiState() == WifiState::CONNECTED && 
            !_config.getHomeAssistantUrl().isEmpty() && 
            !_config.getHomeAssistantApiKey().isEmpty();
 }
