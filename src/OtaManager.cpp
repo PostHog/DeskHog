@@ -1,10 +1,19 @@
 #include "OtaManager.h"
+#include "ConfigManager.h" // For WiFi credentials, if needed for HTTPS
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <Update.h> // For ESP32 Update functions
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_flash_partitions.h"
+#include "esp_partition.h"
+#include "esp_system.h" // For esp_chip_info
 #include "esp_task_wdt.h"
-#include <WiFi.h> // For WiFi.status() and WL_CONNECTED
-#include "esp_ota_ops.h" // Needed for esp_ota_get_running_partition()
+#include <FS.h>
+#include <SPIFFS.h> // Or LittleFS, depending on what you use for cert storage
+#include <time.h>     // For time_t, tm, gmtime_r, asctime
+#include "esp_heap_caps.h" // For PSRAM allocator
+#include <Update.h> // For ESP32 Update functions
 
 // For heap_caps_malloc and esp_ptr_external_ram, ensure correct include if not already covered by Arduino.h/ESP-IDF basics
 // #include "esp_heap_caps.h" // Already in OtaManager.h but good to be mindful

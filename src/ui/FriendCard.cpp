@@ -2,6 +2,7 @@
 #include "Style.h"
 #include "sprites.h"
 #include "hardware/Input.h"
+#include <vector>
 
 FriendCard::FriendCard(lv_obj_t* parent)
     : _card(nullptr)
@@ -10,8 +11,14 @@ FriendCard::FriendCard(lv_obj_t* parent)
     , _label(nullptr)
     , _label_shadow(nullptr)
     , _animation_running(false)
-    , _current_message_index(0) {
+    , _current_message_index(0)
+    , _current_bg_color_index(0) {
     
+    // Initialize background colors
+    _background_colors.push_back(lv_color_hex(0x87CEEB)); // Sky Blue
+    _background_colors.push_back(lv_color_hex(0x138510)); // Dark Green
+    _background_colors.push_back(lv_color_hex(0x880808)); // Dark Red / Maroon
+
     // Create main card with black background
     _card = lv_obj_create(parent);
     if (!_card) return;
@@ -30,7 +37,12 @@ FriendCard::FriendCard(lv_obj_t* parent)
     
     // Make green container fill parent completely
     lv_obj_set_style_radius(_background, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(_background, lv_color_hex(0x0E7A00), 0);
+    if (!_background_colors.empty()) {
+        lv_obj_set_style_bg_color(_background, _background_colors[_current_bg_color_index], 0);
+    } else {
+        // Fallback: Set a default color if the vector is unexpectedly empty.
+        lv_obj_set_style_bg_color(_background, lv_color_hex(0x000000), 0); // Default to black
+    }
     lv_obj_set_style_border_width(_background, 0, 0);
     lv_obj_set_style_pad_all(_background, 5, 0);
     
@@ -161,6 +173,12 @@ void FriendCard::cycleNextMessage() {
     
     // Display the message
     setText(_messages[_current_message_index].c_str());
+
+    // Cycle and set background color
+    if (isValidObject(_background) && !_background_colors.empty()) {
+        _current_bg_color_index = (_current_bg_color_index + 1) % _background_colors.size();
+        lv_obj_set_style_bg_color(_background, _background_colors[_current_bg_color_index], 0);
+    }
 }
 
 bool FriendCard::handleButtonPress(uint8_t button_index) {
