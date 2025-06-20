@@ -6,6 +6,8 @@
 #include "ConfigManager.h"
 #include "EventQueue.h"
 #include "homeassistant/HomeAssistantParser.h"
+#include "homeassistant/HomeAssistantClient.h"
+#include "ui/InputHandler.h"
 #include "UICallback.h"
 
 /**
@@ -24,8 +26,9 @@
  * - Memory-safe LVGL object management
  * - Unit display and formatting
  * - State availability indication
+ * - Button interaction for cover and light control
  */
-class HomeAssistantCard {
+class HomeAssistantCard : public InputHandler {
 public:
     /**
      * @brief Constructor
@@ -33,6 +36,7 @@ public:
      * @param parent LVGL parent object to attach this card to
      * @param config Configuration manager for persistent storage
      * @param eventQueue Event queue for receiving data updates
+     * @param homeAssistantClient Home Assistant client for service calls
      * @param entityId Home Assistant entity ID (e.g., "sensor.temperature")
      * @param width Card width in pixels
      * @param height Card height in pixels
@@ -44,7 +48,8 @@ public:
      * Subscribes to HA_ENTITY_STATE_RECEIVED events for the specified entityId.
      */
     HomeAssistantCard(lv_obj_t* parent, ConfigManager& config, EventQueue& eventQueue,
-                     const String& entityId, uint16_t width, uint16_t height);
+                     HomeAssistantClient& homeAssistantClient, const String& entityId, 
+                     uint16_t width, uint16_t height);
     
     /**
      * @brief Destructor - cleans up LVGL objects safely
@@ -69,10 +74,22 @@ public:
      */
     lv_obj_t* getCardObject() const { return _card; }
 
+    /**
+     * @brief Handle button press events
+     * @param button_index The button that was pressed
+     * @return true if the event was handled, false otherwise
+     * 
+     * For cover entities: toggles open/close
+     * For light entities: toggles on/off
+     * For switch entities: toggles on/off
+     */
+    bool handleButtonPress(uint8_t button_index) override;
+
 private:
     // Configuration and events
     ConfigManager& _config;
     EventQueue& _event_queue;
+    HomeAssistantClient& _home_assistant_client;
     
     // Entity identification
     String _entity_id;

@@ -1,12 +1,15 @@
 #include "HomeAssistantCard.h"
 #include "Style.h"
 #include "NumberFormat.h"
+#include "hardware/Input.h"
 #include <algorithm>
 
 HomeAssistantCard::HomeAssistantCard(lv_obj_t* parent, ConfigManager& config, EventQueue& eventQueue,
-                                   const String& entityId, uint16_t width, uint16_t height)
+                                   HomeAssistantClient& homeAssistantClient, const String& entityId, 
+                                   uint16_t width, uint16_t height)
     : _config(config)
     , _event_queue(eventQueue)
+    , _home_assistant_client(homeAssistantClient)
     , _entity_id(entityId)
     , _current_title("")
     , _card(nullptr)
@@ -404,6 +407,53 @@ void HomeAssistantCard::clearContentContainer() {
     if (isValidObject(_content_container)) {
         lv_obj_clean(_content_container);
     }
+}
+
+bool HomeAssistantCard::handleButtonPress(uint8_t button_index) {
+    // Only handle center button press
+    if (button_index != Input::BUTTON_CENTER) {
+        return false;
+    }
+    
+    // Only handle cover and light entity types
+    if (_current_type != HomeAssistantParser::EntityType::COVER && 
+        _current_type != HomeAssistantParser::EntityType::LIGHT &&
+        _current_type != HomeAssistantParser::EntityType::SWITCH) {
+        return false;
+    }
+    
+    Serial.printf("[HomeAssistantCard-%s] DEBUG: Button press handled for entity type %d\n", 
+                  _entity_id.c_str(), (int)_current_type);
+    
+    // Determine the service domain and action based on entity type
+    String domain, service;
+    if (_current_type == HomeAssistantParser::EntityType::COVER) {
+        domain = "cover";
+        // For covers, we'll use toggle service which opens if closed, closes if open
+        service = "toggle";
+    } else if (_current_type == HomeAssistantParser::EntityType::LIGHT) {
+        domain = "light";
+        service = "toggle";
+    } else if (_current_type == HomeAssistantParser::EntityType::SWITCH) {
+        domain = "switch";
+        service = "toggle";
+    }
+    
+    // Call the service
+    bool success = _home_assistant_client.callService(domain, service, _entity_id);
+    
+    if (success) {
+        Serial.printf("[HomeAssistantCard-%s] Service call successful: %s.%s\n", 
+                      _entity_id.c_str(), domain.c_str(), service.c_str());
+        
+        // Request updated state immediately after service call
+        _home_assistant_client.requestEntityState(_entity_id);
+    } else {
+        Serial.printf("[HomeAssistantCard-%s] Service call failed: %s.%s\n", 
+                      _entity_id.c_str(), domain.c_str(), service.c_str());
+    }
+    
+    return true; // We handled this button press
 }
 
 bool HomeAssistantCard::isValidObject(lv_obj_t* obj) const {

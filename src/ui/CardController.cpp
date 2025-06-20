@@ -238,6 +238,7 @@ void CardController::createHomeAssistantCard(const String& entityId) {
             screen,              // LVGL parent object
             configManager,       // Dependencies
             eventQueue,
+            homeAssistantClient, // Home Assistant client reference
             entityId,
             screenWidth,         // Dimensions
             screenHeight
@@ -252,6 +253,9 @@ void CardController::createHomeAssistantCard(const String& entityId) {
 
         // Add to navigation stack
         cardStack->addCard(newCard->getCardObject());
+
+        // Register as input handler for button interactions
+        cardStack->registerInputHandler(newCard->getCardObject(), newCard);
 
         // Add to our list of Home Assistant cards
         homeAssistantCards.push_back(newCard);
@@ -406,12 +410,16 @@ void CardController::initializeCardTypes() {
             screen,
             configManager,
             eventQueue,
+            homeAssistantClient,  // Add the HomeAssistant client reference
             configValue,
             screenWidth,
             screenHeight
         );
         
         if (newCard && newCard->getCardObject()) {
+            // Register as input handler for button interactions
+            cardStack->registerInputHandler(newCard->getCardObject(), newCard);
+            
             // Add to our list of cards
             homeAssistantCards.push_back(newCard);
             
