@@ -455,10 +455,14 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         Serial.printf("Executing reconciliation on Core: %d, Task: %s\n", 
                       xPortGetCoreID(), pcTaskGetTaskName(NULL));
         
-        // For now, implement a simple approach: remove all dynamic cards and recreate
-        // TODO: Implement smarter diffing to preserve existing cards when possible
+        // Save current card index to restore after reconciliation
+        uint8_t savedCardIndex = cardStack ? cardStack->getCurrentIndex() : 0;
         
-        // Remove existing insight cards
+        // Simple approach: Clear everything and rebuild from scratch
+        // This avoids complex diffing logic that can cause sync issues
+        
+        // First, remove all existing dynamic cards
+        // Remove insight cards
         for (auto* card : insightCards) {
             if (card && card->getCard()) {
                 cardStack->removeCard(card->getCard());
@@ -477,18 +481,25 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         homeAssistantCards.clear();
         
         // Remove existing animation card
+
         if (animationCard && animationCard->getCard()) {
             cardStack->removeCard(animationCard->getCard());
             delete animationCard;
             animationCard = nullptr;
         }
         
-        // Create cards based on new configuration, sorted by order
+        // Force LVGL to process all pending operations
+        lv_refr_now(NULL);
+        
+        // Now recreate cards based on new configuration
         std::vector<CardConfig> sortedConfigs = newConfigs;
         std::sort(sortedConfigs.begin(), sortedConfigs.end(), 
                   [](const CardConfig& a, const CardConfig& b) {
                       return a.order < b.order;
                   });
+        
+        // Track how many cards we've created
+        size_t cardsCreated = 0;
         
         for (const CardConfig& config : sortedConfigs) {
             // Find the registered card type
@@ -498,12 +509,14 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
                                   });
             
             if (it != registeredCardTypes.end() && it->factory) {
-                // Create the card using the factory function (now safe to call on LVGL task)
+                // Create the card using the factory function
                 lv_obj_t* cardObj = it->factory(config.config);
                 if (cardObj) {
                     cardStack->addCard(cardObj);
-                    Serial.printf("Created card of type %s with config: %s\n", 
-                                 cardTypeToString(config.type).c_str(), config.config.c_str());
+                    cardsCreated++;
+                    Serial.printf("Created card %zu of type %s with config: %s\n", 
+                                 cardsCreated, cardTypeToString(config.type).c_str(), 
+                                 config.config.c_str());
                 } else {
                     Serial.printf("Failed to create card of type %s\n", 
                                  cardTypeToString(config.type).c_str());
@@ -514,8 +527,36 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
             }
         }
         
+        // Force another LVGL refresh to ensure everything is properly laid out
+        lv_refr_now(NULL);
+        
+        // Force the card stack to update its pip indicators
+        // This ensures the indicators are correct after bulk card operations
+        cardStack->forceUpdateIndicators();
+        
+        // Restore card position if possible (accounting for provisioning card at index 0)
+        // If we had cards before and still have cards now, try to maintain position
+        if (savedCardIndex > 0 && cardsCreated > 0) {
+            // Adjust for the provisioning card (always at index 0)
+            uint8_t maxIndex = cardsCreated; // provisioning + created cards - 1
+            uint8_t targetIndex = (savedCardIndex <= maxIndex) ? savedCardIndex : maxIndex;
+            cardStack->goToCard(targetIndex);
+        }
+        
+        // Debug: Log final card count
+        uint32_t totalCards = cardStack->getCardCount();
+        Serial.printf("Card reconciliation complete. Created %zu cards. Total in stack: %u\n", 
+                     cardsCreated, totalCards);
+        
+        // Verify pip count matches card count
+        lv_obj_t* indicator = lv_obj_get_child(screen, 1); // Assuming indicator is second child
+        if (indicator) {
+            uint32_t pipCount = lv_obj_get_child_cnt(indicator);
+            Serial.printf("Pip count: %u (should match total cards: %u)\n", pipCount, totalCards);
+        }
+        
         displayInterface->giveMutex();
-    });
+    }, true); // Use to_front=true for immediate processing
 }
 
 void CardController::initUIQueue() {

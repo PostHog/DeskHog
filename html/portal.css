@@ -9,6 +9,8 @@
     --panel-color: #FFF;
     --label-color: #a0a0a0;
     --button-shadow: #E1DDDD;
+    --tip-color: #343434;
+    --link-color: rgb(245 78 0);
     --default-font: system-ui, -apple-system, sans-serif; 
     font-family: var(--default-font);
 
@@ -25,10 +27,17 @@ body {
     border: 1px solid var(--border-color);
 }
 
+a {
+    color: var(--link-color);
+    font-weight: 600;
+    text-decoration: none;
+}
+
 .tip {
-    margin-top: 0px;
     font-weight: 400;
-    font-size: 1rem;
+    font-size: 0.9rem;
+    color: var(--tip-color);
+    margin-bottom: 1.5rem;
 }
 
 .config-section {
@@ -271,7 +280,6 @@ select::-ms-expand {
 
 .add-card-btn {
     background-color: var(--input-color);
-    color: #28a745;
     border: 1px solid var(--button-border);
     padding: 0.5rem 1rem;
     border-radius: var(--radius);

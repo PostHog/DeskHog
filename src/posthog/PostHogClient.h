@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <queue>
 #include <vector>
 #include <set>
@@ -83,6 +84,7 @@ private:
     std::set<String> requested_insights;  ///< All known insight IDs
     std::queue<QueuedRequest> request_queue; ///< Queue of pending requests
     bool has_active_request;               ///< Request in progress flag
+    WiFiClientSecure _secureClient;        ///< Secure WiFi client for HTTPS
     HTTPClient _http;                      ///< HTTP client instance
     unsigned long last_refresh_check;       ///< Last refresh timestamp
     

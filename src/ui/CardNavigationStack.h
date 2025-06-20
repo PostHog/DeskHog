@@ -78,6 +78,12 @@ public:
     uint8_t getCurrentIndex() const;
     
     /**
+     * @brief Get the total number of cards in the stack
+     * @return Total card count
+     */
+    uint32_t getCardCount() const;
+    
+    /**
      * @brief Set mutex for thread-safe button handling
      * @param mutex_ptr Pointer to FreeRTOS semaphore
      */
@@ -98,6 +104,14 @@ public:
      * @param handler InputHandler implementation
      */
     void registerInputHandler(lv_obj_t* card, InputHandler* handler);
+    
+    /**
+     * @brief Force update of pip indicators
+     * 
+     * Explicitly updates pip count and active indicator.
+     * Useful after bulk card operations to ensure UI consistency.
+     */
+    void forceUpdateIndicators();
     
 private:
     /**

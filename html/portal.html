@@ -30,7 +30,7 @@
                     <input type="password" name="password" id="password">
                 </div>
 
-                <p class="tip">If your network doesn't need a password, just leave this blank.</p>
+                <p class="tip">If your network doesn't need a password, you can leave this blank.</p>
                 
                 <div class="button-container">
                     <button type="submit">Save WiFi</button>
@@ -42,18 +42,25 @@
             </div>
         </div>
 
-        <h2>API configuration</h2>
+        <h2>Welcome to DeskHog</h2>
+        <div class="config-section">
+            <p>DeskHog is a tiny platform for having fun with code, hardware and the internet. Check out the <a href="https://github.com/posthog/deskhog/blob/main/README.md" target="_blank">readme</a> to get hacking, especially the <a href="https://github.com/posthog/deskhog/blob/main/tech-details.md" target="_blank">tech details file</a>.</p>
+        </div>
+
+        <h2>PostHog API configuration</h2>
 
         <div class="config-section">
             <form id="device-form" onsubmit="return saveDeviceConfig()">
                 <div class="form-group">
                     <label for="teamId">Team ID</label>
                     <input type="text" name="teamId" id="teamId" min="-1" required>
+                    <p class="tip">This is the numeral that appears at the end of the URL when you're looking at your <a href="https://app.posthog.com/" target="_blank">project's homepage dashboard</a>.</p>
                 </div>
                 
                 <div class="form-group">
                     <label for="apiKey">API key</label>
                     <input type="text" name="apiKey" id="apiKey">
+                    <p class="tip">Create a <a href="https://app.posthog.com/settings/user-api-keyss" target="_blank">new API key in your project settings</a>. Give it read access to insights.</p>
                 </div>
                 
                 <div class="button-container">
@@ -62,29 +69,7 @@
             </form>
         </div>
 
-        <h2>Home Assistant</h2>
-
-        <div class="config-section">
-            <form id="ha-form" onsubmit="return saveHomeAssistantConfig()">
-                <div class="form-group">
-                    <label for="haUrl">Home Assistant URL</label>
-                    <input type="url" name="haUrl" id="haUrl" placeholder="http://homeassistant.local:8123">
-                </div>
-                
-                <div class="form-group">
-                    <label for="haApiKey">Long-Lived Access Token</label>
-                    <input type="text" name="haApiKey" id="haApiKey" placeholder="Your Home Assistant token">
-                </div>
-                
-                <p class="tip">Get your token from Home Assistant → Profile → Long-Lived Access Tokens</p>
-                
-                <div class="button-container">
-                    <button type="submit">Save Home Assistant configuration</button>
-                </div>
-            </form>
-        </div>
-
-        <h2>Card management</h2>
+        <h2>Add cards</h2>
 
         <div class="config-section">
             <h3>Available cards</h3>
@@ -94,8 +79,8 @@
             </div>
         </div>
 
+        <h2>Manage cards</h2>
         <div class="config-section">
-            <h3>Configured cards</h3>
             <div id="cards-list">
                 <!-- Will be populated by JavaScript -->
                 <p>Loading cards...</p>
