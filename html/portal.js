@@ -73,67 +73,6 @@ function saveWifiConfig() {
     return false; 
 }
 
-// Handle device config form submission
-function saveDeviceConfig() {
-    const form = document.getElementById('device-form');
-    const formData = new FormData(form);
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    
-    fetch('/api/actions/save-device-config', { 
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data && data.status === 'queued') {
-            console.log("Save device config action successfully queued.", data.message);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = data.message || "Device configuration save initiated.";
-                globalActionStatusEl.className = 'status-message info';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                     if (globalActionStatusEl.textContent === (data.message || "Device configuration save initiated.")) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 5000);
-            }
-        } else {
-            const errorMessage = (data && data.message) ? data.message : "Failed to initiate device config save.";
-            console.error("Failed to initiate device config save:", errorMessage);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = errorMessage;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.className.includes('error')) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 7000);
-            }
-        }
-    })
-    .catch(() => {
-        console.error("Communication error saving device config.");
-        if (globalActionStatusEl) {
-            globalActionStatusEl.textContent = "Communication error saving device config.";
-            globalActionStatusEl.className = 'status-message error';
-            globalActionStatusEl.style.display = 'block';
-            setTimeout(() => {
-                if (globalActionStatusEl.className.includes('error')) {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }
-            }, 7000);
-        }
-    });
-    
-    return false;
-}
 
 // Toggle API key visibility
 function toggleApiKeyVisibility() {
@@ -144,6 +83,374 @@ function toggleApiKeyVisibility() {
 // Global variables for card management
 let availableCardTypes = [];
 let configuredCards = [];
+
+// Global variables for service management
+let availableServices = [];
+let configuredServices = [];
+
+// Load service definitions from the device
+async function loadServiceDefinitions() {
+    try {
+        const response = await fetch('/api/services/definitions');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const definitions = await response.json();
+        availableServices = definitions;
+        updateAvailableServicesList();
+        console.log('Loaded', definitions.length, 'service definitions');
+    } catch (error) {
+        console.error('Failed to load service definitions:', error);
+        availableServices = [];
+        updateAvailableServicesList();
+    }
+}
+
+// Load configured services from the device
+async function loadConfiguredServices() {
+    try {
+        const response = await fetch('/api/services/configured');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const services = await response.json();
+        configuredServices = services;
+        updateAvailableServicesList(); // Update availability status
+        console.log('Loaded', services.length, 'configured services');
+    } catch (error) {
+        console.error('Failed to load configured services:', error);
+        configuredServices = [];
+        updateAvailableServicesList();
+    }
+}
+
+// Render configuration fields for a service definition
+function renderServiceConfigFields(serviceDef) {
+    if (!serviceDef.fields || serviceDef.fields.length === 0) {
+        return ''; // No configuration fields
+    }
+    
+    return serviceDef.fields.map(field => {
+        const fieldId = `service-config-${serviceDef.type}-${field.key}`;
+        const required = field.required ? 'required' : '';
+        
+        switch (field.type) {
+            case 'TEXT':
+                return `
+                    <div class="config-field">
+                        <label for="${fieldId}">${field.label}${field.required ? ' *' : ''}</label>
+                        <input type="text" class="config-input" id="${fieldId}" 
+                               placeholder="${field.label}" value="${field.defaultValue || ''}" ${required}>
+                        ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
+                    </div>
+                `;
+            case 'PASSWORD':
+                return `
+                    <div class="config-field">
+                        <label for="${fieldId}">${field.label}${field.required ? ' *' : ''}</label>
+                        <input type="password" class="config-input" id="${fieldId}" 
+                               placeholder="${field.label}" value="${field.defaultValue || ''}" ${required}>
+                        ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
+                    </div>
+                `;
+            case 'SELECT':
+                const options = field.options || [];
+                
+                // If exactly 2 options, render as radio buttons like the existing region selector
+                if (options.length === 2) {
+                    const radioButtons = options.map(option => {
+                        const radioId = `${fieldId}-${option}`;
+                        const checked = option === field.defaultValue ? 'checked' : '';
+                        const displayText = option === 'us' ? 'US' : option === 'eu' ? 'EU' : option;
+                        return `
+                            <label for="${radioId}">
+                                <input type="radio" name="${fieldId}" id="${radioId}" value="${option}" ${checked} ${required}>
+                                ${displayText}
+                            </label>
+                        `;
+                    }).join('');
+                    
+                    return `
+                        <div class="config-field">
+                            <label>${field.label}${field.required ? ' *' : ''}</label>
+                            <div class="region-options">
+                                ${radioButtons}
+                            </div>
+                            ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
+                        </div>
+                    `;
+                } else {
+                    // Regular dropdown for more than 2 options
+                    const optionItems = options.map(option => 
+                        `<option value="${option}" ${option === field.defaultValue ? 'selected' : ''}>${option}</option>`
+                    ).join('');
+                    return `
+                        <div class="config-field">
+                            <label for="${fieldId}">${field.label}${field.required ? ' *' : ''}</label>
+                            <select class="config-input" id="${fieldId}" ${required}>
+                                <option value="">Select ${field.label}</option>
+                                ${optionItems}
+                            </select>
+                            ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
+                        </div>
+                    `;
+                }
+            case 'BOOLEAN':
+                return `
+                    <div class="config-field">
+                        <label class="checkbox-label">
+                            <input type="checkbox" class="config-input" id="${fieldId}" 
+                                   ${field.defaultValue === 'true' ? 'checked' : ''} ${required}>
+                            ${field.label}${field.required ? ' *' : ''}
+                        </label>
+                        ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
+                    </div>
+                `;
+            default:
+                return `<input type="text" class="config-input" id="${fieldId}" placeholder="${field.label}" ${required}>`;
+        }
+    }).join('');
+}
+
+// Update the available services list
+function updateAvailableServicesList() {
+    const container = document.getElementById('available-services-list');
+    if (!container) return;
+    
+    // Handle empty state
+    if (!availableServices || availableServices.length === 0) {
+        if (container.innerHTML !== '<p>No services available</p>') {
+            container.innerHTML = '<p>No services available</p>';
+        }
+        return;
+    }
+    
+    // Clear and rebuild the list
+    container.innerHTML = '';
+    
+    availableServices.forEach(serviceDef => {
+        // Find existing configuration for this service
+        const existingConfig = configuredServices.find(service => service.type === serviceDef.type);
+        const isConfigured = !!existingConfig;
+        
+        const serviceItem = document.createElement('div');
+        serviceItem.className = 'available-service-item';
+        serviceItem.setAttribute('data-service-type', serviceDef.type);
+        
+        serviceItem.innerHTML = `
+            <div class="available-service-info">
+                <div class="available-service-name">${serviceDef.name}</div>
+                <div class="available-service-description">${serviceDef.description || ''}</div>
+                <div class="available-service-status">${isConfigured ? 'Configured' : 'Not configured'}</div>
+            </div>
+            <div class="available-service-actions">
+                ${renderServiceConfigFields(serviceDef)}
+                <button class="save-service-btn" onclick="saveServiceConfiguration('${serviceDef.type}')">
+                    ${isConfigured ? 'Update Configuration' : 'Save Configuration'}
+                </button>
+            </div>
+        `;
+        
+        container.appendChild(serviceItem);
+        
+        // Pre-populate existing configuration values
+        if (isConfigured && existingConfig.config) {
+            for (const [key, value] of Object.entries(existingConfig.config)) {
+                const fieldId = `service-config-${serviceDef.type}-${key}`;
+                
+                // Find the corresponding field definition to determine type
+                const fieldDef = serviceDef.fields.find(f => f.key === key);
+                
+                if (fieldDef && fieldDef.type === 'SELECT' && fieldDef.options && fieldDef.options.length === 2) {
+                    // This is a radio button group (2-option SELECT)
+                    const radioGroup = document.getElementsByName(fieldId);
+                    for (const radio of radioGroup) {
+                        radio.checked = (radio.value === value);
+                    }
+                } else {
+                    // Regular input field
+                    const input = document.getElementById(fieldId);
+                    if (input) {
+                        if (input.type === 'checkbox') {
+                            input.checked = value === 'true';
+                        } else {
+                            // Handle masked values for sensitive fields
+                            if (value.includes('****')) {
+                                // Show that there's a value but allow re-entry
+                                input.value = ''; // Keep empty for security
+                                input.placeholder = 'Current: ' + value + ' (leave empty to keep current)';
+                                // Change password fields to text temporarily to show the mask
+                                if (input.type === 'password') {
+                                    input.type = 'text';
+                                    input.value = value;
+                                    input.setAttribute('readonly', true);
+                                    // Add a small edit button or click handler
+                                    input.style.backgroundColor = '#f0f0f0';
+                                    input.onclick = function() {
+                                        this.type = 'password';
+                                        this.value = '';
+                                        this.placeholder = 'Enter new value or leave empty to keep current';
+                                        this.removeAttribute('readonly');
+                                        this.style.backgroundColor = '';
+                                        this.onclick = null;
+                                    };
+                                }
+                            } else {
+                                input.value = value;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Save service configuration
+async function saveServiceConfiguration(serviceType) {
+    const globalActionStatusEl = document.getElementById('global-action-status');
+    
+    // Find the service definition
+    const serviceDef = availableServices.find(def => def.type === serviceType);
+    if (!serviceDef) {
+        console.error('Service definition not found for type:', serviceType);
+        return;
+    }
+    
+    let configData = {};
+    
+    // Collect values from all configuration fields
+    if (serviceDef.fields && serviceDef.fields.length > 0) {
+        for (const field of serviceDef.fields) {
+            const fieldId = `service-config-${serviceType}-${field.key}`;
+            let value = '';
+            
+            // Handle different field types
+            if (field.type === 'SELECT' && field.options && field.options.length === 2) {
+                // This is a radio button group (2-option SELECT)
+                const radioGroup = document.getElementsByName(fieldId);
+                for (const radio of radioGroup) {
+                    if (radio.checked) {
+                        value = radio.value;
+                        break;
+                    }
+                }
+            } else {
+                // Regular input field
+                const input = document.getElementById(fieldId);
+                
+                if (!input) {
+                    console.error(`Config input not found: ${fieldId}`);
+                    continue;
+                }
+                
+                if (input.type === 'checkbox') {
+                    value = input.checked ? 'true' : 'false';
+                } else {
+                    value = input.value.trim();
+                }
+            }
+            
+            // Handle sensitive fields - preserve existing value if empty
+            if (!value && field.sensitive) {
+                // Check if there's an existing value for this field
+                const existingConfig = configuredServices.find(service => service.type === serviceType);
+                if (existingConfig && existingConfig.config && existingConfig.config[field.key]) {
+                    // Preserve existing value for sensitive fields when user leaves them empty
+                    configData[field.key] = existingConfig.config[field.key];
+                }
+            }
+            
+            // Validate required fields (after handling sensitive field preservation)
+            if (field.required && !value && !configData[field.key]) {
+                if (globalActionStatusEl) {
+                    globalActionStatusEl.textContent = `Please enter a value for ${field.label}`;
+                    globalActionStatusEl.className = 'status-message error';
+                    globalActionStatusEl.style.display = 'block';
+                    setTimeout(() => {
+                        globalActionStatusEl.style.display = 'none';
+                        globalActionStatusEl.textContent = '';
+                        globalActionStatusEl.className = 'status-message';
+                    }, 3000);
+                }
+                return;
+            }
+            
+            // Only add non-empty values (sensitive fields already handled above)
+            if (value) {
+                configData[field.key] = value;
+            }
+        }
+    }
+    
+    // Create service configuration
+    const serviceConfig = {
+        type: serviceType,
+        config: configData
+    };
+    
+    // Update existing config or add new one
+    const existingIndex = configuredServices.findIndex(service => service.type === serviceType);
+    if (existingIndex >= 0) {
+        configuredServices[existingIndex] = serviceConfig;
+    } else {
+        configuredServices.push(serviceConfig);
+    }
+    
+    // Save to device
+    try {
+        const response = await fetch('/api/services/configured', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(configuredServices)
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            console.log('Service configuration saved successfully');
+            
+            // Reload configurations to reflect changes
+            await loadConfiguredServices();
+            
+            if (globalActionStatusEl) {
+                globalActionStatusEl.textContent = "Service configuration saved successfully";
+                globalActionStatusEl.className = 'status-message info';
+                globalActionStatusEl.style.display = 'block';
+                setTimeout(() => {
+                    globalActionStatusEl.style.display = 'none';
+                    globalActionStatusEl.textContent = '';
+                    globalActionStatusEl.className = 'status-message';
+                }, 3000);
+            }
+        } else {
+            console.error('Failed to save service configuration:', result.message);
+            if (globalActionStatusEl) {
+                globalActionStatusEl.textContent = result.message || 'Failed to save service configuration';
+                globalActionStatusEl.className = 'status-message error';
+                globalActionStatusEl.style.display = 'block';
+                setTimeout(() => {
+                    globalActionStatusEl.style.display = 'none';
+                    globalActionStatusEl.textContent = '';
+                    globalActionStatusEl.className = 'status-message';
+                }, 5000);
+            }
+        }
+    } catch (error) {
+        console.error('Error saving service configuration:', error);
+        if (globalActionStatusEl) {
+            globalActionStatusEl.textContent = 'Error saving service configuration';
+            globalActionStatusEl.className = 'status-message error';
+            globalActionStatusEl.style.display = 'block';
+            setTimeout(() => {
+                globalActionStatusEl.style.display = 'none';
+                globalActionStatusEl.textContent = '';
+                globalActionStatusEl.className = 'status-message';
+            }, 5000);
+        }
+    }
+}
 
 // Load card definitions from the device
 async function loadCardDefinitions() {
@@ -182,6 +489,69 @@ async function loadConfiguredCards() {
         updateCardsListUI();
         updateAvailableCardsList(); // Update availability status
     }
+}
+
+// Render configuration fields for a card definition
+function renderConfigFields(cardDef) {
+    
+    // Handle new dynamic config fields
+    if (cardDef.configFields && cardDef.configFields.length > 0) {
+        return cardDef.configFields.map(field => {
+            const fieldId = `config-${cardDef.id}-${field.key}`;
+            const required = field.required ? 'required' : '';
+            
+            switch (field.type) {
+                case 'TEXT':
+                    return `
+                        <div class="config-field">
+                            <label for="${fieldId}">${field.inputLabel}${field.required ? ' *' : ''}</label>
+                            <input type="text" class="config-input" id="${fieldId}" 
+                                   placeholder="${field.inputLabel}" value="${field.defaultValue || ''}" ${required}>
+                            ${field.uiDescription ? `<small class="field-description">${field.uiDescription}</small>` : ''}
+                        </div>
+                    `;
+                case 'TEXTAREA':
+                    return `
+                        <div class="config-field">
+                            <label for="${fieldId}">${field.inputLabel}${field.required ? ' *' : ''}</label>
+                            <textarea class="config-input" id="${fieldId}" 
+                                      placeholder="${field.inputLabel}" ${required}>${field.defaultValue || ''}</textarea>
+                            ${field.uiDescription ? `<small class="field-description">${field.uiDescription}</small>` : ''}
+                        </div>
+                    `;
+                case 'SELECT':
+                    const options = field.options || [];
+                    const optionItems = options.map(option => 
+                        `<option value="${option}" ${option === field.defaultValue ? 'selected' : ''}>${option}</option>`
+                    ).join('');
+                    return `
+                        <div class="config-field">
+                            <label for="${fieldId}">${field.inputLabel}${field.required ? ' *' : ''}</label>
+                            <select class="config-input" id="${fieldId}" ${required}>
+                                <option value="">Select ${field.inputLabel}</option>
+                                ${optionItems}
+                            </select>
+                            ${field.uiDescription ? `<small class="field-description">${field.uiDescription}</small>` : ''}
+                        </div>
+                    `;
+                case 'BOOLEAN':
+                    return `
+                        <div class="config-field">
+                            <label class="checkbox-label">
+                                <input type="checkbox" class="config-input" id="${fieldId}" 
+                                       ${field.defaultValue === 'true' ? 'checked' : ''} ${required}>
+                                ${field.inputLabel}${field.required ? ' *' : ''}
+                            </label>
+                            ${field.uiDescription ? `<small class="field-description">${field.uiDescription}</small>` : ''}
+                        </div>
+                    `;
+                default:
+                    return `<input type="text" class="config-input" id="${fieldId}" placeholder="${field.inputLabel}" ${required}>`;
+            }
+        }).join('');
+    }
+    
+    return ''; // No configuration fields
 }
 
 // Update the available cards list
@@ -225,9 +595,7 @@ function updateAvailableCardsList() {
                     <div class="available-card-status"></div>
                 </div>
                 <div class="available-card-actions">
-                    ${cardDef.needsConfigInput ? `
-                        <input type="text" class="config-input" placeholder="${cardDef.configInputLabel}" id="config-${cardDef.id}">
-                    ` : ''}
+                    ${renderConfigFields(cardDef)}
                     <button class="add-card-btn" onclick="addCardFromList('${cardDef.id}')" ${!canAdd ? 'style="display:none"' : ''}>
                         + Add card
                     </button>
@@ -294,34 +662,60 @@ function addCardFromList(cardTypeId) {
         return;
     }
     
-    // Get config value if needed
     let cardConfig = '';
-    if (cardDef.needsConfigInput) {
-        const configInput = document.getElementById(`config-${cardTypeId}`);
-        if (!configInput || !configInput.value.trim()) {
-            // Show error
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = `Please enter a value for ${cardDef.configInputLabel}`;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }, 3000);
+    let configMap = {};
+    
+    // Handle dynamic configuration fields
+    if (cardDef.configFields && cardDef.configFields.length > 0) {
+        // Collect values from all dynamic config fields
+        for (const field of cardDef.configFields) {
+            const fieldId = `config-${cardTypeId}-${field.key}`;
+            const input = document.getElementById(fieldId);
+            
+            if (!input) {
+                console.error(`Config input not found: ${fieldId}`);
+                continue;
             }
-            return;
+            
+            let value = '';
+            if (input.type === 'checkbox') {
+                value = input.checked ? 'true' : 'false';
+            } else {
+                value = input.value.trim();
+            }
+            
+            // Validate required fields
+            if (field.required && !value) {
+                if (globalActionStatusEl) {
+                    globalActionStatusEl.textContent = `Please enter a value for ${field.inputLabel}`;
+                    globalActionStatusEl.className = 'status-message error';
+                    globalActionStatusEl.style.display = 'block';
+                    setTimeout(() => {
+                        globalActionStatusEl.style.display = 'none';
+                        globalActionStatusEl.textContent = '';
+                        globalActionStatusEl.className = 'status-message';
+                    }, 3000);
+                }
+                return;
+            }
+            
+            if (value) {
+                configMap[field.key] = value;
+            }
         }
-        cardConfig = configInput.value.trim();
     }
     
     // Create new card configuration
     const newCard = {
         type: cardTypeId,
-        config: cardConfig,
         name: cardDef.name,
         order: configuredCards.length // Add to end
     };
+    
+    // Add configuration data
+    if (Object.keys(configMap).length > 0) {
+        newCard.configMap = configMap;
+    }
     
     // Add to current configuration
     configuredCards.push(newCard);
@@ -329,11 +723,18 @@ function addCardFromList(cardTypeId) {
     // Save to device
     saveCardConfiguration();
     
-    // Clear the config input if it exists
-    if (cardDef.needsConfigInput) {
-        const configInput = document.getElementById(`config-${cardTypeId}`);
-        if (configInput) {
-            configInput.value = '';
+    // Clear the config inputs
+    if (cardDef.configFields && cardDef.configFields.length > 0) {
+        for (const field of cardDef.configFields) {
+            const fieldId = `config-${cardTypeId}-${field.key}`;
+            const input = document.getElementById(fieldId);
+            if (input) {
+                if (input.type === 'checkbox') {
+                    input.checked = field.defaultValue === 'true';
+                } else {
+                    input.value = field.defaultValue || '';
+                }
+            }
         }
     }
     
@@ -350,6 +751,18 @@ function addCardFromList(cardTypeId) {
             globalActionStatusEl.className = 'status-message';
         }, 3000);
     }
+}
+
+// Get display text for card configuration
+function getConfigDisplayText(card) {
+    if (card.configMap && Object.keys(card.configMap).length > 0) {
+        // Display dynamic configuration
+        const configEntries = Object.entries(card.configMap)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(', ');
+        return ` • Config: ${configEntries}`;
+    }
+    return ''; // No configuration
 }
 
 // Update the cards list UI with drag-and-drop functionality
@@ -383,7 +796,7 @@ function updateCardsListUI() {
                     <div>
                         <strong>${card.name}</strong>
                         <br>
-                        <small>Type: ${card.type}${card.config ? ` • Config: ${card.config}` : ''}</small>
+                        <small>Type: ${card.type}${getConfigDisplayText(card)}</small>
                     </div>
                 </div>
                 <div>
@@ -519,98 +932,7 @@ function deleteCard(index) {
     }
 }
 
-// Delete insight (legacy function for backward compatibility)
-function deleteInsight(id) {
-    if (!confirm('Are you sure you want to delete this insight?')) {
-        return;
-    }
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    const formData = new FormData();
-    formData.append('id', id);
 
-    fetch('/api/actions/delete-insight', { 
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data && data.status === 'queued') {
-            console.log("Delete insight action successfully queued.", data.message);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = data.message || "Delete insight initiated.";
-                globalActionStatusEl.className = 'status-message info';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.textContent === (data.message || "Delete insight initiated.")) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 5000);
-            }
-        } else {
-            const errorMessage = (data && data.message) ? data.message : "Failed to initiate delete insight.";
-            console.error("Failed to initiate delete insight:", errorMessage);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = errorMessage;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.className.includes('error')) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 7000);
-            }
-        }
-    })
-    .catch(() => {
-        console.error("Communication error deleting insight.");
-        if (globalActionStatusEl) {
-            globalActionStatusEl.textContent = "Communication error deleting insight.";
-            globalActionStatusEl.className = 'status-message error';
-            globalActionStatusEl.style.display = 'block';
-            setTimeout(() => {
-                if (globalActionStatusEl.className.includes('error')) {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }
-            }, 7000);
-        }
-    });
-}
-
-// Load insights list - UI update part will be in pollApiStatus (legacy function)
-function _updateInsightsListUI(insights) {
-    const container = document.getElementById('insights-list');
-    if (!container) {
-        // Container doesn't exist in new UI, skip silently
-        return;
-    }
-    
-    container.innerHTML = '';
-    
-    if (!insights || insights.length === 0) {
-        container.innerHTML = '<p>No insights configured</p>';
-        return;
-    }
-    
-    const list = document.createElement('ul');
-    list.className = 'insights-list';
-    
-    insights.forEach(insight => {
-        const item = document.createElement('li');
-        item.className = 'insight-item';
-        item.innerHTML = `
-            <button onclick="deleteInsight('${insight.id}')" class="button danger">Delete ${insight.title}</button>
-        `;
-        list.appendChild(item);
-    });
-    
-    container.appendChild(list);
-}
 
 // Refresh network list - UI update part will be in pollApiStatus
 function _updateNetworksListUI(networks) {
@@ -700,7 +1022,6 @@ function requestScanNetworks() {
 // Main function to poll /api/status and update UI
 let lastProcessedAction = null;
 let lastProcessedActionMessage = "";
-let initialDeviceConfigLoaded = false;
 let lastWifiUpdateTime = 0;
 const WIFI_UPDATE_INTERVAL = 10000; // Update WiFi list every 10 seconds
 
@@ -805,15 +1126,7 @@ function pollApiStatus() {
                 }
             }
 
-            // 3. Update Device Config Info
-            if (data.device_config) {
-                _updateDeviceConfigUI(data.device_config);
-            }
 
-            // 4. Update Insights List (legacy - remove if cards are working)
-            if (data.insights) {
-                _updateInsightsListUI(data.insights);
-            }
             
             // 4a. Refresh card configuration periodically
             // Note: We refresh cards on successful completion of card-related actions
@@ -841,26 +1154,6 @@ function pollApiStatus() {
         });
 }
 
-// Load current configuration - UI update part will be in pollApiStatus
-function _updateDeviceConfigUI(config) {
-    if (!initialDeviceConfigLoaded) {
-        if (config.team_id !== undefined) {
-            const teamIdField = document.getElementById('teamId');
-            // Only set value if field exists and is empty
-            if (teamIdField && !teamIdField.value) {
-                teamIdField.value = config.team_id;
-            }
-        }
-        if (config.api_key_display !== undefined) { 
-            const apiKeyField = document.getElementById('apiKey');
-            // Only set value if field exists and is empty
-            if (apiKeyField && !apiKeyField.value) {
-                apiKeyField.value = config.api_key_display;
-            }
-        }
-        initialDeviceConfigLoaded = true;
-    }
-}
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', function() {
@@ -889,7 +1182,14 @@ document.addEventListener('DOMContentLoaded', function() {
         refreshBtn.addEventListener('click', requestScanNetworks);
     }
     
-    // Initialize card management with a small delay to avoid overwhelming the device
+    // Initialize service and card management with small delays to avoid overwhelming the device
+    setTimeout(() => {
+        loadServiceDefinitions();
+        setTimeout(() => {
+            loadConfiguredServices();
+        }, 300);
+    }, 500);
+    
     setTimeout(() => {
         loadCardDefinitions();
         setTimeout(() => {

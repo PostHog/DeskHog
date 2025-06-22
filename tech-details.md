@@ -88,65 +88,203 @@ The DeskHog uses a dynamic card system that allows users to configure which card
 
 #### Adding new card types
 
-To create a new card type, you need to:
+The DeskHog now features a **dynamic configuration system** that allows cards to have sophisticated configuration forms with multiple fields, different input types, validation, and more. Here's how to create new card types:
 
-1. **Add to CardType enum** - Add your new type to the `CardType` enum in `src/ui/CardController.h`
-2. **Create the card class** - Implement your card UI using LVGL
-3. **Register the card type** - Add it to CardController's registration system
-4. **Add configuration support** (optional) - If your card needs user input
-
-**Example: Adding a simple "Hello World" card**
+**Step 1: Add to CardType enum**
+Add your new type to `src/config/CardConfig.h`:
 
 ```cpp
-// 1. Add to CardType enum (src/ui/CardController.h)
 enum class CardType {
-    INSIGHT = 0,
-    FRIEND = 1,
-    HELLO = 2  // Add your new type here
+    INSIGHT,
+    FRIEND,
+    WEATHER    // Add your new type here
 };
 
-// 2. Create your card class (src/ui/HelloCard.h)
-class HelloCard {
+// Don't forget to update the helper functions too:
+inline String cardTypeToString(CardType type) {
+    switch (type) {
+        case CardType::INSIGHT: return "INSIGHT";
+        case CardType::FRIEND: return "FRIEND";
+        case CardType::WEATHER: return "WEATHER";  // Add this line
+        default: return "UNKNOWN";
+    }
+}
+
+inline CardType stringToCardType(const String& str) {
+    if (str == "INSIGHT") return CardType::INSIGHT;
+    if (str == "FRIEND") return CardType::FRIEND;
+    if (str == "WEATHER") return CardType::WEATHER;  // Add this line
+    return CardType::INSIGHT; // Default fallback
+}
+```
+
+**Step 2: Create your card class**
+Implement your card UI using LVGL:
+
+```cpp
+// src/ui/WeatherCard.h
+class WeatherCard {
 public:
-    HelloCard(lv_obj_t* parent);
+    WeatherCard(lv_obj_t* parent, const std::map<String, String>& config);
     lv_obj_t* getCard() const { return _card; }
 
 private:
     lv_obj_t* _card;
+    String _location;
+    bool _showForecast;
 };
 
-// 3. Register in CardController::initializeCardTypes()
-CardDefinition helloDef;
-helloDef.type = CardType::HELLO;
-helloDef.name = "Hello world";
-helloDef.allowMultiple = true;
-helloDef.needsConfigInput = false;
-helloDef.uiDescription = "A simple greeting card";
-helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
-    HelloCard* newCard = new HelloCard(screen);
-    return newCard ? newCard->getCard() : nullptr;
-};
-registerCardType(helloDef);
+// src/ui/WeatherCard.cpp
+WeatherCard::WeatherCard(lv_obj_t* parent, const std::map<String, String>& config) {
+    // Extract configuration values
+    auto locationIt = config.find("location");
+    _location = (locationIt != config.end()) ? locationIt->second : "New York";
+    
+    auto forecastIt = config.find("show_forecast");
+    _showForecast = (forecastIt != config.end()) ? (forecastIt->second == "true") : false;
+    
+    // Create LVGL UI using the configuration...
+    _card = lv_obj_create(parent);
+    // ... implement your UI here
+}
 ```
 
-**Card definition properties:**
-- `type`: Unique enum value for your card type
-- `name`: Display name in the web UI
-- `allowMultiple`: Whether users can add multiple instances
-- `needsConfigInput`: Whether the card requires configuration input
-- `configInputLabel`: Label for the config input field (if needed)
-- `uiDescription`: Description shown in the web UI
-- `factory`: Lambda function that creates card instances
+**Step 3: Register the card type with dynamic configuration**
+Add to `CardController::initializeCardTypes()` in `src/ui/CardController.cpp`:
+
+```cpp
+void CardController::initializeCardTypes() {
+    // ... existing registrations ...
+    
+    // Register WEATHER card type with dynamic configuration
+    std::vector<ConfigField> weatherFields = {
+        ConfigField("location", "Location", "Enter the city name for weather", 
+                   ConfigFieldType::TEXT, "New York", true),
+        ConfigField("units", "Units", "Temperature units", 
+                   std::vector<String>{"Celsius", "Fahrenheit"}, "Celsius", false),
+        ConfigField("show_forecast", "Show Forecast", "Display 5-day forecast", 
+                   ConfigFieldType::BOOLEAN, "false", false),
+        ConfigField("update_interval", "Update Interval (minutes)", 
+                   "How often to fetch weather data", 
+                   ConfigFieldType::TEXT, "30", false)
+    };
+    
+    CardDefinition weatherDef(CardType::WEATHER, "Weather card", true,
+                             "Display current weather and forecast", weatherFields);
+    
+    // Set up the factory function
+    weatherDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
+        // Validate required fields
+        auto locationIt = configValues.find("location");
+        if (locationIt == configValues.end() || locationIt->second.isEmpty()) {
+            Serial.println("Error: Location is required for weather card");
+            return nullptr;
+        }
+        
+        // Create the weather card with configuration
+        WeatherCard* newCard = new WeatherCard(screen, configValues);
+        
+        if (newCard && newCard->getCard()) {
+            // Add to any tracking collections if needed
+            // weatherCards.push_back(newCard);
+            
+            Serial.printf("Created weather card for location: %s\n", 
+                         locationIt->second.c_str());
+            return newCard->getCard();
+        }
+        
+        delete newCard;
+        return nullptr;
+    };
+    
+    // Legacy factory for backward compatibility (optional)
+    weatherDef.legacyFactory = [this](const String& configValue) -> lv_obj_t* {
+        std::map<String, String> config;
+        config["location"] = configValue;  // Treat legacy config as location
+        return weatherDef.factory(config);
+    };
+    
+    registerCardType(weatherDef);
+}
+```
+
+**Configuration Field Types:**
+
+- **`ConfigFieldType::TEXT`** - Single-line text input
+- **`ConfigFieldType::TEXTAREA`** - Multi-line text input  
+- **`ConfigFieldType::SELECT`** - Dropdown with predefined options
+- **`ConfigFieldType::BOOLEAN`** - Checkbox for true/false values
+
+**ConfigField Parameters:**
+```cpp
+ConfigField(
+    "key",              // Unique key for this field
+    "Display Label",    // Label shown to user
+    "Help description", // Detailed help text
+    ConfigFieldType::TEXT,  // Input type
+    "default_value",    // Default value (optional)
+    true               // Whether field is required
+);
+
+// For SELECT type with options:
+ConfigField("units", "Temperature Units", "Choose temperature scale",
+           std::vector<String>{"Celsius", "Fahrenheit"}, "Celsius", false);
+```
+
+**CardDefinition Properties:**
+- `type`: Your CardType enum value
+- `name`: Display name in web UI
+- `allowMultiple`: Whether users can add multiple instances of this card type
+- `uiDescription`: Description shown in web UI
+- `configFields`: Vector of ConfigField objects defining the configuration form
+- `factory`: Lambda that creates cards using `std::map<String, String>` config
+- `legacyFactory`: Optional legacy support for old single-string configs
+
+**Step 4: Update cleanup code (if needed)**
+If your card needs special cleanup, add it to `CardController::reconcileCards()`:
+
+```cpp
+// In reconcileCards(), add cleanup for your card type:
+// Remove weather cards
+for (auto* card : weatherCards) {
+    if (card && card->getCard()) {
+        cardStack->removeCard(card->getCard());
+    }
+    delete card;
+}
+weatherCards.clear();
+```
 
 #### Web UI integration
 
-The web UI automatically displays available card types with:
-- Add buttons for cards that can be added
-- Configuration inputs for cards that need them
+The web UI automatically generates sophisticated configuration forms based on your card definitions. Features include:
+
+**Automatic form generation:**
+- Text inputs, dropdowns, textareas, and checkboxes based on `ConfigFieldType`
+- Field validation for required fields
+- Default values and help text
+- Options for SELECT fields
+
+**Card management:**
+- Add buttons for cards that can be added (respects `allowMultiple`)
 - Status indicators showing how many instances are configured
 - Drag-and-drop reordering for configured cards
+- Dynamic configuration display in the cards list
 
-No web UI changes are needed when adding new card types - everything is driven by the card registration system.
+**Example generated form for the weather card above:**
+- "Location" text input (required, marked with *)
+- "Units" dropdown with Celsius/Fahrenheit options
+- "Show Forecast" checkbox
+- "Update Interval" text input with default "30"
+- Help text displayed under each field
+
+**No web UI changes needed** - everything is driven by the card registration system. The web UI automatically:
+1. Fetches card definitions from `/api/cards/definitions`
+2. Renders appropriate input fields based on `configFields`
+3. Validates required fields before submission
+4. Sends dynamic configuration as JSON to `/api/cards/configured`
+
+**Backward compatibility:** The system seamlessly supports both new dynamic configurations and legacy single-string configurations, so existing cards continue working without changes.
 
 ### Insight parser and PostHog client
 

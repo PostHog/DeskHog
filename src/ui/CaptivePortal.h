@@ -18,6 +18,7 @@
 #include "html_portal.h"  // Include generated HTML header
 #include "EventQueue.h"   // Include the event queue
 #include "config/CardConfig.h"  // Include card configuration structures
+#include "config/ServiceConfig.h"  // Include service configuration structures
 // #include "OtaManager.h" // Will be included in .cpp, forward declare here
 
 class OtaManager; // Forward declaration
@@ -28,9 +29,6 @@ enum class PortalAction {
     NONE,
     SCAN_WIFI,
     SAVE_WIFI,
-    SAVE_DEVICE_CONFIG,
-    SAVE_INSIGHT,
-    DELETE_INSIGHT,
     CHECK_OTA_UPDATE,
     START_OTA_UPDATE
 };
@@ -122,35 +120,7 @@ private:
      */
     void handleSaveWifi(AsyncWebServerRequest *request);
 
-    /**
-     * @brief Return current device configuration
-     * Returns team ID and truncated API key
-     */
-    void handleGetDeviceConfig(AsyncWebServerRequest *request);
 
-    /**
-     * @brief Handle device configuration updates
-     * Accepts team ID and API key updates
-     */
-    void handleSaveDeviceConfig(AsyncWebServerRequest *request);
-
-    /**
-     * @brief Return list of configured insights
-     * Returns JSON array of insight IDs and titles
-     */
-    void handleGetInsights(AsyncWebServerRequest *request);
-
-    /**
-     * @brief Handle new insight creation
-     * Accepts insight ID, publishes INSIGHT_ADDED event
-     */
-    void handleSaveInsight(AsyncWebServerRequest *request);
-
-    /**
-     * @brief Handle insight deletion
-     * Accepts JSON with insight ID, publishes INSIGHT_DELETED event
-     */
-    void handleDeleteInsight(AsyncWebServerRequest *request);
 
     /**
      * @brief Return list of available card types
@@ -169,6 +139,24 @@ private:
      * Accepts JSON array of CardConfig objects
      */
     void handleSaveConfiguredCards(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Return list of available service types
+     * Returns JSON array of ServiceDefinition objects
+     */
+    void handleGetServiceDefinitions(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Return current service configuration
+     * Returns JSON array of ServiceConfig objects
+     */
+    void handleGetConfiguredServices(AsyncWebServerRequest *request);
+
+    /**
+     * @brief Handle service configuration updates
+     * Accepts JSON array of ServiceConfig objects
+     */
+    void handleSaveConfiguredServices(AsyncWebServerRequest *request);
 
     /**
      * @brief Handle captive portal detection
@@ -215,9 +203,6 @@ private:
     void handleApiStatus(AsyncWebServerRequest *request);
     void handleRequestWifiScan(AsyncWebServerRequest *request);
     void handleRequestSaveWifi(AsyncWebServerRequest *request);
-    void handleRequestSaveDeviceConfig(AsyncWebServerRequest *request);
-    void handleRequestSaveInsight(AsyncWebServerRequest *request);
-    void handleRequestDeleteInsight(AsyncWebServerRequest *request);
     void handleRequestCheckOtaUpdate(AsyncWebServerRequest *request);
     void handleRequestStartOtaUpdate(AsyncWebServerRequest *request);
 

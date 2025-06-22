@@ -17,38 +17,21 @@ void ConfigManager::setEventQueue(EventQueue* queue) {
 void ConfigManager::begin() {
     // Initialize preferences
     _preferences.begin(_namespace, false);
-    _insightsPrefs.begin(_insightsNamespace, false);
     _cardPrefs.begin(_cardNamespace, false);
+    _servicePrefs.begin(_serviceNamespace, false);
     
-    // Check initial API configuration state
-    updateApiConfigurationState();
 }
 
-// Private helper to check and update API configuration state
-void ConfigManager::updateApiConfigurationState() {
-    if (!_preferences.isKey(_teamIdKey) || getTeamId() == NO_TEAM_ID) {
-        SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-        return;
-    }
-    
-    if (!_preferences.isKey(_apiKeyKey) || getApiKey().isEmpty()) {
-        SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-        return;
-    }
-    
-    // Both team ID and API key are set
-    SystemController::setApiState(ApiState::API_CONFIGURED);
-}
 
 // Helper method to commit changes to flash
 void ConfigManager::commit() {
     _preferences.end();
-    _insightsPrefs.end();
     _cardPrefs.end();
+    _servicePrefs.end();
     
     _preferences.begin(_namespace, false);
-    _insightsPrefs.begin(_insightsNamespace, false);
     _cardPrefs.begin(_cardNamespace, false);
+    _servicePrefs.begin(_serviceNamespace, false);
 }
 
 bool ConfigManager::saveWiFiCredentials(const String& ssid, const String& password) {
@@ -120,155 +103,11 @@ bool ConfigManager::checkWiFiCredentialsAndPublish() {
     return hasCredentials;
 }
 
-bool ConfigManager::saveInsight(const String& id, const String& title) {
-    if (id.length() == 0 || id.length() > MAX_INSIGHT_ID_LENGTH) {
-        return false;
-    }
-    // Store the insight content
-    _insightsPrefs.putString(id.c_str(), title);
 
-    // Update the ID list
-    auto ids = getAllInsightIds();
-    if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
-        ids.push_back(id);
-        updateIdList(ids);
-    }
-    
-    // Commit changes
-    commit();
 
-    return true;
-}
 
-String ConfigManager::getInsight(const String& id) {
-    return _insightsPrefs.getString(id.c_str(), "");
-}
 
-void ConfigManager::deleteInsight(const String& id) {
-    if (_insightsPrefs.isKey(id.c_str())) {
-        _insightsPrefs.remove(id.c_str());
-        
-        // Update the ID list
-        auto ids = getAllInsightIds();
-        ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
-        updateIdList(ids);
-        
-        // Commit changes
-        commit();
-    }
-}
 
-std::vector<String> ConfigManager::getAllInsightIds() {
-    std::vector<String> ids;
-    
-    // Check if the key exists first to avoid error logs
-    if (!_insightsPrefs.isKey("_id_list")) {
-        return ids; // Return empty vector if no insights stored yet
-    }
-    
-    // We'll maintain a special key that stores all insight IDs
-    String idList = _insightsPrefs.getString("_id_list", "");
-    
-    if (idList.length() > 0) {
-        // Split the ID list on commas
-        int start = 0;
-        int end = idList.indexOf(',');
-        while (end >= 0) {
-            ids.push_back(idList.substring(start, end));
-            start = end + 1;
-            end = idList.indexOf(',', start);
-        }
-        // Add the last ID if there is one
-        if (start < idList.length()) {
-            ids.push_back(idList.substring(start));
-        }
-    }
-    
-    return ids;
-}
-
-void ConfigManager::updateIdList(const std::vector<String>& ids) {
-    String idList;
-    for (size_t i = 0; i < ids.size(); i++) {
-        idList += ids[i];
-        if (i < ids.size() - 1) {
-            idList += ",";
-        }
-    }
-    _insightsPrefs.putString("_id_list", idList);
-    
-    // Commit changes
-    commit();
-}
-
-void ConfigManager::setTeamId(int teamId) {
-    _preferences.putInt(_teamIdKey, teamId);
-    
-    // Commit changes
-    commit();
-    
-    updateApiConfigurationState();
-}
-
-int ConfigManager::getTeamId() {
-    if (!_preferences.isKey(_teamIdKey)) {
-        return NO_TEAM_ID;
-    }
-    return _preferences.getInt(_teamIdKey);
-}
-
-void ConfigManager::setRegion(String region) {
-    _preferences.putString(_regionKey, region);
-    
-    // Commit changes
-    commit();
-    
-    updateApiConfigurationState();
-}
-
-String ConfigManager::getRegion() {
-    if (!_preferences.isKey(_regionKey)) {
-        return "us";
-    }
-    return _preferences.getString(_regionKey);
-}
-
-void ConfigManager::clearTeamId() {
-    _preferences.remove(_teamIdKey);
-    
-    // Commit changes
-    commit();
-    
-    SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-}
-
-bool ConfigManager::setApiKey(const String& apiKey) {
-    if (apiKey.length() == 0 || apiKey.length() > MAX_API_KEY_LENGTH) {
-        SystemController::setApiState(ApiState::API_CONFIG_INVALID);
-        return false;
-    }
-
-    _preferences.putString(_apiKeyKey, apiKey);
-    
-    // Commit changes
-    commit();
-    
-    updateApiConfigurationState();
-    return true;
-}
-
-String ConfigManager::getApiKey() {
-    return _preferences.getString(_apiKeyKey, "");
-}
-
-void ConfigManager::clearApiKey() {
-    _preferences.remove(_apiKeyKey);
-    
-    // Commit changes
-    commit();
-    
-    SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-}
 
 std::vector<CardConfig> ConfigManager::getCardConfigs() {
     std::vector<CardConfig> configs;
@@ -281,8 +120,8 @@ std::vector<CardConfig> ConfigManager::getCardConfigs() {
     // Get JSON string from preferences
     String jsonString = _cardPrefs.getString("config_list", "[]");
     
-    // Parse JSON
-    DynamicJsonDocument doc(2048);
+    // Parse JSON with larger size for dynamic configs
+    DynamicJsonDocument doc(4096);
     DeserializationError error = deserializeJson(doc, jsonString);
     
     if (error) {
@@ -294,12 +133,20 @@ std::vector<CardConfig> ConfigManager::getCardConfigs() {
     JsonArray array = doc.as<JsonArray>();
     for (JsonVariant v : array) {
         JsonObject obj = v.as<JsonObject>();
-        if (obj.containsKey("type") && obj.containsKey("config") && obj.containsKey("order")) {
+        if (obj.containsKey("type") && obj.containsKey("order")) {
             CardConfig config;
             config.type = stringToCardType(obj["type"].as<String>());
-            config.config = obj["config"].as<String>();
             config.order = obj["order"].as<int>();
             config.name = obj["name"].as<String>();
+            
+            // Handle dynamic configuration loading
+            if (obj.containsKey("configMap") && obj["configMap"].is<JsonObject>()) {
+                JsonObject configMap = obj["configMap"].as<JsonObject>();
+                for (JsonPair kv : configMap) {
+                    config.setConfig(String(kv.key().c_str()), kv.value().as<String>());
+                }
+            }
+            
             configs.push_back(config);
         }
     }
@@ -308,17 +155,35 @@ std::vector<CardConfig> ConfigManager::getCardConfigs() {
 }
 
 bool ConfigManager::saveCardConfigs(const std::vector<CardConfig>& configs) {
-    // Create JSON document
-    DynamicJsonDocument doc(2048);
+    // Create JSON document with larger size for dynamic configs
+    DynamicJsonDocument doc(4096);
     JsonArray array = doc.to<JsonArray>();
     
     // Convert vector to JSON array
     for (const CardConfig& config : configs) {
         JsonObject obj = array.createNestedObject();
         obj["type"] = cardTypeToString(config.type);
-        obj["config"] = config.config;
         obj["order"] = config.order;
         obj["name"] = config.name;
+        
+        // Handle dynamic configuration storage
+        if (config.config.empty()) {
+            obj["config"] = "";  // No configuration
+        } else {
+            auto legacyIt = config.config.find("legacy");
+            if (config.config.size() == 1 && legacyIt != config.config.end()) {
+                // Legacy single configuration value
+                obj["config"] = legacyIt->second;
+            } else {
+                // Dynamic configuration - store as nested object
+                JsonObject configObj = obj.createNestedObject("configMap");
+                for (const auto& pair : config.config) {
+                    configObj[pair.first] = pair.second;
+                }
+                // Also store first value as legacy config for backward compatibility
+                obj["config"] = config.config.empty() ? "" : config.config.begin()->second;
+            }
+        }
     }
     
     // Serialize to string
@@ -340,4 +205,101 @@ bool ConfigManager::saveCardConfigs(const std::vector<CardConfig>& configs) {
     }
     
     return true;
+}
+
+std::vector<ServiceConfig> ConfigManager::getServiceConfigs() {
+    std::vector<ServiceConfig> configs;
+    
+    // Check if the key exists first to avoid error logs
+    if (!_servicePrefs.isKey("service_list")) {
+        return configs; // Return empty vector if no service config stored yet
+    }
+    
+    // Get JSON string from preferences
+    String jsonString = _servicePrefs.getString("service_list", "[]");
+    
+    // Parse JSON with larger size for dynamic configs
+    DynamicJsonDocument doc(4096);
+    DeserializationError error = deserializeJson(doc, jsonString);
+    
+    if (error) {
+        Serial.printf("Failed to parse service configs JSON: %s\n", error.c_str());
+        return configs; // Return empty vector on parse error
+    }
+    
+    // Convert JSON array to vector of ServiceConfig
+    JsonArray array = doc.as<JsonArray>();
+    for (JsonVariant v : array) {
+        JsonObject obj = v.as<JsonObject>();
+        if (obj.containsKey("type")) {
+            ServiceConfig config;
+            config.type = stringToServiceType(obj["type"].as<String>());
+            
+            // Handle dynamic configuration loading
+            if (obj.containsKey("config") && obj["config"].is<JsonObject>()) {
+                JsonObject configObj = obj["config"].as<JsonObject>();
+                for (JsonPair kv : configObj) {
+                    config.setConfig(String(kv.key().c_str()), kv.value().as<String>());
+                }
+            }
+            
+            configs.push_back(config);
+        }
+    }
+    
+    return configs;
+}
+
+bool ConfigManager::saveServiceConfigs(const std::vector<ServiceConfig>& configs) {
+    // Create JSON document with larger size for dynamic configs
+    DynamicJsonDocument doc(4096);
+    JsonArray array = doc.to<JsonArray>();
+    
+    // Convert vector to JSON array
+    for (const ServiceConfig& config : configs) {
+        JsonObject obj = array.createNestedObject();
+        obj["type"] = serviceTypeToString(config.type);
+        
+        // Handle dynamic configuration storage
+        if (!config.config.empty()) {
+            JsonObject configObj = obj.createNestedObject("config");
+            for (const auto& pair : config.config) {
+                configObj[pair.first] = pair.second;
+            }
+        }
+    }
+    
+    // Serialize to string
+    String jsonString;
+    if (serializeJson(doc, jsonString) == 0) {
+        Serial.println("Failed to serialize service configs to JSON");
+        return false;
+    }
+    
+    // Save to preferences
+    _servicePrefs.putString("service_list", jsonString);
+    
+    // Commit changes
+    commit();
+    
+    // Publish event if event queue is available
+    if (_eventQueue != nullptr) {
+        _eventQueue->publishEvent(EventType::SERVICE_CONFIG_CHANGED, "");
+    }
+    
+    return true;
+}
+
+ServiceConfig ConfigManager::getServiceConfig(ServiceType type) {
+    std::vector<ServiceConfig> configs = getServiceConfigs();
+    for (const ServiceConfig& config : configs) {
+        if (config.type == type) {
+            return config;
+        }
+    }
+    
+    // Return empty config if not found
+    ServiceConfig empty;
+    empty.type = type;
+    return empty;
 }

@@ -178,11 +178,6 @@ private:
      */
     void createAnimationCard();
     
-    /**
-     * @brief Handle insight-related events
-     * @param event Event containing insight data
-     */
-    void handleInsightEvent(const Event& event);
 
     /**
      * @brief Handle WiFi-related events

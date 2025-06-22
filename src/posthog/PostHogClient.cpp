@@ -1,5 +1,6 @@
 #include "PostHogClient.h"
 #include "../ConfigManager.h"
+#include "../services/PostHogService.h"
 
 
 
@@ -14,7 +15,9 @@ PostHogClient::PostHogClient(ConfigManager& config, EventQueue& eventQueue)
 }
 
 String PostHogClient::buildBaseUrl() const {
-    return "https://" + _config.getRegion() + ".posthog.com/api/projects/";
+    ServiceConfig posthogConfig = _config.getServiceConfig(ServiceType::POSTHOG);
+    String region = posthogConfig.getConfig("region", "us");
+    return "https://" + region + ".posthog.com/api/projects/";
 }
 
 void PostHogClient::requestInsightData(const String& insight_id) {
@@ -30,9 +33,13 @@ void PostHogClient::requestInsightData(const String& insight_id) {
 }
 
 bool PostHogClient::isReady() const {
+    ServiceConfig posthogConfig = _config.getServiceConfig(ServiceType::POSTHOG);
+    String teamIdStr = posthogConfig.getConfig("team_id");
+    String apiKey = posthogConfig.getConfig("api_key");
+    
     return SystemController::isSystemFullyReady() && 
-           _config.getTeamId() != ConfigManager::NO_TEAM_ID && 
-           _config.getApiKey().length() > 0;
+           !teamIdStr.isEmpty() && teamIdStr.toInt() > 0 && 
+           !apiKey.isEmpty();
 }
 
 void PostHogClient::process() {
@@ -133,14 +140,18 @@ void PostHogClient::checkRefreshes() {
 }
 
 String PostHogClient::buildInsightUrl(const String& insight_id, const char* refresh_mode) const {
+    ServiceConfig posthogConfig = _config.getServiceConfig(ServiceType::POSTHOG);
+    String teamIdStr = posthogConfig.getConfig("team_id");
+    String apiKey = posthogConfig.getConfig("api_key");
+    
     String url = buildBaseUrl();
-    url += String(_config.getTeamId());
+    url += teamIdStr;
     url += "/insights/?refresh=";
     url += refresh_mode;
     url += "&short_id=";
     url += insight_id;
     url += "&personal_api_key=";
-    url += _config.getApiKey();
+    url += apiKey;
     return url;
 }
 

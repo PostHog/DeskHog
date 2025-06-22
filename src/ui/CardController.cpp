@@ -1,5 +1,6 @@
 #include "ui/CardController.h"
 #include <algorithm>
+#include <map>
 
 QueueHandle_t CardController::uiQueue = nullptr;
 
@@ -83,31 +84,12 @@ void CardController::initialize(DisplayInterface* display) {
     // Load current card configuration and create cards
     currentCardConfigs = configManager.getCardConfigs();
     
-    // If no configuration exists, create default cards for backward compatibility
-    if (currentCardConfigs.empty()) {
-        // Create default friend card
-        createAnimationCard();
-        
-        // Create insight cards from legacy storage
-        std::vector<String> insightIds = configManager.getAllInsightIds();
-        for (const String& id : insightIds) {
-            createInsightCard(id);
-        }
-    } else {
-        // Create cards based on stored configuration
-        reconcileCards(currentCardConfigs);
-    }
+    // Create cards based on stored configuration
+    reconcileCards(currentCardConfigs);
     
     // Connect WiFi manager to UI
     wifiInterface.setUI(provisioningCard);
     
-    // Subscribe to insight events (legacy support)
-    eventQueue.subscribe([this](const Event& event) {
-        if (event.type == EventType::INSIGHT_ADDED || 
-            event.type == EventType::INSIGHT_DELETED) {
-            handleInsightEvent(event);
-        }
-    });
     
     // Subscribe to card configuration changes
     eventQueue.subscribe([this](const Event& event) {
@@ -178,8 +160,7 @@ void CardController::createInsightCard(const String& insightId) {
         // Create new insight card using full screen dimensions
         InsightCard* newCard = new InsightCard(
             screen,         // LVGL parent object
-            configManager,  // Dependencies
-            eventQueue,
+            eventQueue,     // Dependencies
             insightId,
             screenWidth,    // Dimensions
             screenHeight
@@ -208,33 +189,6 @@ void CardController::createInsightCard(const String& insightId) {
     });
 }
 
-// Handle insight events
-void CardController::handleInsightEvent(const Event& event) {
-    if (event.type == EventType::INSIGHT_ADDED) {
-        createInsightCard(event.insightId);
-    } 
-    else if (event.type == EventType::INSIGHT_DELETED) {
-        if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-            return;
-        }
-        
-        // Find and remove the card
-        for (auto it = insightCards.begin(); it != insightCards.end(); ++it) {
-            InsightCard* card = *it;
-            if (card->getInsightId() == event.insightId) {
-                // Remove from card stack
-                cardStack->removeCard(card->getCard());
-                
-                // Remove from vector and delete
-                insightCards.erase(it);
-                delete card;
-                break;
-            }
-        }
-        
-        displayInterface->giveMutex();
-    }
-}
 
 // Handle WiFi events
 void CardController::handleWiFiEvent(const Event& event) {
@@ -276,21 +230,29 @@ void CardController::registerCardType(const CardDefinition& definition) {
 }
 
 void CardController::initializeCardTypes() {
-    // Register INSIGHT card type
-    CardDefinition insightDef;
-    insightDef.type = CardType::INSIGHT;
-    insightDef.name = "PostHog insight";
-    insightDef.allowMultiple = true;
-    insightDef.needsConfigInput = true;
-    insightDef.configInputLabel = "Insight ID";
-    insightDef.uiDescription = "Insight cards let you keep an eye on PostHog data";
-    insightDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    // Register INSIGHT card type with dynamic configuration
+    std::vector<ConfigField> insightFields = {
+        ConfigField("insight_id", "Insight ID", "Enter the PostHog insight ID you want to display", ConfigFieldType::TEXT, "", true)
+    };
+    
+    CardDefinition insightDef(CardType::INSIGHT, "PostHog insight", true, 
+                             "Insight cards let you keep an eye on PostHog data", insightFields);
+    
+    // Set up factory function
+    insightDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
+        auto it = configValues.find("insight_id");
+        if (it == configValues.end() || it->second.isEmpty()) {
+            Serial.println("Error: No insight ID provided in configuration");
+            return nullptr;
+        }
+        
+        String insightId = it->second;
+        
         // Create new insight card using the insight ID
         InsightCard* newCard = new InsightCard(
             screen,
-            configManager,
             eventQueue,
-            configValue,
+            insightId,
             screenWidth,
             screenHeight
         );
@@ -300,8 +262,8 @@ void CardController::initializeCardTypes() {
             insightCards.push_back(newCard);
             
             // Request data for this insight immediately
-            posthogClient.requestInsightData(configValue);
-            Serial.printf("Requested insight data for: %s\n", configValue.c_str());
+            posthogClient.requestInsightData(insightId);
+            Serial.printf("Requested insight data for: %s\n", insightId.c_str());
             
             return newCard->getCard();
         }
@@ -309,18 +271,15 @@ void CardController::initializeCardTypes() {
         delete newCard;
         return nullptr;
     };
+    
     registerCardType(insightDef);
     
-    // Register FRIEND card type  
-    CardDefinition friendDef;
-    friendDef.type = CardType::FRIEND;
-    friendDef.name = "Friend card";
-    friendDef.allowMultiple = false;
-    friendDef.needsConfigInput = false;
-    friendDef.configInputLabel = "";
-    friendDef.uiDescription = "Get reassurance from Max the hedgehog";
-    friendDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        // Create new friend card (ignore configValue for now)
+    // Register FRIEND card type (no configuration changes)
+    CardDefinition friendDef(CardType::FRIEND, "Friend card", false,
+                            "Get reassurance from Max the hedgehog", {});
+    
+    friendDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
+        // Create new friend card (no configuration needed)
         animationCard = new FriendCard(screen);
         
         if (animationCard && animationCard->getCard()) {
@@ -333,6 +292,7 @@ void CardController::initializeCardTypes() {
         animationCard = nullptr;
         return nullptr;
     };
+    
     registerCardType(friendDef);
 }
 
@@ -404,15 +364,19 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
                                       return def.type == config.type;
                                   });
             
-            if (it != registeredCardTypes.end() && it->factory) {
-                // Create the card using the factory function
-                lv_obj_t* cardObj = it->factory(config.config);
+            if (it != registeredCardTypes.end()) {
+                lv_obj_t* cardObj = nullptr;
+                
+                // Use factory function to create card
+                if (it->factory) {
+                    cardObj = it->factory(config.config);
+                }
+                
                 if (cardObj) {
                     cardStack->addCard(cardObj);
                     cardsCreated++;
-                    Serial.printf("Created card %zu of type %s with config: %s\n", 
-                                 cardsCreated, cardTypeToString(config.type).c_str(), 
-                                 config.config.c_str());
+                    Serial.printf("Created card %zu of type %s\n", 
+                                 cardsCreated, cardTypeToString(config.type).c_str());
                 } else {
                     Serial.printf("Failed to create card of type %s\n", 
                                  cardTypeToString(config.type).c_str());
@@ -510,18 +474,23 @@ void CardController::dispatchToLVGLTask(std::function<void()> update_func, bool 
 void CardController::handleCardTitleUpdated(const Event& event) {
     // Find and update the card configuration with the new title
     for (auto& cardConfig : currentCardConfigs) {
-        if (cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) {
-            // Update the name with the new title
-            if (cardConfig.name != event.title) {
-                cardConfig.name = event.title;
-                
-                // Save the updated configuration to persistent storage
-                configManager.saveCardConfigs(currentCardConfigs);
-                
-                Serial.printf("Updated card title for insight %s to: %s\n", 
-                             event.insightId.c_str(), event.title.c_str());
+        if (cardConfig.type == CardType::INSIGHT) {
+            // Check if this card config matches the insight ID
+            String configInsightId = cardConfig.getConfig("insight_id");
+            
+            if (configInsightId == event.insightId) {
+                // Update the name with the new title
+                if (cardConfig.name != event.title) {
+                    cardConfig.name = event.title;
+                    
+                    // Save the updated configuration to persistent storage
+                    configManager.saveCardConfigs(currentCardConfigs);
+                    
+                    Serial.printf("Updated card title for insight %s to: %s\n", 
+                                 event.insightId.c_str(), event.title.c_str());
+                }
+                break;
             }
-            break;
         }
     }
 } 
