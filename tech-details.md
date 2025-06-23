@@ -197,12 +197,6 @@ void CardController::initializeCardTypes() {
         return nullptr;
     };
     
-    // Legacy factory for backward compatibility (optional)
-    weatherDef.legacyFactory = [this](const String& configValue) -> lv_obj_t* {
-        std::map<String, String> config;
-        config["location"] = configValue;  // Treat legacy config as location
-        return weatherDef.factory(config);
-    };
     
     registerCardType(weatherDef);
 }
@@ -238,7 +232,6 @@ ConfigField("units", "Temperature Units", "Choose temperature scale",
 - `uiDescription`: Description shown in web UI
 - `configFields`: Vector of ConfigField objects defining the configuration form
 - `factory`: Lambda that creates cards using `std::map<String, String>` config
-- `legacyFactory`: Optional legacy support for old single-string configs
 
 **Step 4: Update cleanup code (if needed)**
 If your card needs special cleanup, add it to `CardController::reconcileCards()`:
@@ -284,7 +277,6 @@ The web UI automatically generates sophisticated configuration forms based on yo
 3. Validates required fields before submission
 4. Sends dynamic configuration as JSON to `/api/cards/configured`
 
-**Backward compatibility:** The system seamlessly supports both new dynamic configurations and legacy single-string configurations, so existing cards continue working without changes.
 
 ### Insight parser and PostHog client
 

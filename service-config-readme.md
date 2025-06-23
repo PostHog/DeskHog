@@ -431,19 +431,6 @@ public:
 - **ESP32 preferences**: Configuration stored in encrypted preferences partition
 - **JSON serialization**: Structured storage with proper error handling
 
-## 📝 Migration & Compatibility
-
-### Legacy PostHog Configuration
-The system maintains backward compatibility with existing PostHog configurations:
-
-- **Automatic migration**: Old ConfigManager fields are automatically migrated to service config
-- **Sync mechanism**: `PostHogService::syncToConfigManager()` maintains legacy field compatibility
-- **No data loss**: Existing configurations continue to work without user intervention
-
-### Gradual Migration Path
-1. **Legacy methods preserved**: Old ConfigManager PostHog methods still exist for compatibility
-2. **Service config priority**: New system takes precedence when available
-3. **Automatic fallback**: System falls back to legacy config if service config unavailable
 
 ## 🎯 Benefits
 
