@@ -62,8 +62,6 @@ void CaptivePortal::begin() {
     // Needs to be defined before the actual GET/POST handlers for the same paths.
     _server.on("/save-wifi", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     _server.on("/save-device-config", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
-    _server.on("/save-insight", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
-    _server.on("/delete-insight", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     _server.on("/start-update", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1));
     // _server.on("/check-update", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1)); // Usually GET, but if POST later
     // _server.on("/update-status", HTTP_OPTIONS, std::bind(&CaptivePortal::handleCorsPreflight, this, std::placeholders::_1)); // Usually GET

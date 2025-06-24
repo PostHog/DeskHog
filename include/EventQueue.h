@@ -14,9 +14,8 @@
  * @brief Event types in the system
  */
 enum class EventType {
-    INSIGHT_ADDED,
-    INSIGHT_DELETED,
     INSIGHT_DATA_RECEIVED,
+    INSIGHT_FORCE_REFRESH,
     WIFI_CREDENTIALS_FOUND,
     NEED_WIFI_CREDENTIALS,
     WIFI_CONNECTING,

@@ -933,7 +933,6 @@ function deleteCard(index) {
 }
 
 
-
 // Refresh network list - UI update part will be in pollApiStatus
 function _updateNetworksListUI(networks) {
     const select = document.getElementById('ssid');

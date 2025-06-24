@@ -42,11 +42,12 @@ public:
      * @brief Queue an insight for immediate fetch
      * 
      * @param insight_id ID of insight to fetch
+     * @param forceRefresh If true, force recalculation instead of using cache
      * 
      * Adds insight to request queue with retry count of 0.
      * Will be processed in FIFO order.
      */
-    void requestInsightData(const String& insight_id);
+    void requestInsightData(const String& insight_id, bool forceRefresh = false);
     
     /**
      * @brief Check if client is ready for operation
@@ -74,6 +75,7 @@ private:
     struct QueuedRequest {
         String insight_id;     ///< ID of insight to fetch
         uint8_t retry_count;   ///< Number of retry attempts
+        bool force_refresh;    ///< Force recalculation instead of cache
     };
     
     // Configuration
@@ -126,9 +128,10 @@ private:
      * 
      * @param insight_id ID of insight to fetch
      * @param response String to store response
+     * @param forceRefresh If true, force recalculation instead of using cache
      * @return true if fetch was successful
      */
-    bool fetchInsight(const String& insight_id, String& response);
+    bool fetchInsight(const String& insight_id, String& response, bool forceRefresh = false);
     
     /**
      * @brief Build insight API URL
