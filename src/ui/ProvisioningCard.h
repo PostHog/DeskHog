@@ -3,7 +3,7 @@
 #include <lvgl.h>  // LVGL core library
 #include <string>  // For String class (or could be Arduino's String)
 #include "hardware/WiFiInterface.h"  // Custom WiFi interface class
-#include "SystemController.h" // Added for ApiState, ControllerState
+#include "SystemController.h" // Added for ControllerState
 
 /**
  * @class ProvisioningCard
@@ -185,5 +185,4 @@ private:
 
     // Helper methods for SystemController integration
     void handleSystemStateChange(const ControllerState& newState);
-    String apiStateToString(ApiState state);
 };

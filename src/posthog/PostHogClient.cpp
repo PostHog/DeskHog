@@ -44,7 +44,7 @@ bool PostHogClient::isReady() const {
     ServiceConfig posthogConfig = _config.getServiceConfig(ServiceType::POSTHOG);
     String teamIdStr = posthogConfig.getConfig("team_id");
     String apiKey = posthogConfig.getConfig("api_key");
-    
+
     return SystemController::isSystemFullyReady() && 
            !teamIdStr.isEmpty() && teamIdStr.toInt() > 0 && 
            !apiKey.isEmpty();
@@ -164,6 +164,7 @@ String PostHogClient::buildInsightUrl(const String& insight_id, const char* refr
 }
 
 bool PostHogClient::fetchInsight(const String& insight_id, String& response, bool forceRefresh) {
+    Serial.printf("Fetching insight %s (forceRefresh=%d)\n", insight_id.c_str(), forceRefresh);
     if (!isReady() || WiFi.status() != WL_CONNECTED) {
         return false;
     }
