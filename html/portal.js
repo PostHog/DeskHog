@@ -376,7 +376,7 @@ function updateCardsListUI() {
         item.draggable = true;
         item.dataset.cardIndex = index;
         
-        item.innerHTML = `
+        item.textContent = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center;">
                     <span class="drag-handle">⋮⋮</span>
