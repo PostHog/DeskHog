@@ -156,45 +156,22 @@ function renderServiceConfigFields(serviceDef) {
             case 'SELECT':
                 const options = field.options || [];
                 
-                // If exactly 2 options, render as radio buttons like the existing region selector
-                if (options.length === 2) {
-                    const radioButtons = options.map(option => {
-                        const radioId = `${fieldId}-${option}`;
-                        const checked = option === field.defaultValue ? 'checked' : '';
-                        const displayText = option === 'us' ? 'US' : option === 'eu' ? 'EU' : option;
-                        return `
-                            <label for="${radioId}">
-                                <input type="radio" name="${fieldId}" id="${radioId}" value="${option}" ${checked} ${required}>
-                                ${displayText}
-                            </label>
-                        `;
-                    }).join('');
-                    
-                    return `
-                        <div class="config-field">
-                            <label>${field.label}${field.required ? ' *' : ''}</label>
-                            <div class="region-options">
-                                ${radioButtons}
-                            </div>
-                            ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
-                        </div>
-                    `;
-                } else {
-                    // Regular dropdown for more than 2 options
-                    const optionItems = options.map(option => 
-                        `<option value="${option}" ${option === field.defaultValue ? 'selected' : ''}>${option}</option>`
-                    ).join('');
-                    return `
-                        <div class="config-field">
-                            <label for="${fieldId}">${field.label}${field.required ? ' *' : ''}</label>
-                            <select class="config-input" id="${fieldId}" ${required}>
-                                <option value="">Select ${field.label}</option>
-                                ${optionItems}
-                            </select>
-                            ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
-                        </div>
-                    `;
-                }
+                // Always render as dropdown
+                const optionItems = options.map(option => {
+                    const displayText = option === 'us' ? 'US' : option === 'eu' ? 'EU' : option;
+                    return `<option value="${option}" ${option === field.defaultValue ? 'selected' : ''}>${displayText}</option>`;
+                }).join('');
+                
+                return `
+                    <div class="config-field">
+                        <label for="${fieldId}">${field.label}${field.required ? ' *' : ''}</label>
+                        <select class="config-input" id="${fieldId}" ${required}>
+                            <option value="">Select ${field.label}</option>
+                            ${optionItems}
+                        </select>
+                        ${field.description ? `<small class="field-description">${field.description}</small>` : ''}
+                    </div>
+                `;
             case 'BOOLEAN':
                 return `
                     <div class="config-field">
