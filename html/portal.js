@@ -235,46 +235,35 @@ function updateAvailableServicesList() {
             for (const [key, value] of Object.entries(existingConfig.config)) {
                 const fieldId = `service-config-${serviceDef.type}-${key}`;
                 
-                // Find the corresponding field definition to determine type
-                const fieldDef = serviceDef.fields.find(f => f.key === key);
-                
-                if (fieldDef && fieldDef.type === 'SELECT' && fieldDef.options && fieldDef.options.length === 2) {
-                    // This is a radio button group (2-option SELECT)
-                    const radioGroup = document.getElementsByName(fieldId);
-                    for (const radio of radioGroup) {
-                        radio.checked = (radio.value === value);
-                    }
-                } else {
-                    // Regular input field
-                    const input = document.getElementById(fieldId);
-                    if (input) {
-                        if (input.type === 'checkbox') {
-                            input.checked = value === 'true';
-                        } else {
-                            // Handle masked values for sensitive fields
-                            if (value.includes('****')) {
-                                // Show that there's a value but allow re-entry
-                                input.value = ''; // Keep empty for security
-                                input.placeholder = 'Current: ' + value + ' (leave empty to keep current)';
-                                // Change password fields to text temporarily to show the mask
-                                if (input.type === 'password') {
-                                    input.type = 'text';
-                                    input.value = value;
-                                    input.setAttribute('readonly', true);
-                                    // Add a small edit button or click handler
-                                    input.style.backgroundColor = '#f0f0f0';
-                                    input.onclick = function() {
-                                        this.type = 'password';
-                                        this.value = '';
-                                        this.placeholder = 'Enter new value or leave empty to keep current';
-                                        this.removeAttribute('readonly');
-                                        this.style.backgroundColor = '';
-                                        this.onclick = null;
-                                    };
-                                }
-                            } else {
+                // Regular input field
+                const input = document.getElementById(fieldId);
+                if (input) {
+                    if (input.type === 'checkbox') {
+                        input.checked = value === 'true';
+                    } else {
+                        // Handle masked values for sensitive fields
+                        if (value.includes('****')) {
+                            // Show that there's a value but allow re-entry
+                            input.value = ''; // Keep empty for security
+                            input.placeholder = 'Current: ' + value + ' (leave empty to keep current)';
+                            // Change password fields to text temporarily to show the mask
+                            if (input.type === 'password') {
+                                input.type = 'text';
                                 input.value = value;
+                                input.setAttribute('readonly', true);
+                                // Add a small edit button or click handler
+                                input.style.backgroundColor = '#f0f0f0';
+                                input.onclick = function() {
+                                    this.type = 'password';
+                                    this.value = '';
+                                    this.placeholder = 'Enter new value or leave empty to keep current';
+                                    this.removeAttribute('readonly');
+                                    this.style.backgroundColor = '';
+                                    this.onclick = null;
+                                };
                             }
+                        } else {
+                            input.value = value;
                         }
                     }
                 }
@@ -303,29 +292,17 @@ async function saveServiceConfiguration(serviceType) {
             let value = '';
             
             // Handle different field types
-            if (field.type === 'SELECT' && field.options && field.options.length === 2) {
-                // This is a radio button group (2-option SELECT)
-                const radioGroup = document.getElementsByName(fieldId);
-                for (const radio of radioGroup) {
-                    if (radio.checked) {
-                        value = radio.value;
-                        break;
-                    }
-                }
+            const input = document.getElementById(fieldId);
+            
+            if (!input) {
+                console.error(`Config input not found: ${fieldId}`);
+                continue;
+            }
+            
+            if (input.type === 'checkbox') {
+                value = input.checked ? 'true' : 'false';
             } else {
-                // Regular input field
-                const input = document.getElementById(fieldId);
-                
-                if (!input) {
-                    console.error(`Config input not found: ${fieldId}`);
-                    continue;
-                }
-                
-                if (input.type === 'checkbox') {
-                    value = input.checked ? 'true' : 'false';
-                } else {
-                    value = input.value.trim();
-                }
+                value = input.value.trim();
             }
             
             // Handle sensitive fields - preserve existing value if empty
