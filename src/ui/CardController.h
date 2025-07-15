@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <vector>
+#include <unordered_map>
 
 #include "ConfigManager.h"
 #include "hardware/WifiInterface.h"
@@ -11,10 +12,13 @@
 #include "ui/ProvisioningCard.h"
 #include "ui/InsightCard.h"
 #include "ui/FriendCard.h"
+#include "ui/examples/HelloWorldCard.h"
+#include "ui/FlappyHogCard.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 #include "config/CardConfig.h"
 #include "UICallback.h"
+#include "ui/QuestionCard.h"
 
 /**
  * @class CardController
@@ -85,9 +89,19 @@ public:
 
     /**
      * @brief Get all insight cards
-     * @return Reference to vector of insight card pointers
+     * @return Vector of insight card pointers
      */
-    std::vector<InsightCard*>& getInsightCards() { return insightCards; }
+    std::vector<InsightCard*> getInsightCards() {
+        std::vector<InsightCard*> result;
+        auto it = dynamicCards.find(CardType::INSIGHT);
+        if (it != dynamicCards.end()) {
+            for (const auto& instance : it->second) {
+                // Cast the handler to InsightCard*
+                result.push_back(static_cast<InsightCard*>(instance.handler));
+            }
+        }
+        return result;
+    }
 
     /**
      * @brief Get the display interface
@@ -155,8 +169,16 @@ private:
     // UI Components
     CardNavigationStack* cardStack;     ///< Navigation stack for cards
     ProvisioningCard* provisioningCard; ///< Card for device provisioning
+    
+    // Unified card tracking system
+    struct CardInstance {
+        InputHandler* handler;  ///< The card as an InputHandler
+        lv_obj_t* lvglCard;    ///< The LVGL card object
+    };
+    std::unordered_map<CardType, std::vector<CardInstance>> dynamicCards; ///< All dynamic cards by type
+    
+    // Legacy single instance tracking (for backwards compatibility during transition)
     FriendCard* animationCard;       ///< Card for animations
-    std::vector<InsightCard*> insightCards; ///< Collection of insight cards
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
@@ -173,6 +195,11 @@ private:
      * @brief Create and initialize the animation card
      */
     void createAnimationCard();
+    
+    /**
+     * @brief Create and initialize the hello world card
+     */
+    void createHelloWorldCard();
     
 
     /**

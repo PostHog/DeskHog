@@ -85,6 +85,13 @@ public:
      * @return SemaphoreHandle_t* Pointer to the mutex
      */
     SemaphoreHandle_t* getMutexPtr();
+    
+    /**
+     * @brief Set display backlight brightness
+     * 
+     * @param brightness Brightness level (0-255)
+     */
+    void setBrightness(uint8_t brightness);
 
 private:
     uint16_t _screen_width;

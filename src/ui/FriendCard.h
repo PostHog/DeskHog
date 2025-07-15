@@ -9,7 +9,7 @@
 #include "ui/InputHandler.h"
 
 /**
- * @class AnimationCard
+ * @class FriendCard
  * @brief UI component for displaying animated sprites with encouraging messages
  * 
  * Features:
@@ -89,6 +89,7 @@ public:
      * @return true if center button (cycles messages), false otherwise
      */
     bool handleButtonPress(uint8_t button_index) override;
+    void prepareForRemoval() override { _card = nullptr; }
     
 private:
     // Animation timing

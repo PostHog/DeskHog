@@ -278,6 +278,54 @@ The web UI automatically generates sophisticated configuration forms based on yo
 4. Sends dynamic configuration as JSON to `/api/cards/configured`
 
 
+#### Creating game-like cards
+
+Cards that need regular updates (games, animations, real-time visualizations) can use the `InputHandler::update()` method:
+
+```cpp
+// 1. Your card class should inherit from InputHandler
+class FlappyHogCard : public InputHandler {
+public:
+    // Handle button presses (required by InputHandler)
+    bool handleButtonPress(uint8_t button_index) override {
+        // Return false to allow navigation, true if you handled it
+        return false;
+    }
+    
+    // Update method for game logic (called ~60 times per second)
+    bool update() override {
+        if (game) {
+            game->loop();  // Update game state
+            return true;   // Continue receiving updates
+        }
+        return false;      // Stop updates
+    }
+    
+    // Required for proper cleanup
+    void prepareForRemoval() override {
+        // Called before LVGL object deletion
+    }
+};
+
+// 2. Register the card with an InputHandler
+helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    FlappyHogCard* newCard = new FlappyHogCard(screen);
+    if (newCard && newCard->getCard()) {
+        // Register as InputHandler to receive updates
+        cardStack->registerInputHandler(newCard->getCard(), newCard);
+        return newCard->getCard();
+    }
+    delete newCard;
+    return nullptr;
+};
+```
+
+The `update()` method is automatically called by the UI system when your card is active/visible. This approach:
+- Works within the existing task/core architecture
+- Doesn't require creating new tasks or timers
+- Automatically stops updates when the card isn't visible
+- Maintains proper thread safety through the existing UI queue system
+
 ### Insight parser and PostHog client
 
 `InsightParser` ingests PostHog API responses and makes them available to the UI. `PostHogClient` constructs requests and dispatches responses.
@@ -289,3 +337,63 @@ This project relies on the powerful [LVGL project](https://docs.lvgl.io/9.2/intr
 ### Config manager and captive portal
 
 `ConfigManager` handles persistent storage and retrieval of credentials and insights. `CaptivePortal` provides the web server and interacts with `ConfigManager` to read and write to persistent storage.
+
+### PNG sprite system
+
+The project includes a `png2c.py` script that automatically converts PNG images into LVGL-compatible C arrays. This makes it easy to add sprite-based animations and graphics to DeskHog. The script runs before each build, so your sprites are always up to date. Beware: the board has limited storage and we already use most of it. Optimize your images aggressively and use PNG files sparingly.
+
+#### How it works
+
+1. **Place PNG files in subdirectories** under `raw-png/`:
+   ```
+   raw-png/
+   ├── walking/
+   │   ├── frame_01.png
+   │   ├── frame_02.png
+   │   └── frame_03.png
+   ├── idle/
+   │   ├── idle_01.png
+   │   └── idle_02.png
+   └── attack/
+       └── attack_01.png
+   ```
+
+2. **Run the conversion script**:
+   ```bash
+   python3 png2c.py
+   ```
+
+3. **Generated output**:
+   - Individual header/source files for each sprite in `include/sprites/`
+   - Filenames are preserved (e.g., `frame_01.png` → `sprite_frame_01.h/c`)
+   - A master `sprites.h` and `sprites.c` containing arrays for each subdirectory
+
+#### Using sprites in your code
+
+```cpp
+#include "sprites/sprites.h"
+
+// Access the walking animation array
+lv_obj_t* img = lv_img_create(parent);
+lv_img_set_src(img, &walking_sprites[0]);  // First frame
+
+// Animate through frames
+for (int i = 0; i < walking_sprites_count; i++) {
+    lv_img_set_src(img, walking_sprites[i]);
+    // Add delay or use LVGL animation
+}
+```
+
+#### Features
+
+- **Automatic grouping**: Each subdirectory gets its own array (e.g., `walking_sprites[]`, `idle_sprites[]`)
+- **Count variables**: Each array has a corresponding count (e.g., `walking_sprites_count`)
+- **LVGL compatible**: Generates ARGB8888 format data structures that work directly with LVGL 9.x
+
+#### Requirements
+
+- Python 3
+- Pillow and numpy (required):
+  ```bash
+  pip install Pillow numpy
+  ```

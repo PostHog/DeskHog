@@ -1,6 +1,6 @@
 #include "ui/FriendCard.h"
 #include "Style.h"
-#include "sprites.h"
+#include "sprites/sprites.h"
 #include "hardware/Input.h"
 
 FriendCard::FriendCard(lv_obj_t* parent)

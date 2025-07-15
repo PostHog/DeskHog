@@ -1,6 +1,6 @@
 /**
  * @file sprites.h
- * @brief Includes all LVGL sprite headers
+ * @brief Includes all LVGL sprite headers and arrays
  */
 
 #ifndef LVGL_SPRITES_H
@@ -18,7 +18,7 @@ extern "C" {
 #include "sprite_Normal_Walking_05.h"
 #include "sprite_Normal_Walking_06.h"
 
-// Array of all walking animation sprites
+// Array of all walking sprites
 extern const lv_img_dsc_t* walking_sprites[];
 extern const uint8_t walking_sprites_count;
 

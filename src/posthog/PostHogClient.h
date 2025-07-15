@@ -92,7 +92,7 @@ private:
     
     // Constants
     static const char* BASE_URL;                        ///< PostHog API base URL
-    static const unsigned long REFRESH_INTERVAL = 30000; ///< Refresh every 30s
+    static const unsigned long REFRESH_INTERVAL = 60000 * 30; ///< Refresh every 30 minutes
     static const uint8_t MAX_RETRIES = 3;              ///< Max retry attempts
     static const unsigned long RETRY_DELAY = 1000;      ///< Delay between retries
     

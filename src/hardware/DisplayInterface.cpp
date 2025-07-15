@@ -79,9 +79,17 @@ void DisplayInterface::begin() {
     _tft->init(_screen_height, _screen_width);
     _tft->setRotation(1);
     
-    // Configure backlight
+    // Configure backlight with PWM for brightness control
     pinMode(_backlight_pin, OUTPUT);
-    digitalWrite(_backlight_pin, HIGH);
+    
+    // Set up PWM on the backlight pin using new ESP32 Arduino Core 3.x API
+    // Attach pin with 5000 Hz frequency and 8-bit resolution
+    ledcAttach(_backlight_pin, 5000, 8);
+    
+    // Set brightness to 80% (204 out of 255)
+    ledcWrite(_backlight_pin, 204);
+    Serial.println("Display backlight set to 80% brightness");
+    
     _tft->fillScreen(ST77XX_BLACK);
     
     // Initialize LVGL
@@ -187,4 +195,9 @@ DisplayInterface::~DisplayInterface() {
     if (instance == this) {
         instance = nullptr;
     }
+}
+
+void DisplayInterface::setBrightness(uint8_t brightness) {
+    // Update the PWM duty cycle on the backlight pin
+    ledcWrite(_backlight_pin, brightness);
 }

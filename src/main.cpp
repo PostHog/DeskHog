@@ -35,6 +35,7 @@
 #include "esp_partition.h" // Include for partition functions
 #include "OtaManager.h"
 #include <esp_sleep.h> // Added for deep sleep functionality
+#include <esp_pm.h> // Added for power management
 
 // Display dimensions
 #define SCREEN_WIDTH 240
@@ -195,6 +196,20 @@ void setup() {
         while(1); // Stop here if PSRAM init fails
     }
 
+    // Configure power management for automatic light sleep
+    esp_pm_config_t pm_config = {
+        .max_freq_mhz = 240,  // Maximum CPU frequency
+        .min_freq_mhz = 10,   // Minimum CPU frequency when idle
+        .light_sleep_enable = true  // Enable automatic light sleep
+    };
+    
+    esp_err_t pm_result = esp_pm_configure(&pm_config);
+    if (pm_result == ESP_OK) {
+        Serial.println("Power management configured: Light sleep enabled");
+    } else {
+        Serial.printf("Failed to configure power management: %s\n", esp_err_to_name(pm_result));
+    }
+    
     // Add Partition Logging Here
     Serial.println("--- Partition Table Info ---");
     esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
@@ -252,6 +267,13 @@ void setup() {
     
     // Initialize buttons
     Input::configureButtons();
+    
+    // Configure GPIO wakeup for buttons to wake from light sleep
+    gpio_wakeup_enable((gpio_num_t)Input::BUTTON_UP, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable((gpio_num_t)Input::BUTTON_DOWN, GPIO_INTR_LOW_LEVEL);  
+    gpio_wakeup_enable((gpio_num_t)Input::BUTTON_CENTER, GPIO_INTR_HIGH_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    Serial.println("GPIO wakeup configured for buttons");
     
     // Create and initialize card controller
     cardController = new CardController(

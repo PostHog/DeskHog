@@ -77,6 +77,7 @@ public:
      * Handles center button (button 1) to force refresh insight data
      */
     bool handleButtonPress(uint8_t button_index) override;
+    void prepareForRemoval() override { _card = nullptr; }
 
 private:
     // Constants for UI layout and limits

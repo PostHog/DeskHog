@@ -113,6 +113,14 @@ public:
      */
     void forceUpdateIndicators();
     
+    /**
+     * @brief Update the active card if it needs updates
+     * 
+     * Calls the update() method on the currently active card's InputHandler.
+     * Should be called regularly from the main LVGL task.
+     */
+    void updateActiveCard();
+    
 private:
     /**
      * @brief LVGL scroll event callback

@@ -84,6 +84,12 @@ void WiFiInterface::begin() {
     // Initialize WiFi
     WiFi.mode(WIFI_STA);
     
+    // Enable WiFi power save mode
+    // WIFI_PS_MIN_MODEM: Minimum modem power saving mode (recommended for most applications)
+    // This reduces power consumption when WiFi is idle but maintains connectivity
+    WiFi.setSleep(WIFI_PS_MIN_MODEM);
+    Serial.println("WiFi power save mode enabled (MIN_MODEM)");
+    
     // Subscribe to WiFi credential events if event queue is available
     if (_eventQueue != nullptr) {
         _eventQueue->subscribe([this](const Event& event) {

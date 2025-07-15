@@ -181,36 +181,35 @@ void CardNavigationStack::handleButtonPress(uint8_t button_index) {
         }
     }
     
-    // Handle center button (Button 1) - delegate to active card if it has an input handler
-    if (button_index == Input::BUTTON_CENTER) {
-        // Find the input handler for the current card
-        bool handled = false;
-        for (const auto& handler_pair : _input_handlers) {
-            if (handler_pair.first == lv_obj_get_child(_main_container, _current_card)) {
-                // Found a handler for the current card
-                if (handler_pair.second) {
-                    handled = handler_pair.second->handleButtonPress(button_index);
-                    if (handled) {
-                        // Handler processed the button press, don't do default behavior
-                        if (_mutex_ptr) {
-                            xSemaphoreGive(*_mutex_ptr);
-                        }
-                        return;
+    // Try to delegate button press to active card's input handler first
+    lv_obj_t* current_card = lv_obj_get_child(_main_container, _current_card);
+    bool handled = false;
+    
+    for (const auto& handler_pair : _input_handlers) {
+        if (handler_pair.first == current_card) {
+            // Found a handler for the current card
+            if (handler_pair.second) {
+                handled = handler_pair.second->handleButtonPress(button_index);
+                if (handled) {
+                    // Handler processed the button press, don't do default behavior
+                    if (_mutex_ptr) {
+                        xSemaphoreGive(*_mutex_ptr);
                     }
+                    return;
                 }
-                break;
             }
+            break;
         }
-        // If not handled by card, fall through to default behavior (if any)
     }
     
-    // Next card (Button 0)
-    if (button_index == Input::BUTTON_DOWN) {
-        nextCard();
-    }
-    // Previous card (Button 2)
-    else if (button_index == Input::BUTTON_UP) {
-        prevCard();
+    // If not handled by the card, do default navigation behavior
+    if (!handled) {
+        if (button_index == Input::BUTTON_DOWN) {
+            nextCard();
+        }
+        else if (button_index == Input::BUTTON_UP) {
+            prevCard();
+        }
     }
     
     // Release mutex if we acquired it
@@ -245,6 +244,21 @@ void CardNavigationStack::forceUpdateIndicators() {
     
     // Force LVGL to redraw the indicator container
     lv_obj_invalidate(_scroll_indicator);
+}
+
+void CardNavigationStack::updateActiveCard() {
+    // Get the current card
+    lv_obj_t* currentCard = lv_obj_get_child(_main_container, _current_card);
+    if (!currentCard) return;
+    
+    // Find the input handler for this card
+    for (const auto& handler_pair : _input_handlers) {
+        if (handler_pair.first == currentCard) {
+            // Call update on the handler
+            handler_pair.second->update();
+            break;
+        }
+    }
 }
 
 void CardNavigationStack::_scroll_event_cb(lv_event_t* e) {
