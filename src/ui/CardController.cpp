@@ -194,8 +194,12 @@ void CardController::initializeCardTypes() {
         ConfigField("insight_id", "Insight ID", "Enter the PostHog insight ID you want to display", ConfigFieldType::TEXT, "", true)
     };
     
-    CardDefinition insightDef(CardType::INSIGHT, "PostHog insight", true, 
-                             "Insight cards let you keep an eye on PostHog data", insightFields);
+    CardDefinition insightDef;
+    insightDef.type = CardType::INSIGHT;
+    insightDef.name = "PostHog insight";
+    insightDef.allowMultiple = true;
+    insightDef.uiDescription = "Insight cards let you keep an eye on PostHog data";
+    insightDef.configFields = insightFields;
     
     // Set up factory function
     insightDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
@@ -238,8 +242,12 @@ void CardController::initializeCardTypes() {
     registerCardType(insightDef);
     
     // Register FRIEND card type (no configuration changes)
-    CardDefinition friendDef(CardType::FRIEND, "Friend card", false,
-                            "Get reassurance from Max the hedgehog", {});
+    CardDefinition friendDef;
+    friendDef.type = CardType::FRIEND;
+    friendDef.name = "Friend card";
+    friendDef.allowMultiple = false;
+    friendDef.uiDescription = "Get reassurance from Max the hedgehog";
+    friendDef.configFields = {};
     
     friendDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         // Create new friend card (no configuration needed)
@@ -265,8 +273,12 @@ void CardController::initializeCardTypes() {
     registerCardType(friendDef);
     
     // Register HELLO_WORLD card type
-    CardDefinition helloDef(CardType::HELLO_WORLD, "Hello, world!", true,
-                           "A simple greeting card", {});
+    CardDefinition helloDef;
+    helloDef.type = CardType::HELLO_WORLD;
+    helloDef.name = "Hello, world!";
+    helloDef.allowMultiple = true;
+    helloDef.uiDescription = "A simple greeting card";
+    helloDef.configFields = {};
     
     helloDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         HelloWorldCard* newCard = new HelloWorldCard(screen);
@@ -287,8 +299,12 @@ void CardController::initializeCardTypes() {
     registerCardType(helloDef);
     
     // Register FLAPPY_HOG card type
-    CardDefinition flappyDef(CardType::FLAPPY_HOG, "Flappy Hog", false,
-                            "One button. Endless frustration. Infinite glory.", {});
+    CardDefinition flappyDef;
+    flappyDef.type = CardType::FLAPPY_HOG;
+    flappyDef.name = "Flappy Hog";
+    flappyDef.allowMultiple = false;
+    flappyDef.uiDescription = "One button. Endless frustration. Infinite glory.";
+    flappyDef.configFields = {};
     
     flappyDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         FlappyHogCard* newCard = new FlappyHogCard(screen);
@@ -309,8 +325,12 @@ void CardController::initializeCardTypes() {
     registerCardType(flappyDef);
     
     // Register QUESTION card type
-    CardDefinition questionDef(CardType::QUESTION, "Question Card", false,
-                              "Break the ice with your coworkers.", {});
+    CardDefinition questionDef;
+    questionDef.type = CardType::QUESTION;
+    questionDef.name = "Question Card";
+    questionDef.allowMultiple = false;
+    questionDef.uiDescription = "Break the ice with your coworkers.";
+    questionDef.configFields = {};
     
     questionDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         QuestionCard* newCard = new QuestionCard(screen);
@@ -331,8 +351,12 @@ void CardController::initializeCardTypes() {
     registerCardType(questionDef);
     
     // Register PADDLE card type
-    CardDefinition paddleDef(CardType::PADDLE, "Paddle", false,
-                            "Classic Paddle game - beat the AI!", {});
+    CardDefinition paddleDef;
+    paddleDef.type = CardType::PADDLE;
+    paddleDef.name = "Paddle";
+    paddleDef.allowMultiple = false;
+    paddleDef.uiDescription = "Classic Paddle game - beat the AI!";
+    paddleDef.configFields = {};
     
     paddleDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         PaddleCard* newCard = new PaddleCard(screen);
