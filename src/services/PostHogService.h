@@ -46,7 +46,7 @@ public:
         return ServiceDefinition(
             ServiceType::POSTHOG,
             "PostHog Analytics",
-            "Analytics and insights platform for product teams. Connect to view insights, funnels, and user behavior data.",
+            "Connect to view PostHog insights right on your DeskHog.",
             fields
         );
     }
