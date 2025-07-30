@@ -295,11 +295,6 @@ lv_obj_t* ProvisioningCard::getCard() const {
 
 // Implementation for SystemController integration
 void ProvisioningCard::handleSystemStateChange(const ControllerState& newState) {
-    // Update API Status label
-    if (_apiStatusLabel && lv_obj_is_valid(_apiStatusLabel)) {
-        safeUpdateLabel(_apiStatusLabel, apiStateToString(newState.api_state));
-    }
-
     // Update WiFi Status label (SSID if connected, otherwise relies on updateConnectionStatus)
     if (_statusLabel && lv_obj_is_valid(_statusLabel)) {
         if (newState.wifi_state == WifiState::CONNECTED) {
@@ -308,20 +303,5 @@ void ProvisioningCard::handleSystemStateChange(const ControllerState& newState) 
         // If not connected, updateConnectionStatus() is expected to be called externally 
         // with a more specific status (e.g., "Connecting...", "Failed", "Disconnected").
         // So, we don't set a generic "Disconnected" here to avoid overwriting specific statuses.
-    }
-}
-
-String ProvisioningCard::apiStateToString(ApiState state) {
-    switch (state) {
-        case ApiState::API_NONE:
-            return "Not Set"; // Changed from "Not Configured" for brevity if needed
-        case ApiState::API_AWAITING_CONFIG:
-            return "Awaiting"; // Changed from "Awaiting Config"
-        case ApiState::API_CONFIG_INVALID:
-            return "Invalid";  // Changed from "Invalid Config"
-        case ApiState::API_CONFIGURED:
-            return "Configured";
-        default:
-            return "Unknown"; // Changed from "Unknown API State"
     }
 }

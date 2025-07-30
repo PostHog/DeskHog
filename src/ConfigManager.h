@@ -5,6 +5,7 @@
 #include <vector>
 #include "EventQueue.h"
 #include "config/CardConfig.h"
+#include "config/ServiceConfig.h"
 
 /**
  * @class ConfigManager
@@ -22,7 +23,6 @@
  */
 class ConfigManager {
 public:
-    static const int NO_TEAM_ID = -1;  // Sentinel value for no team ID
 
     /**
      * @brief Default constructor
@@ -79,52 +79,6 @@ public:
      */
     bool checkWiFiCredentialsAndPublish();
 
-    /**
-     * @brief Store team identifier
-     * @param teamId The team identifier to store
-     */
-    void setTeamId(int teamId);
-
-    /**
-     * @brief Store region of the project
-     * @param region The region of the project
-     */
-    void setRegion(String region);
-
-        /**
-     * @brief Retrieve stored region of the project
-     * @return The region of the project
-     */
-    String getRegion();
-
-    /**
-     * @brief Retrieve stored team identifier
-     * @return The team ID or NO_TEAM_ID if not set
-     */
-    int getTeamId();
-
-    /**
-     * @brief Remove stored team identifier
-     */
-    void clearTeamId();
-
-    /**
-     * @brief Store API key
-     * @param apiKey The API key to store
-     * @return true if saved successfully, false otherwise
-     */
-    bool setApiKey(const String& apiKey);
-
-    /**
-     * @brief Retrieve stored API key
-     * @return The API key or empty string if not set
-     */
-    String getApiKey();
-
-    /**
-     * @brief Remove stored API key
-     */
-    void clearApiKey();
 
 
     /**
@@ -140,17 +94,28 @@ public:
      */
     bool saveCardConfigs(const std::vector<CardConfig>& configs);
 
+    /**
+     * @brief Get all configured services from persistent storage
+     * @return Vector of ServiceConfig objects representing configured services
+     */
+    std::vector<ServiceConfig> getServiceConfigs();
+
+    /**
+     * @brief Save service configurations to persistent storage
+     * @param configs Vector of ServiceConfig objects to save
+     * @return true if saved successfully, false otherwise
+     */
+    bool saveServiceConfigs(const std::vector<ServiceConfig>& configs);
+
+    /**
+     * @brief Get configuration for a specific service type
+     * @param type The service type to retrieve
+     * @return ServiceConfig for the requested type, or disabled config if not found
+     */
+    ServiceConfig getServiceConfig(ServiceType type);
+
 private:
     
-    /**
-     * @brief Validates and updates the API configuration state
-     * 
-     * Checks if both team ID and API key are properly set in preferences.
-     * Updates the system state via SystemController to one of:
-     * - API_AWAITING_CONFIG: if either team ID or API key is missing
-     * - API_CONFIGURED: if both team ID and API key are properly set
-     */
-    void updateApiConfigurationState();
 
     /**
      * @brief Ensures preferences changes are persisted to flash
@@ -163,23 +128,19 @@ private:
 
     // Preferences instances for persistent storage
     Preferences _preferences;      ///< Main preferences storage instance
-    Preferences _insightsPrefs;   ///< Separate storage for insight data
     Preferences _cardPrefs;       ///< Separate storage for card configurations
+    Preferences _servicePrefs;    ///< Separate storage for service configurations
 
     // Namespace constants for preferences organization
     const char* _namespace = "wifi_config";        ///< Namespace for WiFi and general config
-    const char* _insightsNamespace = "insights";   ///< Namespace for insight data
     const char* _cardNamespace = "cards";          ///< Namespace for card configurations
+    const char* _serviceNamespace = "services";    ///< Namespace for service configurations
 
     // Storage keys for WiFi configuration
     const char* _ssidKey = "ssid";                ///< Key for stored WiFi SSID
     const char* _passwordKey = "password";         ///< Key for stored WiFi password
     const char* _hasCredentialsKey = "has_creds"; ///< Key for WiFi credentials presence flag
 
-    // Storage keys for API configuration
-    const char* _teamIdKey = "team_id";           ///< Key for stored team ID
-    const char* _apiKeyKey = "api_key";           ///< Key for stored API key
-    const char* _regionKey = "region";           ///< Key for stored region
 
 
     // Storage size limits
@@ -189,8 +150,6 @@ private:
     static const size_t MAX_PASSWORD_LENGTH = 64;
     /** @brief Maximum length for insight configuration data */
     static const size_t MAX_INSIGHT_LENGTH = 1024;
-    /** @brief Maximum length for API key */
-    static const size_t MAX_API_KEY_LENGTH = 64;
     /** @brief Maximum length for insight identifier */
     static const size_t MAX_INSIGHT_ID_LENGTH = 64;
 

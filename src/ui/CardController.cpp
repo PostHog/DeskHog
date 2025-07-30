@@ -1,6 +1,7 @@
 #include "ui/CardController.h"
 #include "ui/PaddleCard.h"
 #include <algorithm>
+#include <map>
 
 QueueHandle_t CardController::uiQueue = nullptr;
 
@@ -148,27 +149,6 @@ void CardController::createAnimationCard() {
     displayInterface->giveMutex();
 }
 
-void CardController::createHelloWorldCard() {
-    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-        return;
-    }
-    
-    // Create new hello world card
-    HelloWorldCard* helloCard = new HelloWorldCard(screen);
-    
-    if (helloCard && helloCard->getCard()) {
-        // Add to navigation stack
-        cardStack->addCard(helloCard->getCard());
-        
-        // Register as an input handler
-        cardStack->registerInputHandler(helloCard->getCard(), helloCard);
-    }
-    
-    displayInterface->giveMutex();
-}
-
-
-
 // Handle WiFi events
 void CardController::handleWiFiEvent(const Event& event) {
     if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
@@ -209,21 +189,33 @@ void CardController::registerCardType(const CardDefinition& definition) {
 }
 
 void CardController::initializeCardTypes() {
-    // Register INSIGHT card type
+    // Register INSIGHT card type with dynamic configuration
+    std::vector<ConfigField> insightFields = {
+        ConfigField("insight_id", "Insight ID", "Enter the PostHog insight ID you want to display", ConfigFieldType::TEXT, "", true)
+    };
+    
     CardDefinition insightDef;
     insightDef.type = CardType::INSIGHT;
     insightDef.name = "PostHog insight";
     insightDef.allowMultiple = true;
-    insightDef.needsConfigInput = true;
-    insightDef.configInputLabel = "Insight ID";
     insightDef.uiDescription = "Insight cards let you keep an eye on PostHog data";
-    insightDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    insightDef.configFields = insightFields;
+    
+    // Set up factory function
+    insightDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
+        auto it = configValues.find("insight_id");
+        if (it == configValues.end() || it->second.isEmpty()) {
+            Serial.println("Error: No insight ID provided in configuration");
+            return nullptr;
+        }
+        
+        String insightId = it->second;
+        
         // Create new insight card using the insight ID
         InsightCard* newCard = new InsightCard(
             screen,
-            configManager,
             eventQueue,
-            configValue,
+            insightId,
             screenWidth,
             screenHeight
         );
@@ -237,8 +229,8 @@ void CardController::initializeCardTypes() {
             cardStack->registerInputHandler(newCard->getCard(), newCard);
             
             // Request data for this insight immediately
-            posthogClient.requestInsightData(configValue);
-            Serial.printf("Requested insight data for: %s\n", configValue.c_str());
+            posthogClient.requestInsightData(insightId);
+            Serial.printf("Requested insight data for: %s\n", insightId.c_str());
             
             return newCard->getCard();
         }
@@ -246,18 +238,19 @@ void CardController::initializeCardTypes() {
         delete newCard;
         return nullptr;
     };
+    
     registerCardType(insightDef);
     
-    // Register FRIEND card type  
+    // Register FRIEND card type (no configuration changes)
     CardDefinition friendDef;
     friendDef.type = CardType::FRIEND;
     friendDef.name = "Friend card";
     friendDef.allowMultiple = false;
-    friendDef.needsConfigInput = false;
-    friendDef.configInputLabel = "";
     friendDef.uiDescription = "Get reassurance from Max the hedgehog";
-    friendDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        // Create new friend card (ignore configValue for now)
+    friendDef.configFields = {};
+    
+    friendDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
+        // Create new friend card (no configuration needed)
         FriendCard* newCard = new FriendCard(screen);
         
         if (newCard && newCard->getCard()) {
@@ -276,6 +269,7 @@ void CardController::initializeCardTypes() {
         delete newCard;
         return nullptr;
     };
+    
     registerCardType(friendDef);
     
     // Register HELLO_WORLD card type
@@ -283,10 +277,10 @@ void CardController::initializeCardTypes() {
     helloDef.type = CardType::HELLO_WORLD;
     helloDef.name = "Hello, world!";
     helloDef.allowMultiple = true;
-    helloDef.needsConfigInput = false;
-    helloDef.configInputLabel = "";
     helloDef.uiDescription = "A simple greeting card";
-    helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    helloDef.configFields = {};
+    
+    helloDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         HelloWorldCard* newCard = new HelloWorldCard(screen);
         
         if (newCard && newCard->getCard()) {
@@ -308,11 +302,11 @@ void CardController::initializeCardTypes() {
     CardDefinition flappyDef;
     flappyDef.type = CardType::FLAPPY_HOG;
     flappyDef.name = "Flappy Hog";
-    flappyDef.allowMultiple = false;  // Only one game instance at a time
-    flappyDef.needsConfigInput = false;
-    flappyDef.configInputLabel = "";
+    flappyDef.allowMultiple = false;
     flappyDef.uiDescription = "One button. Endless frustration. Infinite glory.";
-    flappyDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    flappyDef.configFields = {};
+    
+    flappyDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         FlappyHogCard* newCard = new FlappyHogCard(screen);
         
         if (newCard && newCard->getCard()) {
@@ -334,11 +328,11 @@ void CardController::initializeCardTypes() {
     CardDefinition questionDef;
     questionDef.type = CardType::QUESTION;
     questionDef.name = "Question Card";
-    questionDef.allowMultiple = false;  // Only one question card at a time
-    questionDef.needsConfigInput = false;
-    questionDef.configInputLabel = "";
+    questionDef.allowMultiple = false;
     questionDef.uiDescription = "Break the ice with your coworkers.";
-    questionDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    questionDef.configFields = {};
+    
+    questionDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         QuestionCard* newCard = new QuestionCard(screen);
         
         if (newCard && newCard->getCard()) {
@@ -360,11 +354,11 @@ void CardController::initializeCardTypes() {
     CardDefinition paddleDef;
     paddleDef.type = CardType::PADDLE;
     paddleDef.name = "Paddle";
-    paddleDef.allowMultiple = false;  // Only one paddle game at a time
-    paddleDef.needsConfigInput = false;
-    paddleDef.configInputLabel = "";
+    paddleDef.allowMultiple = false;
     paddleDef.uiDescription = "Classic Paddle game - beat the AI!";
-    paddleDef.factory = [this](const String& configValue) -> lv_obj_t* {
+    paddleDef.configFields = {};
+    
+    paddleDef.factory = [this](const std::map<String, String>& configValues) -> lv_obj_t* {
         PaddleCard* newCard = new PaddleCard(screen);
         
         if (newCard && newCard->getCard()) {
@@ -462,9 +456,14 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
                                       return def.type == config.type;
                                   });
             
-            if (it != registeredCardTypes.end() && it->factory) {
-                // Create the card using the factory function
-                lv_obj_t* cardObj = it->factory(config.config);
+            if (it != registeredCardTypes.end()) {
+                lv_obj_t* cardObj = nullptr;
+                
+                // Use factory function to create card
+                if (it->factory) {
+                    cardObj = it->factory(config.config);
+                }
+                
                 if (cardObj) {
                     cardStack->addCard(cardObj);
                     
@@ -474,6 +473,8 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
                     }
                     
                     cardsCreated++;
+                    Serial.printf("Created card %zu of type %s\n", 
+                                 cardsCreated, cardTypeToString(config.type).c_str());
                 } else {
                     Serial.printf("Failed to create card of type %s\n", 
                                  cardTypeToString(config.type).c_str());
@@ -570,18 +571,23 @@ void CardController::dispatchToLVGLTask(std::function<void()> update_func, bool 
 void CardController::handleCardTitleUpdated(const Event& event) {
     // Find and update the card configuration with the new title
     for (auto& cardConfig : currentCardConfigs) {
-        if (cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) {
-            // Update the name with the new title
-            if (cardConfig.name != event.title) {
-                cardConfig.name = event.title;
-                
-                // Save the updated configuration to persistent storage
-                configManager.saveCardConfigs(currentCardConfigs);
-                
-                Serial.printf("Updated card title for insight %s to: %s\n", 
-                             event.insightId.c_str(), event.title.c_str());
+        if (cardConfig.type == CardType::INSIGHT) {
+            // Check if this card config matches the insight ID
+            String configInsightId = cardConfig.getConfig("insight_id");
+            
+            if (configInsightId == event.insightId) {
+                // Update the name with the new title
+                if (cardConfig.name != event.title) {
+                    cardConfig.name = event.title;
+                    
+                    // Save the updated configuration to persistent storage
+                    configManager.saveCardConfigs(currentCardConfigs);
+                    
+                    Serial.printf("Updated card title for insight %s to: %s\n", 
+                                 event.insightId.c_str(), event.title.c_str());
+                }
+                break;
             }
-            break;
         }
     }
 } 

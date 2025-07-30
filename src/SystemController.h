@@ -9,17 +9,6 @@
 using WifiState = WiFiState;
 
 /**
- * @enum ApiState
- * @brief Represents the current state of API configuration
- */
-enum class ApiState {
-    API_NONE,            ///< No API configuration attempted
-    API_AWAITING_CONFIG, ///< Waiting for API configuration
-    API_CONFIG_INVALID,  ///< API configuration is invalid
-    API_CONFIGURED      ///< API is properly configured
-};
-
-/**
  * @enum AuthState
  * @brief Represents the current authentication state
  */
@@ -46,7 +35,6 @@ enum class SystemState {
  */
 struct ControllerState {
     WifiState wifi_state;    ///< Current WiFi connection state
-    ApiState api_state;      ///< Current API configuration state
     AuthState auth_state;    ///< Current authentication state
     SystemState sys_state;   ///< Current system state
 };
@@ -128,12 +116,6 @@ public:
     static WifiState getWifiState();
 
     /**
-     * @brief Get current API state
-     * @return Current API state
-     */
-    static ApiState getApiState();
-
-    /**
      * @brief Get current authentication state
      * @return Current authentication state
      */
@@ -151,13 +133,6 @@ public:
      */
     static ControllerState getFullState();
     
-    /**
-     * @brief Set API configuration state
-     * @param new_state New API state
-     * 
-     * Only triggers notifications if state actually changes
-     */
-    static void setApiState(ApiState new_state);
 
     /**
      * @brief Set authentication state

@@ -8,10 +8,9 @@
 #include "hardware/Input.h"
 
 
-InsightCard::InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& eventQueue,
+InsightCard::InsightCard(lv_obj_t* parent, EventQueue& eventQueue,
                         const String& insightId, uint16_t width, uint16_t height)
-    : _config(config)
-    , _event_queue(eventQueue)
+    : _event_queue(eventQueue)
     , _insight_id(insightId)
     , _current_title("")
     , _card(nullptr)

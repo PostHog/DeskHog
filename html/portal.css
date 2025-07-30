@@ -272,6 +272,45 @@ select::-ms-expand {
     font-style: italic;
 }
 
+/* Available services list styling - reuse card styles */
+.available-service-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    background-color: var(--input-color);
+}
+
+.available-service-info {
+    margin-bottom: 1rem;
+}
+
+.available-service-name {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.available-service-description {
+    font-size: 0.9rem;
+    color: var(--label-color);
+    margin-bottom: 0.25rem;
+}
+
+.available-service-status {
+    font-size: 0.8rem;
+    color: var(--label-color);
+    font-style: italic;
+}
+
+.available-service-actions {
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem;
+}
+
+.save-service-btn {
+    margin-top: 1rem;
+}
+
 .available-card-actions {
     display: flex;
     flex-direction: column;
@@ -366,4 +405,64 @@ select::-ms-expand {
 
 .drag-handle:active {
     cursor: grabbing;
+}
+
+/* Dynamic Configuration Fields */
+.config-field {
+    margin-bottom: 1rem;
+}
+
+.config-field label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+    color: #333;
+    font-size: 0.9rem;
+}
+
+.config-field .config-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.config-field textarea.config-input {
+    min-height: 60px;
+    resize: vertical;
+    font-family: var(--default-font);
+}
+
+.config-field select.config-input {
+    width: 100%;
+}
+
+.checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: auto !important;
+    margin: 0;
+}
+
+.field-description {
+    display: block;
+    color: var(--label-color);
+    font-size: 0.8rem;
+    margin-top: 0.3rem;
+    line-height: 1.4;
+}
+
+.config-field input[required]:invalid,
+.config-field textarea[required]:invalid,
+.config-field select[required]:invalid {
+    border-color: #dc3545;
+}
+
+.config-field input[required]:valid,
+.config-field textarea[required]:valid,
+.config-field select[required]:valid {
+    border-color: #28a745;
 }

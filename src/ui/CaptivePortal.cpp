@@ -4,6 +4,8 @@
 #include "EventQueue.h"
 #include "OtaManager.h" // Required for OtaManager interaction
 #include "ui/CardController.h" // Required for CardController interaction
+#include "services/ServiceRegistry.h" // Required for service definitions
+#include "services/PostHogService.h" // Required for PostHog service sync
 #include "html_portal.h"  // For portal HTML
 #include <ArduinoJson.h>  // For JSON responses
 #include <pgmspace.h> // For PROGMEM
@@ -28,7 +30,6 @@ const char* portalActionToString(PortalAction action) {
         case PortalAction::NONE: return "NONE";
         case PortalAction::SCAN_WIFI: return "SCAN_WIFI";
         case PortalAction::SAVE_WIFI: return "SAVE_WIFI";
-        case PortalAction::SAVE_DEVICE_CONFIG: return "SAVE_DEVICE_CONFIG";
         case PortalAction::CHECK_OTA_UPDATE: return "CHECK_OTA_UPDATE";
         case PortalAction::START_OTA_UPDATE: return "START_OTA_UPDATE";
         default: return "UNKNOWN_ACTION"; // Good practice for a default
@@ -76,7 +77,6 @@ void CaptivePortal::begin() {
     // Serial.println("Registering /api/actions/start-wifi-scan..."); // DEBUG REMOVED
     _server.on("/api/actions/start-wifi-scan", HTTP_POST, std::bind(&CaptivePortal::handleRequestWifiScan, this, std::placeholders::_1));
     _server.on("/api/actions/save-wifi", HTTP_POST, std::bind(&CaptivePortal::handleRequestSaveWifi, this, std::placeholders::_1));
-    _server.on("/api/actions/save-device-config", HTTP_POST, std::bind(&CaptivePortal::handleRequestSaveDeviceConfig, this, std::placeholders::_1));
     // Serial.println("Registering /api/actions/check-ota-update..."); // DEBUG REMOVED
     _server.on("/api/actions/check-ota-update", HTTP_POST, std::bind(&CaptivePortal::handleRequestCheckOtaUpdate, this, std::placeholders::_1));
     _server.on("/api/actions/start-ota-update", HTTP_POST, std::bind(&CaptivePortal::handleRequestStartOtaUpdate, this, std::placeholders::_1));
@@ -85,7 +85,6 @@ void CaptivePortal::begin() {
     _server.on("/scan-networks", HTTP_GET, std::bind(&CaptivePortal::handleScanNetworks, this, std::placeholders::_1));
 
     // Device config actions
-    _server.on("/get-device-config", HTTP_GET, std::bind(&CaptivePortal::handleGetDeviceConfig, this, std::placeholders::_1));
 
 
     // Card management actions
@@ -93,6 +92,21 @@ void CaptivePortal::begin() {
     _server.on("/api/cards/configured", HTTP_GET, std::bind(&CaptivePortal::handleGetConfiguredCards, this, std::placeholders::_1));
     _server.on("/api/cards/configured", HTTP_POST, 
               std::bind(&CaptivePortal::handleSaveConfiguredCards, this, std::placeholders::_1),
+              NULL,
+              [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+                  // Store body data as a parameter for later processing
+                  request->_tempObject = malloc(len + 1);
+                  if(request->_tempObject != NULL){
+                      memcpy(request->_tempObject, data, len);
+                      ((char*)request->_tempObject)[len] = 0;
+                  }
+              });
+
+    // Service management actions
+    _server.on("/api/services/definitions", HTTP_GET, std::bind(&CaptivePortal::handleGetServiceDefinitions, this, std::placeholders::_1));
+    _server.on("/api/services/configured", HTTP_GET, std::bind(&CaptivePortal::handleGetConfiguredServices, this, std::placeholders::_1));
+    _server.on("/api/services/configured", HTTP_POST, 
+              std::bind(&CaptivePortal::handleSaveConfiguredServices, this, std::placeholders::_1),
               NULL,
               [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
                   // Store body data as a parameter for later processing
@@ -214,44 +228,6 @@ void CaptivePortal::handleSaveWifi(AsyncWebServerRequest *request) {
     request->send(response);
 }
 
-void CaptivePortal::handleGetDeviceConfig(AsyncWebServerRequest *request) {
-    DynamicJsonDocument doc(256); // Switched to DynamicJsonDocument
-    doc["teamId"] = _configManager.getTeamId();
-    String apiKey = _configManager.getApiKey();
-    // Send a truncated or placeholder API key for security if it's set
-    doc["apiKey"] = apiKey.length() > 0 ? "********" + apiKey.substring(apiKey.length() - 4) : "";
-
-    String responseJson;
-    serializeJson(doc, responseJson);
-    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    request->send(response);
-}
-
-void CaptivePortal::handleSaveDeviceConfig(AsyncWebServerRequest *request) {
-    bool success = false;
-    if (request->hasParam("teamId", true) && request->hasParam("apiKey", true)) {
-        int teamId = request->getParam("teamId", true)->value().toInt();
-        String apiKey = request->getParam("apiKey", true)->value();
-
-        _configManager.setTeamId(teamId);
-        // Only update API key if it's not the placeholder
-        if (apiKey.indexOf("********") == -1) {
-             _configManager.setApiKey(apiKey);
-        }
-        success = true;
-        // No direct EventType mapping for API_CONFIG_UPDATED, so removing for now.
-        // Consider if a different existing event is appropriate or if one needs to be added to EventQueue.h
-    }
-
-    DynamicJsonDocument doc(256); // Switched to DynamicJsonDocument
-    doc["success"] = success;
-    String responseJson;
-    serializeJson(doc, responseJson);
-    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
-    response->addHeader("Access-Control-Allow-Origin", "*");
-    request->send(response);
-}
 
 
 
@@ -440,26 +416,6 @@ void CaptivePortal::processAsyncOperations() {
                 // _pending_param1 = ""; _pending_param2 = ""; // Not needed now
                 break;
             }
-            case PortalAction::SAVE_DEVICE_CONFIG: {
-                String teamIdStr = current_queued_action.param1; // Use from QueuedAction
-                String apiKey = current_queued_action.param2;    // Use from QueuedAction
-                String region = current_queued_action.param3;   // Use from QueuedAction
-                if (!teamIdStr.isEmpty()) {
-                    _configManager.setTeamId(teamIdStr.toInt());
-                    if (!apiKey.isEmpty() && apiKey.indexOf("********") == -1) {
-                        _configManager.setApiKey(apiKey);
-                    }
-                    if(!region.isEmpty()) {
-                        _configManager.setRegion(region);
-                    }
-                    currentActionSuccess = true;
-                    currentActionMessage = "Device configuration saved.";
-                } else {
-                    currentActionMessage = "Team ID cannot be empty.";
-                }
-                 // _pending_param1 = ""; _pending_param2 = ""; // Not needed now
-                break;
-            }
             case PortalAction::CHECK_OTA_UPDATE:
                 Serial.println("DEBUG: Case PortalAction::CHECK_OTA_UPDATE reached in processAsyncOperations.");
                 if (_otaManager.checkForUpdate()) { 
@@ -573,12 +529,6 @@ void CaptivePortal::handleApiStatus(AsyncWebServerRequest *request) {
     wifiObj["ip_address"] = _wifiInterface.getIPAddress();
     wifiObj["is_connected"] = _wifiInterface.isConnected(); 
 
-    JsonObject deviceConfigObj = doc.createNestedObject("device_config");
-    deviceConfigObj["team_id"] = _configManager.getTeamId();
-    String apiKey = _configManager.getApiKey();
-    deviceConfigObj["api_key_display"] = apiKey.length() > 0 ? "********" + apiKey.substring(apiKey.length() - 4) : "";
-    deviceConfigObj["api_key_present"] = apiKey.length() > 0;
-    deviceConfigObj["region"] = _configManager.getRegion();
 
 
     JsonObject otaObj = doc.createNestedObject("ota");
@@ -611,9 +561,6 @@ void CaptivePortal::handleRequestSaveWifi(AsyncWebServerRequest *request) {
     requestAction(PortalAction::SAVE_WIFI, request);
 }
 
-void CaptivePortal::handleRequestSaveDeviceConfig(AsyncWebServerRequest *request) {
-    requestAction(PortalAction::SAVE_DEVICE_CONFIG, request);
-}
 
 
 void CaptivePortal::handleRequestCheckOtaUpdate(AsyncWebServerRequest *request) {
@@ -645,10 +592,6 @@ void CaptivePortal::requestAction(PortalAction action, AsyncWebServerRequest *re
         if (action == PortalAction::SAVE_WIFI) {
             if (request->hasParam("ssid", true)) new_action.param1 = request->getParam("ssid", true)->value();
             if (request->hasParam("password", true)) new_action.param2 = request->getParam("password", true)->value();
-        } else if (action == PortalAction::SAVE_DEVICE_CONFIG) {
-            if (request->hasParam("teamId", true)) new_action.param1 = request->getParam("teamId", true)->value();
-            if (request->hasParam("apiKey", true)) new_action.param2 = request->getParam("apiKey", true)->value();
-            if (request->hasParam("region", true)) new_action.param3 = request->getParam("region", true)->value();
         }
         // For actions like SCAN_WIFI, CHECK_OTA_UPDATE, START_OTA_UPDATE, params are not from request body initially.
 
@@ -671,7 +614,7 @@ void CaptivePortal::requestAction(PortalAction action, AsyncWebServerRequest *re
 }
 
 void CaptivePortal::handleGetCardDefinitions(AsyncWebServerRequest *request) {
-    DynamicJsonDocument doc(2048);
+    DynamicJsonDocument doc(4096);  // Increased size for dynamic config fields
     JsonArray definitionsArray = doc.to<JsonArray>();
 
     // Get card definitions from CardController
@@ -682,9 +625,45 @@ void CaptivePortal::handleGetCardDefinitions(AsyncWebServerRequest *request) {
         defObj["id"] = cardTypeToString(def.type);
         defObj["name"] = def.name;
         defObj["allowMultiple"] = def.allowMultiple;
-        defObj["needsConfigInput"] = def.needsConfigInput;
-        defObj["configInputLabel"] = def.configInputLabel;
         defObj["description"] = def.uiDescription;
+        
+        
+        // Add dynamic configuration fields
+        if (!def.configFields.empty()) {
+            JsonArray fieldsArray = defObj.createNestedArray("configFields");
+            for (const ConfigField& field : def.configFields) {
+                JsonObject fieldObj = fieldsArray.createNestedObject();
+                fieldObj["key"] = field.key;
+                fieldObj["inputLabel"] = field.inputLabel;
+                fieldObj["uiDescription"] = field.uiDescription;
+                fieldObj["required"] = field.required;
+                fieldObj["defaultValue"] = field.defaultValue;
+                
+                // Convert enum to string
+                switch (field.type) {
+                    case ConfigFieldType::TEXT:
+                        fieldObj["type"] = "TEXT";
+                        break;
+                    case ConfigFieldType::SELECT:
+                        fieldObj["type"] = "SELECT";
+                        break;
+                    case ConfigFieldType::TEXTAREA:
+                        fieldObj["type"] = "TEXTAREA";
+                        break;
+                    case ConfigFieldType::BOOLEAN:
+                        fieldObj["type"] = "BOOLEAN";
+                        break;
+                }
+                
+                // Add options for SELECT type
+                if (field.type == ConfigFieldType::SELECT && !field.options.empty()) {
+                    JsonArray optionsArray = fieldObj.createNestedArray("options");
+                    for (const String& option : field.options) {
+                        optionsArray.add(option);
+                    }
+                }
+            }
+        }
     }
 
     String responseJson;
@@ -695,7 +674,7 @@ void CaptivePortal::handleGetCardDefinitions(AsyncWebServerRequest *request) {
 }
 
 void CaptivePortal::handleGetConfiguredCards(AsyncWebServerRequest *request) {
-    DynamicJsonDocument doc(2048);
+    DynamicJsonDocument doc(4096);  // Increased size for dynamic config maps
     JsonArray cardsArray = doc.to<JsonArray>();
 
     // Get configured cards from ConfigManager
@@ -703,9 +682,16 @@ void CaptivePortal::handleGetConfiguredCards(AsyncWebServerRequest *request) {
     for (const CardConfig& config : cardConfigs) {
         JsonObject cardObj = cardsArray.createNestedObject();
         cardObj["type"] = cardTypeToString(config.type);
-        cardObj["config"] = config.config;
         cardObj["order"] = config.order;
         cardObj["name"] = config.name;
+        
+        // Serialize dynamic configuration
+        if (!config.config.empty()) {
+            JsonObject configObj = cardObj.createNestedObject("configMap");
+            for (const auto& pair : config.config) {
+                configObj[pair.first] = pair.second;
+            }
+        }
     }
 
     String responseJson;
@@ -727,7 +713,7 @@ void CaptivePortal::handleSaveConfiguredCards(AsyncWebServerRequest *request) {
         
         Serial.printf("Received card config body: %s\n", body.c_str());
         
-        DynamicJsonDocument doc(2048);
+        DynamicJsonDocument doc(4096);  // Increased size for dynamic configs
         DeserializationError error = deserializeJson(doc, body);
         
         if (!error && doc.is<JsonArray>()) {
@@ -740,9 +726,17 @@ void CaptivePortal::handleSaveConfiguredCards(AsyncWebServerRequest *request) {
                 if (obj.containsKey("type") && obj.containsKey("order")) {
                     CardConfig config;
                     config.type = stringToCardType(obj["type"].as<String>());
-                    config.config = obj.containsKey("config") ? obj["config"].as<String>() : "";
                     config.order = obj["order"].as<int>();
                     config.name = obj.containsKey("name") ? obj["name"].as<String>() : "";
+                    
+                    // Handle dynamic configuration
+                    if (obj.containsKey("configMap") && obj["configMap"].is<JsonObject>()) {
+                        JsonObject configMap = obj["configMap"].as<JsonObject>();
+                        for (JsonPair kv : configMap) {
+                            config.setConfig(String(kv.key().c_str()), kv.value().as<String>());
+                        }
+                    }
+                    
                     cardConfigs.push_back(config);
                 }
             }
@@ -773,4 +767,196 @@ void CaptivePortal::handleSaveConfiguredCards(AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
     response->addHeader("Access-Control-Allow-Origin", "*");
     request->send(response);
+}
+
+// Service definition and configuration handlers
+void CaptivePortal::handleGetServiceDefinitions(AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(4096);  // Size for service definitions
+    JsonArray definitionsArray = doc.to<JsonArray>();
+
+    // Get service definitions from ServiceRegistry
+    std::vector<ServiceDefinition> definitions = ServiceRegistry::getAllServices();
+    
+    for (const ServiceDefinition& def : definitions) {
+        JsonObject defObj = definitionsArray.createNestedObject();
+        defObj["type"] = serviceTypeToString(def.type);
+        defObj["name"] = def.name;
+        defObj["description"] = def.description;
+        
+        // Add configuration fields
+        JsonArray fieldsArray = defObj.createNestedArray("fields");
+        for (const ServiceField& field : def.fields) {
+            JsonObject fieldObj = fieldsArray.createNestedObject();
+            fieldObj["key"] = field.key;
+            fieldObj["label"] = field.label;
+            fieldObj["description"] = field.description;
+            
+            // Convert ServiceFieldType to string
+            switch (field.type) {
+                case ServiceFieldType::TEXT:
+                    fieldObj["type"] = "TEXT";
+                    break;
+                case ServiceFieldType::PASSWORD:
+                    fieldObj["type"] = "PASSWORD";
+                    break;
+                case ServiceFieldType::SELECT:
+                    fieldObj["type"] = "SELECT";
+                    break;
+                case ServiceFieldType::BOOLEAN:
+                    fieldObj["type"] = "BOOLEAN";
+                    break;
+            }
+            
+            fieldObj["defaultValue"] = field.defaultValue;
+            fieldObj["required"] = field.required;
+            fieldObj["sensitive"] = field.sensitive;
+            
+            // Add options for SELECT type
+            if (field.type == ServiceFieldType::SELECT && !field.options.empty()) {
+                JsonArray optionsArray = fieldObj.createNestedArray("options");
+                for (const String& option : field.options) {
+                    optionsArray.add(option);
+                }
+            }
+        }
+    }
+    
+    String responseJson;
+    serializeJson(doc, responseJson);
+    
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void CaptivePortal::handleGetConfiguredServices(AsyncWebServerRequest *request) {
+    DynamicJsonDocument doc(2048);
+    JsonArray servicesArray = doc.to<JsonArray>();
+    
+    // Get configured services from ConfigManager
+    std::vector<ServiceConfig> services = _configManager.getServiceConfigs();
+    
+    // If PostHog service is not in the list but we have ConfigManager PostHog config, add it
+    bool hasPostHogService = false;
+    for (const ServiceConfig& service : services) {
+        if (service.type == ServiceType::POSTHOG) {
+            hasPostHogService = true;
+            break;
+        }
+    }
+    
+    
+    for (const ServiceConfig& service : services) {
+        JsonObject serviceObj = servicesArray.createNestedObject();
+        serviceObj["type"] = serviceTypeToString(service.type);
+        
+        // Add configuration values (mask sensitive fields)
+        if (!service.config.empty()) {
+            JsonObject configObj = serviceObj.createNestedObject("config");
+            
+            // Get service definition to check which fields are sensitive
+            ServiceDefinition def = ServiceRegistry::getServiceDefinition(service.type);
+            
+            for (const auto& pair : service.config) {
+                bool isSensitive = false;
+                
+                // Check if this field is marked as sensitive
+                for (const ServiceField& field : def.fields) {
+                    if (field.key == pair.first && field.sensitive) {
+                        isSensitive = true;
+                        break;
+                    }
+                }
+                
+                if (isSensitive && !pair.second.isEmpty()) {
+                    // Mask sensitive fields (show first few characters + asterisks)
+                    String maskedValue = pair.second.substring(0, min(4, (int)pair.second.length()));
+                    maskedValue += "****";
+                    configObj[pair.first] = maskedValue;
+                } else {
+                    configObj[pair.first] = pair.second;
+                }
+            }
+        }
+    }
+    
+    String responseJson;
+    serializeJson(doc, responseJson);
+    
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", responseJson);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void CaptivePortal::handleSaveConfiguredServices(AsyncWebServerRequest *request) {
+    bool success = false;
+    String message = "Failed to save service configuration";
+
+    // Check if we have body data stored by the body handler
+    if (request->_tempObject != NULL) {
+        String body = String((char*)request->_tempObject);
+        free(request->_tempObject); // Clean up the allocated memory
+        request->_tempObject = NULL;
+        
+        Serial.printf("Received service config body: %s\n", body.c_str());
+        
+        DynamicJsonDocument doc(4096);  // Size for service configs
+        DeserializationError error = deserializeJson(doc, body);
+        
+        if (!error && doc.is<JsonArray>()) {
+            JsonArray servicesArray = doc.as<JsonArray>();
+            std::vector<ServiceConfig> serviceConfigs;
+            
+            // Parse each service configuration
+            for (JsonVariant v : servicesArray) {
+                JsonObject obj = v.as<JsonObject>();
+                if (obj.containsKey("type")) {
+                    ServiceConfig config;
+                    config.type = stringToServiceType(obj["type"].as<String>());
+                    
+                    // Handle configuration fields
+                    if (obj.containsKey("config") && obj["config"].is<JsonObject>()) {
+                        JsonObject configObj = obj["config"].as<JsonObject>();
+                        for (JsonPair kv : configObj) {
+                            config.setConfig(String(kv.key().c_str()), kv.value().as<String>());
+                        }
+                    }
+                    
+                    serviceConfigs.push_back(config);
+                }
+            }
+            
+            // Save to configuration manager
+            success = _configManager.saveServiceConfigs(serviceConfigs);
+            if (success) {
+                message = "Service configuration saved successfully";
+                Serial.println("Service configuration saved successfully");
+                
+                
+                // Publish configuration change event
+                _eventQueue.publishEvent(EventType::SERVICE_CONFIG_CHANGED, "");
+            } else {
+                message = "Failed to save service configuration to storage";
+                Serial.println("Failed to save service configuration to storage");
+            }
+        } else {
+            message = "Invalid JSON format in request body";
+            Serial.printf("JSON parse error: %s\n", error.c_str());
+        }
+    } else {
+        message = "No request body received";
+        Serial.println("No request body received for service configuration");
+    }
+    
+    // Send response
+    DynamicJsonDocument response(512);
+    response["success"] = success;
+    response["message"] = message;
+    
+    String responseJson;
+    serializeJson(response, responseJson);
+    
+    AsyncWebServerResponse *httpResponse = request->beginResponse(200, "application/json", responseJson);
+    httpResponse->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(httpResponse);
 }

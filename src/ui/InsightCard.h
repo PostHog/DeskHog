@@ -4,7 +4,6 @@
 #include <memory>
 #include <functional>
 #include <vector>
-#include "ConfigManager.h"
 #include "EventQueue.h"
 #include "posthog/parsers/InsightParser.h"
 #include "UICallback.h"
@@ -34,7 +33,6 @@ public:
      * @brief Constructor
      * 
      * @param parent LVGL parent object to attach this card to
-     * @param config Configuration manager for persistent storage
      * @param eventQueue Event queue for receiving data updates
      * @param insightId Unique identifier for this insight
      * @param width Card width in pixels
@@ -45,7 +43,7 @@ public:
      * - Content container for visualization
      * Subscribes to INSIGHT_DATA_RECEIVED events for the specified insightId.
      */
-    InsightCard(lv_obj_t* parent, ConfigManager& config, EventQueue& eventQueue,
+    InsightCard(lv_obj_t* parent, EventQueue& eventQueue,
                 const String& insightId, uint16_t width, uint16_t height);
     
     /**
@@ -133,7 +131,6 @@ private:
     bool isValidObject(lv_obj_t* obj) const;
     
     // Configuration and state
-    ConfigManager& _config;              ///< Configuration manager reference
     EventQueue& _event_queue;            ///< Event queue reference
     String _insight_id;                  ///< Unique insight identifier
     String _current_title;               ///< Current card title
