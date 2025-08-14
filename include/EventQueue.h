@@ -25,7 +25,12 @@ enum class EventType {
     OTA_PROCESS_START,
     OTA_PROCESS_END,
     CARD_CONFIG_CHANGED,
-    CARD_TITLE_UPDATED
+    CARD_TITLE_UPDATED,
+    POKEAPI_FETCH_REQUEST,
+    POKEAPI_FETCH_SPRITE,
+    POKEAPI_DATA_READY,
+    POKEAPI_SPRITE_READY,
+    POKEAPI_ERROR
 };
 
 /**
@@ -38,15 +43,25 @@ struct Event {
     String jsonData;                        // Raw JSON data for insights
     String title;                           // Title/name for card title updates
     
-    Event() {}
+    // PokeAPI specific data
+    int intData;                            // General purpose int (Pokemon ID, etc)
+    char stringData[128];                   // General purpose string data
+    char stringData2[256];                  // Additional string data (description)
+    uint8_t* byteData;                      // Byte array (for PNG data)
+    size_t byteDataSize;                    // Size of byte array
     
-    Event(EventType t, const String& id) : type(t), insightId(id), parser(nullptr) {}
+    Event() : intData(0), byteData(nullptr), byteDataSize(0) {
+        stringData[0] = '\0';
+        stringData2[0] = '\0';
+    }
+    
+    Event(EventType t, const String& id) : type(t), insightId(id), parser(nullptr), byteData(nullptr), byteDataSize(0) {}
     
     Event(EventType t, const String& id, std::shared_ptr<InsightParser> p)
-        : type(t), insightId(id), parser(p) {}
+        : type(t), insightId(id), parser(p), byteData(nullptr), byteDataSize(0) {}
         
     Event(EventType t, const String& id, const String& json)
-        : type(t), insightId(id), parser(nullptr), jsonData(json) {}
+        : type(t), insightId(id), parser(nullptr), jsonData(json), byteData(nullptr), byteDataSize(0) {}
         
     // Constructor for title update events
     static Event createTitleUpdateEvent(const String& id, const String& title_text) {

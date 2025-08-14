@@ -1,5 +1,6 @@
 #include "ui/CardController.h"
 #include "ui/PaddleCard.h"
+#include "ui/PokedexCard.h"
 #include <algorithm>
 
 QueueHandle_t CardController::uiQueue = nullptr;
@@ -115,6 +116,15 @@ void CardController::initialize(DisplayInterface* display) {
             event.type == EventType::WIFI_CONNECTION_FAILED ||
             event.type == EventType::WIFI_AP_STARTED) {
             handleWiFiEvent(event);
+        }
+    });
+    
+    // Subscribe to PokeAPI events
+    eventQueue.subscribe([this](const Event& event) {
+        if (event.type == EventType::POKEAPI_DATA_READY ||
+            event.type == EventType::POKEAPI_SPRITE_READY ||
+            event.type == EventType::POKEAPI_ERROR) {
+            handlePokeAPIEvent(event);
         }
     });
 }
@@ -381,6 +391,32 @@ void CardController::initializeCardTypes() {
         return nullptr;
     };
     registerCardType(paddleDef);
+    
+    // Register POKEDEX card type (combines offline Pokemon with PokeAPI fetching)
+    CardDefinition pokedexDef;
+    pokedexDef.type = CardType::POKEDEX;
+    pokedexDef.name = "Pokedex";
+    pokedexDef.allowMultiple = false;  // Only one pokedex at a time
+    pokedexDef.needsConfigInput = false;
+    pokedexDef.configInputLabel = "";
+    pokedexDef.uiDescription = "Fetch and display random Pokemon from the PokeAPI";
+    pokedexDef.factory = [this](const String& configValue) -> lv_obj_t* {
+        PokedexCard* newCard = new PokedexCard(screen);
+        
+        if (newCard && newCard->getCard()) {
+            // Add to unified tracking system
+            CardInstance instance{newCard, newCard->getCard()};
+            dynamicCards[CardType::POKEDEX].push_back(instance);
+            
+            // Register as input handler
+            cardStack->registerInputHandler(newCard->getCard(), newCard);
+            return newCard->getCard();
+        }
+        
+        delete newCard;
+        return nullptr;
+    };
+    registerCardType(pokedexDef);
 }
 
 void CardController::handleCardConfigChanged() {
@@ -582,6 +618,56 @@ void CardController::handleCardTitleUpdated(const Event& event) {
                              event.insightId.c_str(), event.title.c_str());
             }
             break;
+        }
+    }
+}
+
+void CardController::handlePokeAPIEvent(const Event& event) {
+    // Find the PokedexCard instance (was PokeAPICard)
+    auto it = dynamicCards.find(CardType::POKEDEX);
+    if (it == dynamicCards.end() || it->second.empty()) {
+        // No Pokedex card exists
+        return;
+    }
+    
+    // Forward event to all Pokedex cards (usually just one)
+    for (const auto& instance : it->second) {
+        PokedexCard* pokeCard = static_cast<PokedexCard*>(instance.handler);
+        
+        switch (event.type) {
+            case EventType::POKEAPI_DATA_READY: {
+                // Capture strings explicitly to ensure they're copied
+                int id = event.intData;
+                String name = String(event.stringData);
+                String desc = String(event.stringData2);
+                Serial.printf("[CardController] Dispatching to LVGL: id=%d, name='%s', desc='%s'\n", 
+                              id, name.c_str(), desc.c_str());
+                // Queue UI update for data display
+                dispatchToLVGLTask([pokeCard, id, name, desc]() {
+                    pokeCard->onDataReceived(id, name, desc);
+                });
+                break;
+            }
+                
+            case EventType::POKEAPI_SPRITE_READY:
+                // Queue UI update for sprite display
+                dispatchToLVGLTask([pokeCard, event]() {
+                    // Note: byteData ownership is transferred to PokedexCard
+                    pokeCard->onSpriteReceived(event.byteData, event.byteDataSize);
+                });
+                break;
+                
+            case EventType::POKEAPI_ERROR: {
+                String errorMsg = String(event.stringData);
+                // Queue UI update for error display
+                dispatchToLVGLTask([pokeCard, errorMsg]() {
+                    pokeCard->onFetchError(errorMsg);
+                });
+                break;
+            }
+                
+            default:
+                break;
         }
     }
 } 

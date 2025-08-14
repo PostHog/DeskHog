@@ -207,6 +207,12 @@ private:
      * @param event Event containing WiFi state
      */
     void handleWiFiEvent(const Event& event);
+    
+    /**
+     * @brief Handle PokeAPI-related events
+     * @param event Event containing PokeAPI data
+     */
+    void handlePokeAPIEvent(const Event& event);
 
     /**
      * @brief Handle card title update events

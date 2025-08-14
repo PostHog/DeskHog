@@ -36,6 +36,8 @@
 #include "OtaManager.h"
 #include <esp_sleep.h> // Added for deep sleep functionality
 #include <esp_pm.h> // Added for power management
+#include "network/PokeAPIClient.h"
+#include <cstring>
 
 // Display dimensions
 #define SCREEN_WIDTH 240
@@ -65,6 +67,7 @@ PostHogClient* posthogClient;
 EventQueue* eventQueue; // Add global EventQueue
 NeoPixelController* neoPixelController;  // Renamed from neoPixelManager
 OtaManager* otaManager;
+PokeAPIClient* pokeAPIClient;
 
 // Task handles
 TaskHandle_t wifiTask;
@@ -75,11 +78,64 @@ TaskHandle_t neoPixelTask;
 // WiFi connection timeout in milliseconds
 #define WIFI_TIMEOUT 30000
 
-// WiFi task that handles WiFi operations
+// Queue for PokeAPI requests
+QueueHandle_t pokeAPIQueue = nullptr;
+
+// WiFi task that handles WiFi operations and network requests
 void wifiTaskFunction(void* parameter) {
+    // Create a queue for PokeAPI requests
+    pokeAPIQueue = xQueueCreate(10, sizeof(Event));
+    
+    // Subscribe to PokeAPI events and forward them to our local queue
+    eventQueue->subscribe([](const Event& event) {
+        if (event.type == EventType::POKEAPI_FETCH_REQUEST || 
+            event.type == EventType::POKEAPI_FETCH_SPRITE) {
+            // Forward to our local queue instead of processing directly
+            xQueueSend(pokeAPIQueue, &event, 0);
+        }
+    });
+    
+    Event pokeEvent;
+    
     while (1) {
         // Process WiFi events
         wifiInterface->process();
+        
+        // Check for PokeAPI requests in our queue (processed in WiFi task context with proper stack)
+        if (xQueueReceive(pokeAPIQueue, &pokeEvent, 0) == pdPASS) {
+            switch (pokeEvent.type) {
+                case EventType::POKEAPI_FETCH_REQUEST:
+                    Serial.printf("[WiFi Task] Processing PokeAPI fetch request for ID %d\n", pokeEvent.intData);
+                    if (pokeAPIClient && wifiInterface->isConnected()) {
+                        pokeAPIClient->processFetchRequest(pokeEvent.intData);
+                    } else {
+                        Serial.println("[WiFi Task] Cannot fetch Pokemon - WiFi not connected or client not initialized");
+                        Event errorEvent;
+                        errorEvent.type = EventType::POKEAPI_ERROR;
+                        strncpy(errorEvent.stringData, "WiFi not connected", sizeof(errorEvent.stringData) - 1);
+                        errorEvent.stringData[sizeof(errorEvent.stringData) - 1] = '\0';
+                        eventQueue->publishEvent(errorEvent);
+                    }
+                    break;
+                    
+                case EventType::POKEAPI_FETCH_SPRITE:
+                    Serial.printf("[WiFi Task] Processing sprite fetch request for ID %d\n", pokeEvent.intData);
+                    if (pokeAPIClient && wifiInterface->isConnected()) {
+                        pokeAPIClient->processSpriteRequest(pokeEvent.intData);
+                    } else {
+                        Serial.println("[WiFi Task] Cannot fetch sprite - WiFi not connected or client not initialized");
+                        Event errorEvent;
+                        errorEvent.type = EventType::POKEAPI_ERROR;
+                        strncpy(errorEvent.stringData, "WiFi not connected", sizeof(errorEvent.stringData) - 1);
+                        errorEvent.stringData[sizeof(errorEvent.stringData) - 1] = '\0';
+                        eventQueue->publishEvent(errorEvent);
+                    }
+                    break;
+                    
+                default:
+                    break;
+            }
+        }
         
         // Delay to prevent hogging CPU
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -266,6 +322,9 @@ void setup() {
     wifiInterface = new WiFiInterface(*configManager, *eventQueue);
     wifiInterface->begin();
     
+    // Initialize PokeAPI client
+    pokeAPIClient = new PokeAPIClient(*eventQueue);
+    
     // Initialize buttons
     Input::configureButtons();
     
@@ -297,11 +356,11 @@ void setup() {
     captivePortal = new CaptivePortal(*configManager, *wifiInterface, *eventQueue, *otaManager, *cardController);
     captivePortal->begin();
     
-    // Create task for WiFi operations
+    // Create task for WiFi operations (needs more stack for HTTPS)
     xTaskCreatePinnedToCore(
         wifiTaskFunction,
         "wifiTask",
-        4096,
+        16384,  // Increased stack size for HTTPS operations
         NULL,
         1,
         &wifiTask,
