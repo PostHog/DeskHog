@@ -104,6 +104,24 @@ private:
     void onEvent(const Event& event);
     
     /**
+     * @brief Handle error events from network requests
+     * 
+     * @param event Event containing error information
+     * 
+     * Updates UI to show error state with smooth transitions.
+     */
+    void onErrorEvent(const Event& event);
+    
+    /**
+     * @brief Handle network state changes for Apple-like loading states
+     * 
+     * @param event Event containing network state information
+     * 
+     * Updates loading indicators and animations based on network state.
+     */
+    void onNetworkStateChanged(const Event& event);
+    
+    /**
      * @brief Process parsed insight data
      * 
      * @param parser Shared pointer to parsed insight data
@@ -143,7 +161,49 @@ private:
     lv_obj_t* _card;                    ///< Main card container
     lv_obj_t* _title_label;             ///< Title text label
     lv_obj_t* _content_container;       ///< Container for visualization
+    lv_obj_t* _loading_spinner;         ///< Loading spinner for Apple-like loading states
+    lv_obj_t* _error_label;             ///< Error message label
+    
+    // Loading state management
+    bool _is_loading;                   ///< Current loading state
+    bool _has_error;                    ///< Current error state
+    bool _is_showing_cached_data;       ///< Whether currently showing cached data
     
     // Renderer related members
-    std::unique_ptr<InsightRendererBase> _active_renderer; // Smart pointer to the current renderer
+    std::unique_ptr<InsightRendererBase> _active_renderer; ///< Smart pointer to the current renderer
+    
+    /**
+     * @brief Show loading state with spinner
+     * @param show_spinner Whether to show animated spinner
+     */
+    void showLoadingState(bool show_spinner = true);
+    
+    /**
+     * @brief Show error state with message
+     * @param error_message Error message to display
+     */
+    void showErrorState(const String& error_message);
+    
+    /**
+     * @brief Show success state (hide loading/error indicators)
+     */
+    void showSuccessState();
+    
+    /**
+     * @brief Create loading spinner with Apple-like animation
+     */
+    void createLoadingSpinner();
+    
+    /**
+     * @brief Create error display elements
+     */
+    void createErrorDisplay();
+    
+    /**
+     * @brief Animate transition between states
+     * @param from_opacity Starting opacity (0-255)
+     * @param to_opacity Ending opacity (0-255)
+     * @param duration Animation duration in ms
+     */
+    void animateOpacityTransition(lv_obj_t* obj, uint8_t from_opacity, uint8_t to_opacity, uint32_t duration = 300);
 };

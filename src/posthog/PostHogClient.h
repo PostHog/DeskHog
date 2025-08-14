@@ -8,10 +8,12 @@
 #include <vector>
 #include <set>
 #include <memory>
+#include <map>
 #include "../ConfigManager.h"
 #include "SystemController.h"
 #include "EventQueue.h"
 #include "parsers/InsightParser.h"
+#include "../AsyncHTTPClient.h"
 
 /**
  * @class PostHogClient
@@ -39,15 +41,24 @@ public:
     void operator=(const PostHogClient&) = delete;
     
     /**
-     * @brief Queue an insight for immediate fetch
+     * @brief Queue an insight for immediate fetch with Apple-like UX
      * 
      * @param insight_id ID of insight to fetch
      * @param forceRefresh If true, force recalculation instead of using cache
      * 
-     * Adds insight to request queue with retry count of 0.
-     * Will be processed in FIFO order.
+     * Uses AsyncNetworkManager for smooth loading states and progressive updates.
+     * Shows cached data immediately if available, then updates with fresh data.
      */
     void requestInsightData(const String& insight_id, bool forceRefresh = false);
+    
+    /**
+     * @brief Request insight data with cached data for progressive loading
+     * 
+     * @param insight_id ID of insight to fetch
+     * @param cachedData Cached data to show immediately
+     * @param forceRefresh If true, force recalculation instead of using cache
+     */
+    void requestInsightDataWithCache(const String& insight_id, const String& cachedData, bool forceRefresh = false);
     
     /**
      * @brief Check if client is ready for operation
@@ -82,13 +93,20 @@ private:
     ConfigManager& _config;         ///< Configuration storage
     EventQueue& _eventQueue;        ///< Event system
     
+    // Async network management
+    std::unique_ptr<AsyncHTTPClient> _asyncHttpClient; ///< Truly async HTTP client
+    
     // Request tracking
     std::set<String> requested_insights;  ///< All known insight IDs
-    std::queue<QueuedRequest> request_queue; ///< Queue of pending requests
-    bool has_active_request;               ///< Request in progress flag
+    std::queue<QueuedRequest> request_queue; ///< Queue of pending requests (legacy)
+    bool has_active_request;               ///< Request in progress flag (legacy)
     WiFiClientSecure _secureClient;        ///< Secure WiFi client for HTTPS
     HTTPClient _http;                      ///< HTTP client instance
     unsigned long last_refresh_check;       ///< Last refresh timestamp
+    
+    // Data caching for progressive loading
+    std::map<String, String> _insightCache; ///< Cached insight data
+    std::map<String, unsigned long> _cacheTimestamps; ///< Cache timestamps
     
     // Constants
     static const char* BASE_URL;                        ///< PostHog API base URL
@@ -144,4 +162,48 @@ private:
     
     // Event-related methods
     void publishInsightDataEvent(const String& insight_id, const String& response);
+    
+    /**
+     * @brief Make async insight request
+     * @param insight_id ID of insight to fetch
+     * @param forceRefresh Whether to force refresh
+     */
+    void makeAsyncInsightRequest(const String& insight_id, bool forceRefresh);
+    
+    /**
+     * @brief Handle successful insight data retrieval
+     * @param insight_id ID of insight
+     * @param data Retrieved data
+     * @param statusCode HTTP status code
+     */
+    void handleInsightSuccess(const String& insight_id, const String& data, int statusCode);
+    
+    /**
+     * @brief Handle insight data retrieval error
+     * @param insight_id ID of insight
+     * @param error Error message
+     * @param statusCode HTTP status code
+     */
+    void handleInsightError(const String& insight_id, const String& error, int statusCode);
+    
+    /**
+     * @brief Get cached data for an insight
+     * @param insight_id ID of insight
+     * @return Cached data or empty string if not available
+     */
+    String getCachedData(const String& insight_id) const;
+    
+    /**
+     * @brief Cache insight data
+     * @param insight_id ID of insight
+     * @param data Data to cache
+     */
+    void cacheInsightData(const String& insight_id, const String& data);
+    
+    /**
+     * @brief Check if cached data is still valid
+     * @param insight_id ID of insight
+     * @return true if cache is valid
+     */
+    bool isCacheValid(const String& insight_id) const;
 }; 

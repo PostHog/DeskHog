@@ -1,11 +1,13 @@
 #include "PostHogClient.h"
 #include "../ConfigManager.h"
+#include "../AsyncHTTPClient.h"
 
 
 
 PostHogClient::PostHogClient(ConfigManager& config, EventQueue& eventQueue) 
     : _config(config)
     , _eventQueue(eventQueue)
+    , _asyncHttpClient(std::make_unique<AsyncHTTPClient>(eventQueue))
     , has_active_request(false)
     , last_refresh_check(0) {
     // Configure secure client for HTTPS
@@ -25,16 +27,23 @@ String PostHogClient::buildBaseUrl() const {
 }
 
 void PostHogClient::requestInsightData(const String& insight_id, bool forceRefresh) {
-    // Add to queue for immediate fetch
-    QueuedRequest request = {
-        .insight_id = insight_id,
-        .retry_count = 0,
-        .force_refresh = forceRefresh
-    };
-    request_queue.push(request);
-    
     // Add to our set of known insights for future refreshes
     requested_insights.insert(insight_id);
+    
+    // Get cached data for progressive loading
+    String cachedData = getCachedData(insight_id);
+    if (!cachedData.isEmpty() && !forceRefresh) {
+        // Immediately show cached data
+        Serial.printf("[PostHogClient] Showing cached data for %s\n", insight_id.c_str());
+        publishInsightDataEvent(insight_id, cachedData);
+        
+        // Still fetch fresh data in background
+        makeAsyncInsightRequest(insight_id, false);
+    } else {
+        // No cache or force refresh - show loading state and fetch
+        _eventQueue.publishEvent(EventType::INSIGHT_NETWORK_STATE_CHANGED, insight_id, "loading");
+        makeAsyncInsightRequest(insight_id, forceRefresh);
+    }
 }
 
 bool PostHogClient::isReady() const {
@@ -48,18 +57,19 @@ void PostHogClient::process() {
         return;
     }
 
-    // Process any queued requests
+    // Process async HTTP client
+    _asyncHttpClient->process();
+
+    // Legacy queue processing for fallback
     if (!has_active_request) {
         processQueue();
     }
 
     // Check for needed refreshes
-    if (!has_active_request) {
-        unsigned long now = millis();
-        if (now - last_refresh_check >= REFRESH_INTERVAL) {
-            last_refresh_check = now;
-            checkRefreshes();
-        }
+    unsigned long now = millis();
+    if (now - last_refresh_check >= REFRESH_INTERVAL) {
+        last_refresh_check = now;
+        checkRefreshes();
     }
 }
 
@@ -132,11 +142,9 @@ void PostHogClient::checkRefreshes() {
     }
     
     if (!refresh_id.isEmpty()) {
-        String response;
-        if (fetchInsight(refresh_id, response)) {
-            // Publish to the event system
-            publishInsightDataEvent(refresh_id, response);
-        }
+        // Use async request for automatic refreshes (non-blocking)
+        Serial.printf("[PostHogClient] Auto-refreshing insight %s\\n", refresh_id.c_str());
+        makeAsyncInsightRequest(refresh_id, false); // Use cache first
     }
 }
 
@@ -288,9 +296,104 @@ void PostHogClient::publishInsightDataEvent(const String& insight_id, const Stri
         return;
     }
     
+    // Cache the response for future progressive loading
+    cacheInsightData(insight_id, response);
+    
     // Publish the event with the raw JSON response
     _eventQueue.publishEvent(EventType::INSIGHT_DATA_RECEIVED, insight_id, response);
     
     // Log for debugging
     Serial.printf("Published raw JSON data for %s\n", insight_id.c_str());
+}
+
+void PostHogClient::makeAsyncInsightRequest(const String& insight_id, bool forceRefresh) {
+    if (!isReady() || WiFi.status() != WL_CONNECTED) {
+        handleInsightError(insight_id, "System not ready or WiFi disconnected", 0);
+        return;
+    }
+    
+    String url = buildInsightUrl(insight_id, forceRefresh ? "blocking" : "force_cache");
+    
+    AsyncHTTPClient::RequestConfig config;
+    config.url = url;
+    config.method = AsyncHTTPClient::Method::GET;
+    config.timeout = 30000; // 30 seconds
+    config.maxRetries = 3;
+    
+    // Success callback
+    config.onSuccess = [this, insight_id](const String& response, int statusCode) {
+        this->handleInsightSuccess(insight_id, response, statusCode);
+    };
+    
+    // Error callback
+    config.onError = [this, insight_id](const String& error, int statusCode) {
+        this->handleInsightError(insight_id, error, statusCode);
+    };
+    
+    // Make the async request
+    String requestId = _asyncHttpClient->request(config);
+    if (requestId.isEmpty()) {
+        handleInsightError(insight_id, "Failed to queue HTTP request", 0);
+    } else {
+        Serial.printf("[PostHogClient] Started async request %s for insight %s\\n", 
+                      requestId.c_str(), insight_id.c_str());
+    }
+}
+
+void PostHogClient::handleInsightSuccess(const String& insight_id, const String& data, int statusCode) {
+    // This is called on the UI thread via AsyncHTTPClient
+    Serial.printf("[PostHogClient] Async request succeeded for %s (HTTP %d, %d bytes)\\n", 
+                  insight_id.c_str(), statusCode, data.length());
+    
+    if (statusCode == 200) {
+        // Check if we need to retry with blocking refresh
+        if (data.indexOf("\\\"result\\\":null") >= 0 || data.indexOf("\\\"result\\\":[]") >= 0) {
+            Serial.printf("[PostHogClient] Cache miss for %s, retrying with blocking refresh\\n", insight_id.c_str());
+            makeAsyncInsightRequest(insight_id, true); // Force refresh
+            return;
+        }
+        
+        // Success - publish data and update UI state
+        publishInsightDataEvent(insight_id, data);
+        _eventQueue.publishEvent(EventType::INSIGHT_NETWORK_STATE_CHANGED, insight_id, "success");
+    } else {
+        handleInsightError(insight_id, "HTTP " + String(statusCode), statusCode);
+    }
+}
+
+void PostHogClient::handleInsightError(const String& insight_id, const String& error, int statusCode) {
+    // This is called on the UI thread via AsyncHTTPClient
+    Serial.printf("[PostHogClient] Async request failed for %s: %s (HTTP %d)\\n", 
+                  insight_id.c_str(), error.c_str(), statusCode);
+    
+    // Publish error events
+    _eventQueue.publishEvent(EventType::INSIGHT_DATA_ERROR, insight_id, error);
+    _eventQueue.publishEvent(EventType::INSIGHT_NETWORK_STATE_CHANGED, insight_id, "error");
+}
+
+String PostHogClient::getCachedData(const String& insight_id) const {
+    auto it = _insightCache.find(insight_id);
+    if (it != _insightCache.end() && isCacheValid(insight_id)) {
+        return it->second;
+    }
+    return "";
+}
+
+void PostHogClient::cacheInsightData(const String& insight_id, const String& data) {
+    _insightCache[insight_id] = data;
+    _cacheTimestamps[insight_id] = millis();
+}
+
+bool PostHogClient::isCacheValid(const String& insight_id) const {
+    auto it = _cacheTimestamps.find(insight_id);
+    if (it == _cacheTimestamps.end()) {
+        return false;
+    }
+    
+    unsigned long now = millis();
+    unsigned long cacheAge = now - it->second;
+    
+    // Cache is valid for 5 minutes for progressive loading
+    static const unsigned long CACHE_VALIDITY_MS = 5 * 60 * 1000;
+    return cacheAge < CACHE_VALIDITY_MS;
 } 
