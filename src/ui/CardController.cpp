@@ -1,3 +1,4 @@
+#include "LifeCountdownCardWrapper.h"
 #include "ui/CardController.h"
 #include "ui/PaddleCard.h"
 #include <algorithm>
@@ -209,6 +210,8 @@ void CardController::registerCardType(const CardDefinition& definition) {
 }
 
 void CardController::initializeCardTypes() {
+      Serial.println("DEBUG: Starting card type initialization...");
+    
     // Register INSIGHT card type
     CardDefinition insightDef;
     insightDef.type = CardType::INSIGHT;
@@ -381,6 +384,35 @@ void CardController::initializeCardTypes() {
         return nullptr;
     };
     registerCardType(paddleDef);
+    
+        // Register LIFE_COUNTDOWN card type
+    CardDefinition lifecountdownDef;
+    lifecountdownDef.type = CardType::LIFE_COUNTDOWN;
+    lifecountdownDef.name = "Life Countdown";
+    lifecountdownDef.allowMultiple = false;
+    lifecountdownDef.needsConfigInput = false;
+    lifecountdownDef.configInputLabel = "";
+    lifecountdownDef.uiDescription = "Motivational countdowns for your life and work";
+    lifecountdownDef.factory = [this](const String& configValue) -> lv_obj_t* {
+        LifeCountdownCardWrapper* newCard = new LifeCountdownCardWrapper(screen);
+        
+        if (newCard && newCard->getCard()) {
+            // Add to unified tracking system
+            CardInstance instance{newCard, newCard->getCard()};
+            dynamicCards[CardType::LIFE_COUNTDOWN].push_back(instance);
+            
+            // Register as input handler
+            cardStack->registerInputHandler(newCard->getCard(), newCard);
+            return newCard->getCard();
+        }
+        
+        delete newCard;
+        return nullptr;
+    };
+
+    registerCardType(lifecountdownDef);
+Serial.println("DEBUG: Life Countdown card type registered!");
+Serial.printf("Total registered card types: %d\n", registeredCardTypes.size());
 }
 
 void CardController::handleCardConfigChanged() {
