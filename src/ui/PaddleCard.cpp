@@ -230,25 +230,23 @@ void PaddleCard::updateMessageLabel() {
 bool PaddleCard::handleButtonPress(uint8_t button_index) {
     PaddleGame::GameState current_game_state = _paddle_game_instance.getState();
 
-    if (current_game_state == PaddleGame::GameState::GameOver ||
-    current_game_state == PaddleGame::GameState::StartScreen) {
-        // In GameOver state:
-        // - Center button is still handled by PaddleCard (to restart)
-        // - Up/Down buttons are NOT handled, allowing CardNavigationStack to use them
-        if (button_index == Input::BUTTON_CENTER) {
-            return true; // Center press restarts the game (handled in update())
-        }
-        return false; // Up/Down presses are not handled by PaddleCard in GameOver
-    } else {
-        // In other states (StartScreen, Playing, Paused):
-        // PaddleCard handles all three relevant buttons
-        if (button_index == Input::BUTTON_CENTER ||
-            button_index == Input::BUTTON_UP ||
-            button_index == Input::BUTTON_DOWN) {
-            return true; // Event handled by PaddleCard (logic is in update())
-        }
+    // Center is always owned by PaddleCard: it starts, pauses, resumes, or
+    // restarts the game depending on the current state (handled in update()).
+    // Navigation never uses center, so consuming it here is safe.
+    if (button_index == Input::BUTTON_CENTER) {
+        return true;
     }
-    return false; // Other buttons or unhandled cases
+
+    // Up/Down only drive the paddle while the game is actively being played.
+    // In every other state (StartScreen, Paused, ServeDelay, GameOver) we must
+    // let them fall through to CardNavigationStack so the user can always scroll
+    // to another card and exit the game instead of getting stuck.
+    if (current_game_state == PaddleGame::GameState::Playing &&
+        (button_index == Input::BUTTON_UP || button_index == Input::BUTTON_DOWN)) {
+        return true; // Event handled by PaddleCard (paddle movement logic is in update())
+    }
+
+    return false; // Let CardNavigationStack handle Up/Down for navigation
 }
 
 lv_obj_t* PaddleCard::getCard() const {
