@@ -63,7 +63,10 @@ CardController::~CardController() {
 void CardController::initialize(DisplayInterface* display) {
     // Set the display interface first
     setDisplayInterface(display);
-    
+
+    // Start the CPU-load estimator that drives the CpuHogCard's run speed.
+    cpuMonitor.begin();
+
     // Initialize UI queue for thread-safe operations
     initUIQueue();
     
@@ -381,6 +384,32 @@ void CardController::initializeCardTypes() {
         return nullptr;
     };
     registerCardType(paddleDef);
+
+    // Register CPU_HOG card type
+    CardDefinition cpuHogDef;
+    cpuHogDef.type = CardType::CPU_HOG;
+    cpuHogDef.name = "CPU Hog";
+    cpuHogDef.allowMultiple = false;
+    cpuHogDef.needsConfigInput = false;
+    cpuHogDef.configInputLabel = "";
+    cpuHogDef.uiDescription = "Max runs on a wheel, faster the harder your CPU works";
+    cpuHogDef.factory = [this](const String& configValue) -> lv_obj_t* {
+        CpuHogCard* newCard = new CpuHogCard(screen, &cpuMonitor);
+
+        if (newCard && newCard->getCard()) {
+            // Add to unified tracking system
+            CardInstance instance{newCard, newCard->getCard()};
+            dynamicCards[CardType::CPU_HOG].push_back(instance);
+
+            // Register as input handler
+            cardStack->registerInputHandler(newCard->getCard(), newCard);
+            return newCard->getCard();
+        }
+
+        delete newCard;
+        return nullptr;
+    };
+    registerCardType(cpuHogDef);
 }
 
 void CardController::handleCardConfigChanged() {

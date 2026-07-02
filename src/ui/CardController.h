@@ -14,6 +14,8 @@
 #include "ui/FriendCard.h"
 #include "ui/examples/HelloWorldCard.h"
 #include "ui/FlappyHogCard.h"
+#include "ui/CpuHogCard.h"
+#include "hardware/CpuMonitor.h"
 #include "hardware/DisplayInterface.h"
 #include "EventQueue.h"
 #include "config/CardConfig.h"
@@ -179,6 +181,8 @@ private:
     
     // Legacy single instance tracking (for backwards compatibility during transition)
     FriendCard* animationCard;       ///< Card for animations
+
+    CpuMonitor cpuMonitor;           ///< Device CPU-load estimator for CpuHogCard
     
     // Display interface for thread safety
     DisplayInterface* displayInterface;  ///< Thread-safe display interface
