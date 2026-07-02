@@ -1,6 +1,8 @@
 #include "ui/CpuHogCard.h"
 #include "Style.h"
 #include "sprites/sprites.h"
+#include <string.h>
+#include <stdlib.h>
 
 CpuHogCard::CpuHogCard(lv_obj_t* parent, CpuMonitor* cpu)
     : _cpu(cpu)
@@ -10,7 +12,8 @@ CpuHogCard::CpuHogCard(lv_obj_t* parent, CpuMonitor* cpu)
     , _label(nullptr)
     , _label_shadow(nullptr)
     , _currentBucket(-1)
-    , _lastPollMs(0) {
+    , _lastPollMs(0)
+    , _lineLen(0) {
 
     // Root card - black background, matching the other cards.
     _card = lv_obj_create(parent);
@@ -63,7 +66,7 @@ CpuHogCard::CpuHogCard(lv_obj_t* parent, CpuMonitor* cpu)
     // Start at whatever the CPU is doing right now.
     uint8_t load = _cpu ? _cpu->getLoadPercent() : 0;
     applySpeed(load);
-    setLabel(load);
+    setLabel(load, _cpu && _cpu->hasFreshHostLoad());
 }
 
 CpuHogCard::~CpuHogCard() {
@@ -101,26 +104,54 @@ void CpuHogCard::applySpeed(uint8_t loadPercent) {
     lv_animimg_start(_anim_img);  // Restart with the new pace
 }
 
-void CpuHogCard::setLabel(uint8_t loadPercent) {
+void CpuHogCard::setLabel(uint8_t loadPercent, bool fromHost) {
     char buf[16];
-    snprintf(buf, sizeof(buf), "CPU %u%%", (unsigned)loadPercent);
+    // "MAC" when a live host feed is driving it, "CPU" for the device's own load.
+    snprintf(buf, sizeof(buf), "%s %u%%", fromHost ? "MAC" : "CPU", (unsigned)loadPercent);
     if (isValidObject(_label)) lv_label_set_text(_label, buf);
     if (isValidObject(_label_shadow)) lv_label_set_text(_label_shadow, buf);
+}
+
+void CpuHogCard::pollHostFeed() {
+    // Drain any bytes from USB serial, assembling newline-terminated lines of
+    // the form "CPU:nn" streamed by the Mac companion script.
+    while (Serial.available() > 0) {
+        char c = (char)Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (_lineLen > 0) {
+                _lineBuf[_lineLen] = '\0';
+                if (strncmp(_lineBuf, "CPU:", 4) == 0) {
+                    int v = atoi(_lineBuf + 4);
+                    if (v < 0) v = 0;
+                    if (v > 100) v = 100;
+                    if (_cpu) _cpu->setHostLoad((uint8_t)v);
+                }
+                _lineLen = 0;
+            }
+        } else if (_lineLen < sizeof(_lineBuf) - 1) {
+            _lineBuf[_lineLen++] = c;
+        } else {
+            _lineLen = 0;  // Overlong garbage; resync on next newline.
+        }
+    }
 }
 
 bool CpuHogCard::update() {
     // Called on the UI task while this card is active, so LVGL calls are safe.
     if (!_cpu) return true;
 
+    // Poll the serial feed every tick so we don't drop bytes.
+    pollHostFeed();
+
     uint32_t now = millis();
     if (now - _lastPollMs < kPollIntervalMs) {
-        return true;  // Keep receiving updates, but don't over-sample.
+        return true;  // Keep receiving updates, but don't over-sample the pace.
     }
     _lastPollMs = now;
 
     uint8_t load = _cpu->getLoadPercent();
     applySpeed(load);
-    setLabel(load);
+    setLabel(load, _cpu->hasFreshHostLoad());
     return true;
 }
 

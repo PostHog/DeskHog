@@ -34,14 +34,30 @@ public:
     /**
      * @brief Current estimated CPU load, 0-100 (smoothed).
      *
-     * Computes the count rate since the previous call, updates the observed
-     * per-core maximum, and returns 100 * (1 - rate / max) averaged across
-     * cores. Intended to be polled a few times per second.
+     * If a fresh host reading has been fed in (see setHostLoad), that value is
+     * used - so the hog can track a connected Mac's CPU. Otherwise it falls
+     * back to the device's own load: the count rate since the previous call,
+     * as 100 * (1 - rate / max) averaged across cores. Intended to be polled a
+     * few times per second.
      */
     uint8_t getLoadPercent();
 
+    /**
+     * @brief Feed an external host CPU reading (0-100), e.g. from a Mac.
+     *
+     * Marks the reading as fresh; getLoadPercent() will prefer it over the
+     * device's own load until it goes stale (see kHostFreshMs).
+     */
+    void setHostLoad(uint8_t percent);
+
+    /**
+     * @brief True if a host reading has arrived recently (feed is live).
+     */
+    bool hasFreshHostLoad() const;
+
 private:
     static constexpr int kCores = 2;
+    static constexpr uint32_t kHostFreshMs = 4000;  ///< Host feed staleness window
 
     static void observerTask(void* arg);
 
@@ -51,4 +67,7 @@ private:
     uint32_t _lastSampleMs;               ///< millis() at last sample
     float _smoothed;                      ///< Exponentially smoothed load %
     bool _started;
+
+    uint8_t _hostLoad;                    ///< Last host reading, 0-100
+    uint32_t _hostLoadMs;                 ///< millis() of last host reading (0 == never)
 };

@@ -3,7 +3,9 @@
 CpuMonitor::CpuMonitor()
     : _lastSampleMs(0)
     , _smoothed(0.0f)
-    , _started(false) {
+    , _started(false)
+    , _hostLoad(0)
+    , _hostLoadMs(0) {
     for (int i = 0; i < kCores; i++) {
         _counters[i] = 0;
         _lastCounts[i] = 0;
@@ -44,8 +46,33 @@ void CpuMonitor::begin() {
     _lastSampleMs = millis();
 }
 
+void CpuMonitor::setHostLoad(uint8_t percent) {
+    if (percent > 100) percent = 100;
+    _hostLoad = percent;
+    _hostLoadMs = millis();
+    if (_hostLoadMs == 0) _hostLoadMs = 1;  // 0 is the "never" sentinel
+}
+
+bool CpuMonitor::hasFreshHostLoad() const {
+    if (_hostLoadMs == 0) return false;
+    return (millis() - _hostLoadMs) < kHostFreshMs;
+}
+
 uint8_t CpuMonitor::getLoadPercent() {
     uint32_t now = millis();
+
+    // Prefer a live host feed (e.g. a Mac streaming its CPU over serial).
+    if (hasFreshHostLoad()) {
+        float instant = (float)_hostLoad;
+        _smoothed += (instant - _smoothed) * 0.4f;
+        // Keep device sampling coherent for a clean handover when the feed drops.
+        _lastSampleMs = now;
+        for (int core = 0; core < kCores; core++) {
+            _lastCounts[core] = _counters[core];
+        }
+        return (uint8_t)(_smoothed + 0.5f);
+    }
+
     uint32_t elapsed = now - _lastSampleMs;
     if (elapsed < 50) {
         // Too soon to get a meaningful delta; return the last smoothed value.

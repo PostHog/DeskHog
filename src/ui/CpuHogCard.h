@@ -42,7 +42,8 @@ private:
 
     bool isValidObject(lv_obj_t* obj) const;
     void applySpeed(uint8_t loadPercent);
-    void setLabel(uint8_t loadPercent);
+    void setLabel(uint8_t loadPercent, bool fromHost);
+    void pollHostFeed();  ///< Read "CPU:nn" lines from USB serial (Mac feed)
 
     CpuMonitor* _cpu;          ///< Borrowed CPU monitor
     lv_obj_t* _card;           ///< Root container
@@ -53,4 +54,8 @@ private:
 
     int _currentBucket;        ///< Last applied speed bucket (-1 == unset)
     uint32_t _lastPollMs;      ///< millis() of last CPU poll
+
+    // Line assembly for the "CPU:nn" host feed on USB serial.
+    char _lineBuf[24];
+    uint8_t _lineLen;
 };
