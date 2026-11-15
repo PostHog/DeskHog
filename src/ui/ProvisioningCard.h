@@ -1,9 +1,10 @@
 #pragma once
 
-#include <lvgl.h>  // LVGL core library
+#include <lvgl.h>
+#include <functional>  // LVGL core library
 #include <string>  // For String class (or could be Arduino's String)
 #include "hardware/WifiInterface.h"  // Custom WiFi interface class
-#include "SystemController.h" // Added for ApiState, ControllerState
+#include "SystemController.h" // For ControllerState
 
 /**
  * @class ProvisioningCard
@@ -144,6 +145,9 @@ private:
      */
     String escapeString(const String& input);
     
+    /** Run LVGL work on the UI task, holding the LVGL mutex. Safe to call from any task. */
+    static void runOnUiTask(std::function<void()> work);
+
     /**
      * @brief Safely updates a label's text from any thread
      * 
@@ -181,9 +185,7 @@ private:
     lv_obj_t* _signalLabel;       ///< Signal strength text
     lv_obj_t* _versionLabel;      ///< Firmware version text
     lv_obj_t* _topLeftVersionLabel; ///< Firmware version text (on card top-left)
-    lv_obj_t* _apiStatusLabel = nullptr; ///< API Status text label
 
     // Helper methods for SystemController integration
     void handleSystemStateChange(const ControllerState& newState);
-    String apiStateToString(ApiState state);
 };

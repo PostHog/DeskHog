@@ -24,32 +24,9 @@ EventQueue::~EventQueue() {
     }
 }
 
-bool EventQueue::publishEvent(EventType eventType, const String& insightId) {
-    Event event(eventType, insightId);
-    return publishEvent(event);
-}
-
-bool EventQueue::publishEvent(EventType eventType, const String& insightId, std::shared_ptr<InsightParser> parser) {
-    Event event(eventType, insightId, parser);
-    return publishEvent(event);
-}
-
-bool EventQueue::publishEvent(EventType eventType, const String& insightId, const String& jsonData) {
-    // For large JSON data, we need to handle it carefully
-    if (jsonData.length() > 8192) { // 8KB threshold
-        Serial.printf("Large JSON detected (%u bytes), handling via event\n", jsonData.length());
-    }
-    
-    Event event(eventType, insightId, jsonData);
-    return publishEvent(event);
-}
-
-bool EventQueue::publishEvent(const Event& event) {
-    // Add the event to the queue
-    if (xQueueSend(eventQueue, &event, 0) == pdPASS) {
-        return true;
-    }
-    return false;
+bool EventQueue::publishEvent(EventType eventType) {
+    const Event event{eventType};
+    return xQueueSend(eventQueue, &event, 0) == pdPASS;
 }
 
 void EventQueue::subscribe(EventCallback callback) {

@@ -23,6 +23,52 @@ A [plug-and-play DeskHog hardware kit](https://posthog.com/merch) is coming soon
 - Optional: PKCell 552035 350mAh 3.7V LiPoly battery – buy: [Adafruit](https://www.adafruit.com/product/2750), [Tinytronics (EU)](https://www.tinytronics.nl/en/power/batteries/li-po/pkcell-li-po-battery-3.7v-350mah-jst-ph-lp552035), [BerryBase (EU)](https://www.berrybase.de/en/lp-552035-lithium-polymer-lipo-akku-3-7v-350mah-mit-2-pin-jst-stecker)
 - 3D printed enclosure – print: [3mf file](3d-printing)
 
+## Plugins
+
+DeskHog runs plugins: small Lua files that show up as cards. You install them over WiFi from the device's web page or the command line, with no recompiling and no reflashing.
+
+The web page has a plugin directory (Plugins, Get plugins): pick what you want and it is installed. The directory is the [`plugins/`](plugins) folder of this repository on GitHub, so adding a plugin for everyone is a pull request, and you can point a device at a directory of your own. A freshly flashed device starts empty; the firmware carries no plugins unless you list some in `plugins/bundled.txt`.
+
+```lua
+plugin = { name = "Counter" }
+
+local count = 0
+
+function draw()
+  ui.title("Counter")
+  ui.big(tostring(count))
+end
+
+function button(name)
+  if name == "center" then
+    count = count + 1
+    return true
+  end
+end
+```
+
+```sh
+tools/sim/run.sh counter.lua       # try it on your computer, saves a screenshot
+tools/deskhog push counter.lua     # put it on the device
+tools/deskhog watch counter.lua    # push again on every save
+```
+
+Plugins can fetch JSON from any API, draw freely, react to the three buttons, set the LED and keep small bits of data. A plugin that crashes shows its error on its own card and leaves the rest of the device alone.
+
+One plugin can provide several cards that share settings, such as one account with a card per chart. The device's web page (open `http://deskhog.local`) is where you add, arrange and set up cards. It shows a live picture of each one, and the device's three buttons work from the page, so you can try a card without reaching for the device. On a computer it has a wide layout with an editor for plugin code.
+
+[**Read the plugin guide**](plugins/README.md), or start from the examples in [`plugins/`](plugins): weather, PostHog insights, Max the hedgehog, icebreaker questions, Flappy Hog, Paddle, a clock, a webhook button and a hello world.
+
+Every card is a plugin. The cards that used to be compiled into the firmware (Max, the question card, Flappy Hog, Paddle, hello world) are Lua files now, which you can read and change on the device's web page. Only the WiFi and status screen is still part of the firmware.
+
+### Moving from an older firmware
+
+This firmware uses a different flash layout: one firmware slot plus about 1 MB of storage for plugins, where older versions had two firmware slots for over-the-air updates. Because of that:
+
+- **The first install has to go over USB.** In PlatformIO, choose **Upload** as usual. WiFi and card settings carry over. (Older firmware lost the newest settings on every USB upload, because one boot file was written into the settings area. That is fixed here; see `fix_otadata_offset.py`.)
+- **Firmware updates are over USB from now on.** Plugins are what updates over WiFi.
+- The first boot takes a few seconds longer while the plugin storage is set up.
+
 ## What can DeskHog do?
 
 DeskHog can do a couple of things by default, but the real joy lies in expanding the capabilities by adding them yourself. 
@@ -32,8 +78,9 @@ DeskHog can do a couple of things by default, but the real joy lies in expanding
 A couple of basic [cards](#card-stack) (screens) are included on the firmware and were built by [Danilo Campos](https://posthog.com/community/profiles/31731).
 
 - **ProvisioningCard**: Displays a QR code to connect to the device and shows connection stats.
-- **InsightCard**: Visualizes PostHog data. Still a bit of a WIP, so contributions welcome!
-- **FriendCard**: Lets Max the hedgehog visit with you and provide encouragement.
+- **PostHog insights**: big numbers, line charts and funnels from your PostHog project. This is a plugin now ([`plugins/posthog.lua`](plugins/posthog.lua)): add a card on the device's web page and fill in your project ID and a personal API key. Insight cards set up with older firmware are kept on the first boot, with their settings; install the PostHog plugin from the web page and they work again.
+- **Max**: Max the hedgehog visits and provides encouragement. A plugin too ([`plugins/friend.lua`](plugins/friend.lua)); you can give him your own lines.
+- **Questions**, **Flappy Hog**, **Paddle**: icebreaker questions and two games, also plugins. Cards of these kinds set up with older firmware are kept on the first boot; the web page offers to install the plugin each one needs.
 
 ### Available games and apps
 
@@ -66,9 +113,9 @@ Review [tech-details.md](tech-details.md) for info on architecture, libraries an
 
 ### No matter what I do, flashing the board doesn't change anything! wtf??
 
-We're actually cutting the storage space in half so that over the air updates can be loaded to the unused half of storage. You can end up in a place where the board just won't boot to the correct partition.
+The board can end up booting from the wrong place, for example after switching between this firmware and an older one with a different flash layout.
 
-To fix this, choose **Erase Flash and Upload** from the PlatformIO Project Tasks menu.
+To fix this, choose **Erase Flash and Upload** from the PlatformIO Project Tasks menu. This also erases your WiFi settings, cards and plugins.
 
 ## 🤖 Coding with AI Agents
 
@@ -98,16 +145,14 @@ To wake the device, press the reset tab on the left.
 - Status card: working
 - WiFi provisioning card with QR Code: working
 - Friend card to give you (mild) reassurance: working
-- Numeric card for Big Number insights: working
-- Funnel card: needs a redesign; probably should be horizontal layout instead, won't display more than three steps right now
-- Line graph card: broken, not properly scaling larger data sets, probably fine if you have an insight scoped between 7-30 days
-- Other insights: not yet supported
+- PostHog big numbers, line charts and funnels: working, as a plugin
+- Other kinds of PostHog insight: not yet supported
 
 ## Request for PRs
 
 The following PRs would be interesting, and may earn you a free DeskHog kit or other merch:
 
-- Additional insight parsing and visualizations for Insight Card
+- More kinds of insight in the PostHog plugin (`plugins/posthog.lua`)
 - More games and apps! We think limiting things to one available button prompts creativity
 - Support for other boards and displays
 - LLM slop mitigation: if you see anything obviously stupid in this code that hasn't yet been caught and cleaned up

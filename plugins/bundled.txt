@@ -1,0 +1,9 @@
+# Plugins that are built into the firmware, one name per line. A freshly flashed
+# device then starts with them, without needing the internet.
+#
+# By default there are none: people pick what they want from the plugin
+# directory (index.json in this folder) on the device's web page. List plugins
+# here for a build that has to work without that, for example:
+#
+#   hello
+#   weather

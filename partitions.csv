@@ -1,6 +1,15 @@
-# Name,   Type, SubType, Offset,  Size, Flags
-nvs,      data, nvs,     0x9000,  0x6000,
-otadata,  data, ota,     0xf000,  0x2000,
-phy_init, data, phy,     0x11000, 0x1000,
-ota_0,    app,  ota_0,   0x20000, 0x1F0000,
-ota_1,    app,  ota_1,   0x210000,0x1F0000 
+# DeskHog flash layout (4 MB).
+#
+# One firmware slot and a filesystem for Lua plugins. There is no second slot,
+# so firmware updates go over USB rather than over the air; plugins update
+# over WiFi without touching the firmware.
+#
+# nvs keeps its old offset and size, so WiFi and card settings survive the
+# move from the previous two-slot layout.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+otadata,  data, ota,     0xf000,   0x2000,
+phy_init, data, phy,     0x11000,  0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x2E0000,
+spiffs,   data, spiffs,  0x300000, 0x100000,

@@ -6,8 +6,6 @@ SystemController* SystemController::instance = nullptr;
 // Private constructor
 SystemController::SystemController() : state{
     WifiState::DISCONNECTED,  // Initial WiFi state
-    ApiState::API_NONE,
-    AuthState::AUTH_NONE,
     SystemState::SYS_BOOTING
 } {}
 
@@ -38,14 +36,6 @@ WifiState SystemController::getWifiState() {
     return getInstance()->state.wifi_state;
 }
 
-ApiState SystemController::getApiState() {
-    return getInstance()->state.api_state;
-}
-
-AuthState SystemController::getAuthState() {
-    return getInstance()->state.auth_state;
-}
-
 SystemState SystemController::getSystemState() {
     return getInstance()->state.sys_state;
 }
@@ -55,20 +45,6 @@ ControllerState SystemController::getFullState() {
 }
 
 // State setters
-void SystemController::setApiState(ApiState new_state) {
-    if (getInstance()->state.api_state != new_state) {
-        getInstance()->state.api_state = new_state;
-        getInstance()->notify_state_change();
-    }
-}
-
-void SystemController::setAuthState(AuthState new_state) {
-    if (getInstance()->state.auth_state != new_state) {
-        getInstance()->state.auth_state = new_state;
-        getInstance()->notify_state_change();
-    }
-}
-
 void SystemController::setSystemState(SystemState new_state) {
     if (getInstance()->state.sys_state != new_state) {
         getInstance()->state.sys_state = new_state;
@@ -90,27 +66,10 @@ void SystemController::notify_state_change() {
         case WifiState::AP_MODE: Serial.println("AP_MODE"); break;
     }
     
-    Serial.print("  API: ");
-    switch (controller->state.api_state) {
-        case ApiState::API_NONE: Serial.println("NONE"); break;
-        case ApiState::API_AWAITING_CONFIG: Serial.println("AWAITING_CONFIG"); break;
-        case ApiState::API_CONFIG_INVALID: Serial.println("CONFIG_INVALID"); break;
-        case ApiState::API_CONFIGURED: Serial.println("CONFIGURED"); break;
-    }
-    
-    Serial.print("  Auth: ");
-    switch (controller->state.auth_state) {
-        case AuthState::AUTH_NONE: Serial.println("NONE"); break;
-        case AuthState::AUTH_AWAITING_LOGIN: Serial.println("AWAITING_LOGIN"); break;
-        case AuthState::AUTH_CONFIRMED: Serial.println("CONFIRMED"); break;
-    }
-    
     Serial.print("  System: ");
     switch (controller->state.sys_state) {
         case SystemState::SYS_BOOTING: Serial.println("BOOTING"); break;
         case SystemState::SYS_READY: Serial.println("READY"); break;
-        case SystemState::SYS_IDLE: Serial.println("IDLE"); break;
-        case SystemState::SYS_INSIGHTS_CHANGED: Serial.println("INSIGHTS_CHANGED"); break;
     }
     
     // Notify all registered callbacks
@@ -124,17 +83,4 @@ void SystemController::onStateChange(StateChangeCallback callback) {
     getInstance()->state_change_callbacks.push_back(callback);
     // Immediately call the callback with the current state
     callback(getInstance()->state);
-}
-
-void SystemController::removeAllCallbacks() {
-    getInstance()->state_change_callbacks.clear();
-}
-
-// Utility methods
-bool SystemController::isSystemFullyReady() {
-    return getWifiState() == WifiState::CONNECTED &&
-           getApiState() == ApiState::API_CONFIGURED &&
-           (getSystemState() == SystemState::SYS_READY || 
-            getSystemState() == SystemState::SYS_IDLE ||
-            getSystemState() == SystemState::SYS_INSIGHTS_CHANGED);
 }

@@ -1,0 +1,104 @@
+{
+  "format": 1,
+  "plugins": [
+    {
+      "name": "clock",
+      "title": "Clock",
+      "description": "The time in large digits, with the date under it",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "clock.lua",
+      "size": 2743,
+      "hash": "657fd6bc",
+      "sha256": "1d5e3e390db8fd72a1cea84c68aded7e58530ac7172670ac01ab8648a25affec"
+    },
+    {
+      "name": "flappy",
+      "title": "Flappy Hog",
+      "description": "One button. Endless frustration. Infinite glory.",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "flappy.lua",
+      "size": 2673,
+      "hash": "913ea1d3",
+      "sha256": "cd23c3d2620fac69e527ed4c2ddfd818d37bcd3e018a5fd34e64537937ff9513"
+    },
+    {
+      "name": "hello",
+      "title": "Hello",
+      "description": "The smallest useful plugin: three lines of text and a press counter",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "hello.lua",
+      "size": 566,
+      "hash": "2cfbecc6",
+      "sha256": "33119d67bcc1191fe454ddba5d5ba1f2f675d304135272e405745f6553de655d"
+    },
+    {
+      "name": "friend",
+      "title": "Max",
+      "description": "Max the hedgehog keeps you company and thinks you are doing fine",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "friend.lua",
+      "size": 24860,
+      "hash": "84ce4f09",
+      "sha256": "12dc5c05101ef0f80c2515af9eff0e2651817f18eb5655ca728235643186e164"
+    },
+    {
+      "name": "paddle",
+      "title": "Paddle",
+      "description": "First to five points beats the hedgehog on the other side",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "paddle.lua",
+      "size": 4946,
+      "hash": "f34d83f5",
+      "sha256": "75c045548a76214c67fa5af31308d5d93275cf15fbdf92ea75f8b6c0e5336940"
+    },
+    {
+      "name": "posthog",
+      "title": "PostHog",
+      "description": "PostHog insights on your desk: big numbers, line charts and funnels",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "posthog.lua",
+      "size": 9732,
+      "hash": "77e3eb0e",
+      "sha256": "a7ed00a83dd335b4ccd3577d2db7261aa1bcb3f281419227db296004425032b9"
+    },
+    {
+      "name": "question",
+      "title": "Questions",
+      "description": "Icebreaker questions for the minutes before a meeting starts",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "question.lua",
+      "size": 3002,
+      "hash": "7212c53f",
+      "sha256": "b1f235cd2fc0ffd003b709268ce0bdca0fde615cdac300488cf88bbd0ef75694"
+    },
+    {
+      "name": "weather",
+      "title": "Weather",
+      "description": "The temperature now and today's curve, for any number of cities",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "weather.lua",
+      "size": 3055,
+      "hash": "f9368e4d",
+      "sha256": "4faddf1b95ed06bac81aeb9b80de4d8f7bd05e15d0639f12998c007e2afab895"
+    },
+    {
+      "name": "webhook",
+      "title": "Webhook",
+      "description": "A button that calls a web address and lights the LED",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "webhook.lua",
+      "size": 1202,
+      "hash": "142c371b",
+      "sha256": "5d239fa95b1ac0bd21c10ed4b241857b5fe0f5b190dc2710af27a00b62ae77af"
+    }
+  ]
+}

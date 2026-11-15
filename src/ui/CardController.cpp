@@ -1,5 +1,6 @@
 #include "ui/CardController.h"
-#include "ui/PaddleCard.h"
+#include "plugins/PluginCard.h"
+#include "plugins/PluginManager.h"
 #include <algorithm>
 
 QueueHandle_t CardController::uiQueue = nullptr;
@@ -13,20 +14,16 @@ CardController::CardController(
     uint16_t screenHeight,
     ConfigManager& configManager,
     WiFiInterface& wifiInterface,
-    PostHogClient& posthogClient,
     EventQueue& eventQueue
 ) : screen(screen),
     screenWidth(screenWidth),
     screenHeight(screenHeight),
     configManager(configManager),
     wifiInterface(wifiInterface),
-    posthogClient(posthogClient),
     eventQueue(eventQueue),
     cardStack(nullptr),
     provisioningCard(nullptr),
-    animationCard(nullptr),
-    displayInterface(nullptr),
-    dynamicCards()
+    displayInterface(nullptr)
 {
 }
 
@@ -38,21 +35,15 @@ CardController::~CardController() {
     delete provisioningCard;
     provisioningCard = nullptr;
     
-    delete animationCard;
-    animationCard = nullptr;
-    
     // Use mutex if available before cleaning up dynamic cards
     if (displayInterface && displayInterface->getMutexPtr()) {
         xSemaphoreTake(*(displayInterface->getMutexPtr()), portMAX_DELAY);
     }
     
-    // Clean up all dynamic cards using unified system
-    for (auto& [cardType, cards] : dynamicCards) {
-        for (auto& cardInstance : cards) {
-            delete cardInstance.handler;
-        }
+    for (PluginCard* card : pluginCards) {
+        delete card;
     }
-    dynamicCards.clear();
+    pluginCards.clear();
     
     // Release mutex if we took it
     if (displayInterface && displayInterface->getMutexPtr()) {
@@ -67,11 +58,17 @@ void CardController::initialize(DisplayInterface* display) {
     // Initialize UI queue for thread-safe operations
     initUIQueue();
     
-    // Initialize card type registrations
-    initializeCardTypes();
-    
     // Create card navigation stack
     cardStack = new CardNavigationStack(screen, screenWidth, screenHeight);
+
+    // Let the plugin system bring a card to the front, e.g. the plugin that was just pushed
+    if (pluginManager) {
+        pluginManager->setShowCard([this](lv_obj_t* card) {
+            if (!cardStack || !card) return;
+            const int32_t index = lv_obj_get_index(card);
+            if (index >= 0) cardStack->goToCard(static_cast<uint8_t>(index));
+        });
+    }
     
     // Create provision UI (always present, not configurable)
     provisioningCard = new ProvisioningCard(
@@ -103,8 +100,6 @@ void CardController::initialize(DisplayInterface* display) {
     eventQueue.subscribe([this](const Event& event) {
         if (event.type == EventType::CARD_CONFIG_CHANGED) {
             handleCardConfigChanged();
-        } else if (event.type == EventType::CARD_TITLE_UPDATED) {
-            handleCardTitleUpdated(event);
         }
     });
     
@@ -121,53 +116,15 @@ void CardController::initialize(DisplayInterface* display) {
 
 void CardController::setDisplayInterface(DisplayInterface* display) {
     displayInterface = display;
+    if (pluginManager) {
+        pluginManager->setDisplayInterface(display);
+    }
     
     // Set the mutex for the card stack if we have a display interface
     if (cardStack && displayInterface) {
         cardStack->setMutex(displayInterface->getMutexPtr());
     }
 }
-
-// Create an animation card with the walking sprites
-void CardController::createAnimationCard() {
-    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-        return;
-    }
-    
-    // Create new animation card
-    animationCard = new FriendCard(
-        screen
-    );
-    
-    // Add to navigation stack
-    cardStack->addCard(animationCard->getCard());
-    
-    // Register the animation card as an input handler
-    cardStack->registerInputHandler(animationCard->getCard(), animationCard);
-    
-    displayInterface->giveMutex();
-}
-
-void CardController::createHelloWorldCard() {
-    if (!displayInterface || !displayInterface->takeMutex(portMAX_DELAY)) {
-        return;
-    }
-    
-    // Create new hello world card
-    HelloWorldCard* helloCard = new HelloWorldCard(screen);
-    
-    if (helloCard && helloCard->getCard()) {
-        // Add to navigation stack
-        cardStack->addCard(helloCard->getCard());
-        
-        // Register as an input handler
-        cardStack->registerInputHandler(helloCard->getCard(), helloCard);
-    }
-    
-    displayInterface->giveMutex();
-}
-
-
 
 // Handle WiFi events
 void CardController::handleWiFiEvent(const Event& event) {
@@ -200,189 +157,6 @@ void CardController::handleWiFiEvent(const Event& event) {
     displayInterface->giveMutex();
 }
 
-std::vector<CardDefinition> CardController::getCardDefinitions() const {
-    return registeredCardTypes;
-}
-
-void CardController::registerCardType(const CardDefinition& definition) {
-    registeredCardTypes.push_back(definition);
-}
-
-void CardController::initializeCardTypes() {
-    // Register INSIGHT card type
-    CardDefinition insightDef;
-    insightDef.type = CardType::INSIGHT;
-    insightDef.name = "PostHog insight";
-    insightDef.allowMultiple = true;
-    insightDef.needsConfigInput = true;
-    insightDef.configInputLabel = "Insight ID";
-    insightDef.uiDescription = "Insight cards let you keep an eye on PostHog data";
-    insightDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        // Create new insight card using the insight ID
-        InsightCard* newCard = new InsightCard(
-            screen,
-            configManager,
-            eventQueue,
-            configValue,
-            screenWidth,
-            screenHeight
-        );
-        
-        if (newCard && newCard->getCard()) {
-            // Add to unified tracking system
-            CardInstance instance{newCard, newCard->getCard()};
-            dynamicCards[CardType::INSIGHT].push_back(instance);
-            
-            // Register as input handler
-            cardStack->registerInputHandler(newCard->getCard(), newCard);
-            
-            // Request data for this insight immediately
-            posthogClient.requestInsightData(configValue);
-            Serial.printf("Requested insight data for: %s\n", configValue.c_str());
-            
-            return newCard->getCard();
-        }
-        
-        delete newCard;
-        return nullptr;
-    };
-    registerCardType(insightDef);
-    
-    // Register FRIEND card type  
-    CardDefinition friendDef;
-    friendDef.type = CardType::FRIEND;
-    friendDef.name = "Friend card";
-    friendDef.allowMultiple = false;
-    friendDef.needsConfigInput = false;
-    friendDef.configInputLabel = "";
-    friendDef.uiDescription = "Get reassurance from Max the hedgehog";
-    friendDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        // Create new friend card (ignore configValue for now)
-        FriendCard* newCard = new FriendCard(screen);
-        
-        if (newCard && newCard->getCard()) {
-            // Add to unified tracking system
-            CardInstance instance{newCard, newCard->getCard()};
-            dynamicCards[CardType::FRIEND].push_back(instance);
-            
-            // Keep legacy pointer for backwards compatibility
-            animationCard = newCard;
-            
-            // Register as input handler
-            cardStack->registerInputHandler(newCard->getCard(), newCard);
-            return newCard->getCard();
-        }
-        
-        delete newCard;
-        return nullptr;
-    };
-    registerCardType(friendDef);
-    
-    // Register HELLO_WORLD card type
-    CardDefinition helloDef;
-    helloDef.type = CardType::HELLO_WORLD;
-    helloDef.name = "Hello, world!";
-    helloDef.allowMultiple = true;
-    helloDef.needsConfigInput = false;
-    helloDef.configInputLabel = "";
-    helloDef.uiDescription = "A simple greeting card";
-    helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        HelloWorldCard* newCard = new HelloWorldCard(screen);
-        
-        if (newCard && newCard->getCard()) {
-            // Add to unified tracking system
-            CardInstance instance{newCard, newCard->getCard()};
-            dynamicCards[CardType::HELLO_WORLD].push_back(instance);
-            
-            // Register as input handler
-            cardStack->registerInputHandler(newCard->getCard(), newCard);
-            return newCard->getCard();
-        }
-        
-        delete newCard;
-        return nullptr;
-    };
-    registerCardType(helloDef);
-    
-    // Register FLAPPY_HOG card type
-    CardDefinition flappyDef;
-    flappyDef.type = CardType::FLAPPY_HOG;
-    flappyDef.name = "Flappy Hog";
-    flappyDef.allowMultiple = false;  // Only one game instance at a time
-    flappyDef.needsConfigInput = false;
-    flappyDef.configInputLabel = "";
-    flappyDef.uiDescription = "One button. Endless frustration. Infinite glory.";
-    flappyDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        FlappyHogCard* newCard = new FlappyHogCard(screen);
-        
-        if (newCard && newCard->getCard()) {
-            // Add to unified tracking system
-            CardInstance instance{newCard, newCard->getCard()};
-            dynamicCards[CardType::FLAPPY_HOG].push_back(instance);
-            
-            // Register as input handler
-            cardStack->registerInputHandler(newCard->getCard(), newCard);
-            return newCard->getCard();
-        }
-        
-        delete newCard;
-        return nullptr;
-    };
-    registerCardType(flappyDef);
-    
-    // Register QUESTION card type
-    CardDefinition questionDef;
-    questionDef.type = CardType::QUESTION;
-    questionDef.name = "Question Card";
-    questionDef.allowMultiple = false;  // Only one question card at a time
-    questionDef.needsConfigInput = false;
-    questionDef.configInputLabel = "";
-    questionDef.uiDescription = "Break the ice with your coworkers.";
-    questionDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        QuestionCard* newCard = new QuestionCard(screen);
-        
-        if (newCard && newCard->getCard()) {
-            // Add to unified tracking system
-            CardInstance instance{newCard, newCard->getCard()};
-            dynamicCards[CardType::QUESTION].push_back(instance);
-            
-            // Register as input handler
-            cardStack->registerInputHandler(newCard->getCard(), newCard);
-            return newCard->getCard();
-        }
-        
-        delete newCard;
-        return nullptr;
-    };
-    registerCardType(questionDef);
-    
-    // Register PADDLE card type
-    CardDefinition paddleDef;
-    paddleDef.type = CardType::PADDLE;
-    paddleDef.name = "Paddle";
-    paddleDef.allowMultiple = false;  // Only one paddle game at a time
-    paddleDef.needsConfigInput = false;
-    paddleDef.configInputLabel = "";
-    paddleDef.uiDescription = "Classic Paddle game - beat the AI!";
-    paddleDef.factory = [this](const String& configValue) -> lv_obj_t* {
-        PaddleCard* newCard = new PaddleCard(screen);
-        
-        if (newCard && newCard->getCard()) {
-            // Add to unified tracking system
-            CardInstance instance{newCard, newCard->getCard()};
-            dynamicCards[CardType::PADDLE].push_back(instance);
-            
-            // Register as input handler
-            cardStack->registerInputHandler(newCard->getCard(), newCard);
-            return newCard->getCard();
-        }
-        
-        delete newCard;
-        return nullptr;
-    };
-    registerCardType(paddleDef);
-}
-
 void CardController::handleCardConfigChanged() {
     // Load new configuration from storage
     std::vector<CardConfig> newConfigs = configManager.getCardConfigs();
@@ -399,11 +173,7 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
     }
     
     
-    // Track the number of cards before reconciliation
-    size_t oldCardCount = 0;
-    for (const auto& [cardType, cards] : dynamicCards) {
-        oldCardCount += cards.size();
-    }
+    const size_t oldCardCount = pluginCards.size();
     
     reconcileInProgress = true;
     
@@ -420,22 +190,15 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         // Simple approach: Clear everything and rebuild from scratch
         // This avoids complex diffing logic that can cause sync issues
         
-        // Remove all existing dynamic cards using unified system
-        for (auto& [cardType, cards] : dynamicCards) {
-            for (auto& cardInstance : cards) {
-                if (cardInstance.lvglCard) {
-                    // Notify the card that its LVGL object will be managed externally
-                    cardInstance.handler->prepareForRemoval();
-                    // Remove from navigation stack (this deletes the LVGL object)
-                    cardStack->removeCard(cardInstance.lvglCard);
-                }
-                delete cardInstance.handler;
-            }
+        // Remove every plugin card. A running plugin keeps its state for a
+        // moment without cards (see PluginConnection), so this does not restart it.
+        for (PluginCard* card : pluginCards) {
+            // The stack deletes the LVGL object; tell the card not to do it again.
+            card->prepareForRemoval();
+            cardStack->removeCard(card->getCard());
+            delete card;
         }
-        dynamicCards.clear();
-        
-        // Clear legacy pointer
-        animationCard = nullptr;
+        pluginCards.clear();
         
         // Force LVGL to process all pending operations
         lv_refr_now(NULL);
@@ -456,32 +219,23 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         
         for (size_t i = 0; i < sortedConfigs.size(); i++) {
             const CardConfig& config = sortedConfigs[i];
-            // Find the registered card type
-            auto it = std::find_if(registeredCardTypes.begin(), registeredCardTypes.end(),
-                                  [&config](const CardDefinition& def) {
-                                      return def.type == config.type;
-                                  });
-            
-            if (it != registeredCardTypes.end() && it->factory) {
-                // Create the card using the factory function
-                lv_obj_t* cardObj = it->factory(config.config);
-                if (cardObj) {
-                    cardStack->addCard(cardObj);
-                    
-                    // Track position of new card if this is likely the new one
-                    if (hasNewCard && i == sortedConfigs.size() - 1) {
-                        newCardPosition = cardsCreated + 1; // +1 for provisioning card
-                    }
-                    
-                    cardsCreated++;
-                } else {
-                    Serial.printf("Failed to create card of type %s\n", 
-                                 cardTypeToString(config.type).c_str());
-                }
-            } else {
-                Serial.printf("No factory found for card type %s\n", 
-                             cardTypeToString(config.type).c_str());
+            // The stack leaves 7px on the right for its position indicator.
+            PluginCard* card = (pluginManager && config.isPlugin())
+                ? pluginManager->createCard(screen, config.config, screenWidth - 7, screenHeight)
+                : nullptr;
+            if (!card) {
+                Serial.printf("Could not create the %s card \"%s\"\n", config.type.c_str(), config.config.c_str());
+                continue;
             }
+            pluginCards.push_back(card);
+            cardStack->registerInputHandler(card->getCard(), card);
+            cardStack->addCard(card->getCard());
+
+            // Track position of new card if this is likely the new one
+            if (hasNewCard && i == sortedConfigs.size() - 1) {
+                newCardPosition = cardsCreated + 1; // +1 for provisioning card
+            }
+            cardsCreated++;
         }
         
         // Force another LVGL refresh to ensure everything is properly laid out
@@ -539,6 +293,11 @@ void CardController::processUIQueue() {
     if (cardStack) {
         cardStack->updateActiveCard();
     }
+
+    // Plugins: timers, network answers and drawing for every plugin card
+    if (pluginManager) {
+        pluginManager->tick();
+    }
 }
 
 void CardController::dispatchToLVGLTask(std::function<void()> update_func, bool to_front) {
@@ -566,22 +325,3 @@ void CardController::dispatchToLVGLTask(std::function<void()> update_func, bool 
         delete callback;
     }
 }
-
-void CardController::handleCardTitleUpdated(const Event& event) {
-    // Find and update the card configuration with the new title
-    for (auto& cardConfig : currentCardConfigs) {
-        if (cardConfig.type == CardType::INSIGHT && cardConfig.config == event.insightId) {
-            // Update the name with the new title
-            if (cardConfig.name != event.title) {
-                cardConfig.name = event.title;
-                
-                // Save the updated configuration to persistent storage
-                configManager.saveCardConfigs(currentCardConfigs);
-                
-                Serial.printf("Updated card title for insight %s to: %s\n", 
-                             event.insightId.c_str(), event.title.c_str());
-            }
-            break;
-        }
-    }
-} 

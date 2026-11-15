@@ -35,6 +35,18 @@ void NeoPixelController::update() {
     }
     
     lastUpdate = currentTime;
+
+    const uint32_t override = overrideColor.load();
+    if (override & OVERRIDE_ACTIVE) {
+        const uint32_t until = overrideUntil.load();
+        if (until != 0 && static_cast<int32_t>(currentTime - until) >= 0) {
+            overrideColor.store(0);
+        } else {
+            leds[0] = CRGB((override >> 16) & 0xFF, (override >> 8) & 0xFF, override & 0xFF);
+            FastLED.show();
+            return;
+        }
+    }
     
     breathPhase += BREATH_SPEED;
     if (breathPhase >= BREATH_CYCLE) {
@@ -59,4 +71,18 @@ void NeoPixelController::update() {
     
     leds[0] = CRGB(finalRed, finalGreen, finalBlue); // Set pixel color using FastLED
     FastLED.show(); // Update the strip
-} 
+}
+
+void NeoPixelController::setOverride(uint8_t r, uint8_t g, uint8_t b, uint32_t durationMs) {
+    uint32_t until = 0;
+    if (durationMs != 0) {
+        until = millis() + durationMs;
+        if (until == 0) until = 1;  // 0 means "no deadline"
+    }
+    overrideUntil.store(until);
+    overrideColor.store(OVERRIDE_ACTIVE | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | b);
+}
+
+void NeoPixelController::clearOverride() {
+    overrideColor.store(0);
+}

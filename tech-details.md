@@ -14,7 +14,7 @@ We've got two cores and multiple "tasks" assigned between them – task is [Free
 
 - WiFi
 - Web portal server
-- Insight parsing
+- Network requests for plugins
 - NeoPixel control
 
 **Core 1 (Application CPU) tasks:**
@@ -47,16 +47,13 @@ You don't have to guess the pin definitions. You'll find them documented here:
 - Status card: working
 - WiFi provisioning card with QR Code: working
 - Friend card to give you (mild) reassurance: working
-- Numeric card for Big Number insights: working
-- Funnel card: needs a redesign; probably should be horizontal layout instead, won't display more than three steps right now
-- Line graph card: working decently, but could use more detail
-- Other insights: not yet supported
+- PostHog insights: now a plugin (`plugins/posthog.lua`) with big numbers, line charts and funnels; other kinds of insight are not supported yet
 
 ## Important components
 
 ### Event queue
 
-`EventQueue` is how the project manages communication between tasks and prevents coupling. Events – changes via the web UI, returned requests from the PostHog client – are dispatched out of core 0 to be received by the UI task. Any important data can be safely copied from one context into the other, preventing crashes and other drama.
+`EventQueue` is how the project manages communication between tasks and prevents coupling. Events – changes via the web UI, WiFi coming and going – are dispatched out of core 0 to be received by the UI task. Any important data can be safely copied from one context into the other, preventing crashes and other drama.
 
 ### Card stack
 
@@ -64,141 +61,54 @@ The UI is a stack of cards. The user navigates between them using built-in butto
 
 `CardNavigationStack` manages the UI presentation of these cards, animating transitions.
 
-`CardController` manages updates to the stack contents. If an insight is deleted or added via web UI, the controller processes that update reactively.
+`CardController` manages updates to the stack contents. If a card is added, removed or moved via the web UI, the controller processes that update reactively.
 
 ### Web UI
 
-A basic provisioning and configuration UI is provided. You can access it via a QR code on first launch, and by the IP shown in the status screen once WiFi is configured.
+The device serves one web page for everything: WiFi setup, cards, connections and plugin code. You reach it via a QR code on first launch, and by the IP shown in the status screen once WiFi is configured.
 
-Open `html/portal.html` in your browser to preview changes. The contents of `html` are inlined into a single file on each build by `htmlconvert.py`.
+It is three hand-written files in `html/` with no dependencies, inlined into one file on each build by `htmlconvert.py`. It is laid out for a phone first; from 900 pixels wide it has a sidebar, a grid of cards and a pane at the side for the card you picked.
 
-**Web portal budget:** Right now the portal costs about 18KB. We'll allow up to **100KB**. All portal assets must be locally available, since the portal needs to work when the device doesn't have WiFi. If you want to try adding a more complex UI framework than hand-rolled JS and HTML, you're welcome to try as long as its build system is quick and the final static output is under 100KB.
+To work on it without flashing, run `node test/portal/serve.js` and open `http://localhost:8080`. It serves `html/` as it is on disk, against a pretend device, or against your real one with `--device <address>`. `test/portal/run.sh` runs its tests.
+
+**Web portal budget:** the page is about 70 KB before it is inlined. We allow up to **100KB**. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
 
 ### Card system
 
-The DeskHog uses a dynamic card system that allows users to configure which cards appear on their device through a web UI. Cards are managed by the `CardController` and can be easily extended by developers.
+Every card you can add is a Lua plugin (next section). `CardController` rebuilds the stack from the saved list whenever it changes and asks `PluginManager` for each card.
 
-#### Built-in cards
+One card is part of the firmware: `ProvisioningCard`, always first, which displays a QR code to connect to the device and, once WiFi is connected, the connection stats.
 
-`ProvisioningCard` displays a QR code to connect to the device. If WiFi is connected, it displays connection stats.
+Older firmware had more cards written in C++ (Max, questions, Flappy Hog, Paddle, hello world, PostHog insights), saved with a type of their own. `PluginManager::migrateOldCards()` and `migrateBuiltInPostHog()` turn such saved cards into cards of the plugin that replaced them on the first boot. A card whose plugin is not on the device yet says so on its screen, and the web page offers to install it.
 
-`InsightCard` visualizes PostHog data. Numeric card is working best. The rest need help.
+### Lua plugins
 
-`FriendCard` lets Max the hedgehog visit with you and provide encouragement.
+Plugins are Lua files stored on the device and run as cards. The pieces:
 
-#### Adding new card types
+- `lib/lua`: Lua 5.4, vendored, configured for 32-bit numbers.
+- `lib/plugin_core`: the runtime (`LuaPlugin`). It sandboxes one plugin, enforces its memory and time limits, and exposes the `gfx`, `ui`, `http`, `json`, `led`, `store`, `time` and `input` APIs. It has no Arduino or LVGL dependencies, so it also builds on a desktop.
+- `src/plugins/LvglGfx`: draws a plugin's output onto an LVGL canvas, which is the card.
+- `src/plugins/PluginConnection`: a running connection: one Lua program plus the shared settings its cards use. It serves every card of that connection in the stack.
+- `src/plugins/PluginCard`: one card in the stack: the canvas a connection paints on.
+- `src/plugins/PluginManager`: plugin files and saved connections on flash (LittleFS), the network task for `http`, hot reload, and the state the web API reports.
+- `src/plugins/PluginApi`: the HTTP routes for plugins, connections and cards.
 
-To create a new card type, you need to:
+The three levels are plugin (the code), connection (a plugin plus settings its cards share) and card (one screen). A card is stored in the card stack as `<connection id>:<card id>`. The card stack is rebuilt from scratch on every change; a connection keeps its state for three seconds without cards, so a rebuild does not restart running plugins.
 
-1. **Add to CardType enum** - Add your new type to the `CardType` enum in `src/ui/CardController.h`
-2. **Create the card class** - Implement your card UI using LVGL
-3. **Register the card type** - Add it to CardController's registration system
-4. **Add configuration support** (optional) - If your card needs user input
+Plugins only ever run on the UI task (core 1). The web server and the network task reach them through queues that `PluginManager::tick()` drains on the UI task, which fits the task rules above.
 
-**Example: Adding a simple "Hello World" card**
+Plugins reach a device from a plugin directory: a folder with an `index.json` in a git repository, by default `plugins/` in this one (`PLUGIN_DIRECTORY` in `PluginManager.cpp`, changeable per device on the web page). The device only stores the directory's address. The web page and `tools/deskhog` do the fetching, because the browser has the internet connection, the memory and certificate checks that the device would have to spend scarce internal RAM on. `tools/deskhog index` writes the index; `plugins2c.py` embeds the plugins named in `plugins/bundled.txt` (none by default) into the firmware for a first boot without internet.
 
-```cpp
-// 1. Add to CardType enum (src/ui/CardController.h)
-enum class CardType {
-    INSIGHT = 0,
-    FRIEND = 1,
-    HELLO = 2  // Add your new type here
-};
+Two ways to check plugin work without a device:
 
-// 2. Create your card class (src/ui/HelloCard.h)
-class HelloCard {
-public:
-    HelloCard(lv_obj_t* parent);
-    lv_obj_t* getCard() const { return _card; }
+- `test/native/run.sh` builds the runtime with your computer's compiler and runs its tests, including every plugin in `plugins/`.
+- `tools/sim/run.sh plugins/weather.lua` runs a plugin through the real runtime, `LvglGfx`, LVGL and fonts, and saves a PNG of the card.
 
-private:
-    lv_obj_t* _card;
-};
+The plugin API is documented in [plugins/README.md](plugins/README.md).
 
-// 3. Register in CardController::initializeCardTypes()
-CardDefinition helloDef;
-helloDef.type = CardType::HELLO;
-helloDef.name = "Hello world";
-helloDef.allowMultiple = true;
-helloDef.needsConfigInput = false;
-helloDef.uiDescription = "A simple greeting card";
-helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
-    HelloCard* newCard = new HelloCard(screen);
-    return newCard ? newCard->getCard() : nullptr;
-};
-registerCardType(helloDef);
-```
+### Flash layout
 
-**Card definition properties:**
-- `type`: Unique enum value for your card type
-- `name`: Display name in the web UI
-- `allowMultiple`: Whether users can add multiple instances
-- `needsConfigInput`: Whether the card requires configuration input
-- `configInputLabel`: Label for the config input field (if needed)
-- `uiDescription`: Description shown in the web UI
-- `factory`: Lambda function that creates card instances
-
-#### Web UI integration
-
-The web UI automatically displays available card types with:
-- Add buttons for cards that can be added
-- Configuration inputs for cards that need them
-- Status indicators showing how many instances are configured
-- Drag-and-drop reordering for configured cards
-
-No web UI changes are needed when adding new card types - everything is driven by the card registration system.
-
-#### Creating game-like cards
-
-Cards that need regular updates (games, animations, real-time visualizations) can use the `InputHandler::update()` method:
-
-```cpp
-// 1. Your card class should inherit from InputHandler
-class FlappyHogCard : public InputHandler {
-public:
-    // Handle button presses (required by InputHandler)
-    bool handleButtonPress(uint8_t button_index) override {
-        // Return false to allow navigation, true if you handled it
-        return false;
-    }
-    
-    // Update method for game logic (called ~60 times per second)
-    bool update() override {
-        if (game) {
-            game->loop();  // Update game state
-            return true;   // Continue receiving updates
-        }
-        return false;      // Stop updates
-    }
-    
-    // Required for proper cleanup
-    void prepareForRemoval() override {
-        // Called before LVGL object deletion
-    }
-};
-
-// 2. Register the card with an InputHandler
-helloDef.factory = [this](const String& configValue) -> lv_obj_t* {
-    FlappyHogCard* newCard = new FlappyHogCard(screen);
-    if (newCard && newCard->getCard()) {
-        // Register as InputHandler to receive updates
-        cardStack->registerInputHandler(newCard->getCard(), newCard);
-        return newCard->getCard();
-    }
-    delete newCard;
-    return nullptr;
-};
-```
-
-The `update()` method is automatically called by the UI system when your card is active/visible. This approach:
-- Works within the existing task/core architecture
-- Doesn't require creating new tasks or timers
-- Automatically stops updates when the card isn't visible
-- Maintains proper thread safety through the existing UI queue system
-
-### Insight parser and PostHog client
-
-`InsightParser` ingests PostHog API responses and makes them available to the UI. `PostHogClient` constructs requests and dispatches responses.
+The 4 MB flash holds one firmware slot (2.9 MB) and a 1 MB LittleFS partition for plugins; see `partitions.csv`. There is no second firmware slot, so there are no over-the-air firmware updates: firmware goes over USB, plugins go over WiFi.
 
 ### LVGL
 
@@ -206,64 +116,8 @@ This project relies on the powerful [LVGL project](https://docs.lvgl.io/9.2/intr
 
 ### Config manager and captive portal
 
-`ConfigManager` handles persistent storage and retrieval of credentials and insights. `CaptivePortal` provides the web server and interacts with `ConfigManager` to read and write to persistent storage.
+`ConfigManager` handles persistent storage and retrieval of WiFi credentials and the list of cards. `CaptivePortal` provides the web server and interacts with `ConfigManager` to read and write to persistent storage.
 
-### PNG sprite system
+### Images
 
-The project includes a `png2c.py` script that automatically converts PNG images into LVGL-compatible C arrays. This makes it easy to add sprite-based animations and graphics to DeskHog. The script runs before each build, so your sprites are always up to date. Beware: the board has limited storage and we already use most of it. Optimize your images aggressively and use PNG files sparingly.
-
-#### How it works
-
-1. **Place PNG files in subdirectories** under `raw-png/`:
-   ```
-   raw-png/
-   ├── walking/
-   │   ├── frame_01.png
-   │   ├── frame_02.png
-   │   └── frame_03.png
-   ├── idle/
-   │   ├── idle_01.png
-   │   └── idle_02.png
-   └── attack/
-       └── attack_01.png
-   ```
-
-2. **Run the conversion script**:
-   ```bash
-   python3 png2c.py
-   ```
-
-3. **Generated output**:
-   - Individual header/source files for each sprite in `include/sprites/`
-   - Filenames are preserved (e.g., `frame_01.png` → `sprite_frame_01.h/c`)
-   - A master `sprites.h` and `sprites.c` containing arrays for each subdirectory
-
-#### Using sprites in your code
-
-```cpp
-#include "sprites/sprites.h"
-
-// Access the walking animation array
-lv_obj_t* img = lv_img_create(parent);
-lv_img_set_src(img, &walking_sprites[0]);  // First frame
-
-// Animate through frames
-for (int i = 0; i < walking_sprites_count; i++) {
-    lv_img_set_src(img, walking_sprites[i]);
-    // Add delay or use LVGL animation
-}
-```
-
-#### Features
-
-- **Automatic grouping**: Each subdirectory gets its own array (e.g., `walking_sprites[]`, `idle_sprites[]`)
-- **Count variables**: Each array has a corresponding count (e.g., `walking_sprites_count`)
-- **LVGL compatible**: Generates ARGB8888 format data structures that work directly with LVGL 9.x
-
-#### Requirements
-
-- Python 3
-- Pillow and numpy (required):
-  ```bash
-  pip install Pillow numpy
-  ```
+Plugins hold their images as text in the Lua file (see "Images" in [plugins/README.md](plugins/README.md)). `tools/deskhog image *.png` converts PNG files into that text. The PNGs that Max's walking frames were made from are in `raw-png/walking`.

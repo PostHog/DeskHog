@@ -1,127 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configure DeskHog</title>
+    <title>DeskHog</title>
     <link rel="stylesheet" href="portal.css">
-    <script src="portal.js"></script>
 </head>
 <body>
-    <div class="header">
-        <h1 id="page-title">Configure your DeskHog</h1>
-    </div>
-    
-    <!-- Configuration Screen -->
-    <div id="config-screen">
-        <div id="global-action-status" class="status-message" style="display:none; margin-bottom: 1em; padding: 0.75em; border-radius: 4px; text-align: center;"></div>
-        <h2>WiFi</h2>
-        <div class="config-section">
-            
-            <form id="wifi-form" onsubmit="return saveWifiConfig()">
-                <div class="form-group">
-                    <select name="ssid" id="ssid" required>
-                        <option value="">Select a network</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" name="password" id="password">
-                </div>
+    <!-- A sidebar on a wide screen, a bar with tabs on a narrow one. -->
+    <nav class="nav" aria-label="Sections">
+        <a class="brand" href="#cards" data-page="cards" data-brand>DeskHog</a>
+        <div class="tabs">
+            <a href="#cards" data-page="cards">Cards</a>
+            <a href="#connections" data-page="connections">Connections</a>
+            <a href="#plugins" data-page="plugins">Plugins</a>
+            <a href="#device" data-page="device">Device</a>
+        </div>
+        <a id="wifi-pill" class="pill" href="#device" data-page="device">Connecting…</a>
+    </nav>
 
-                <p class="tip">If your network doesn't need a password, you can leave this blank.</p>
-                
-                <div class="button-container">
-                    <button type="submit">Save WiFi</button>
+    <main>
+        <!-- Shown first while the device has no network. -->
+        <section id="wifi-setup" class="panel" hidden>
+            <h2>Connect to WiFi</h2>
+            <p class="hint">Pick your network. DeskHog needs it to fetch what its cards show.</p>
+            <div id="wifi-form"></div>
+        </section>
+
+        <section class="page" id="page-cards">
+            <div class="split">
+                <div class="col">
+                    <header class="page-head">
+                        <h1>Cards</h1>
+                        <button type="button" id="add-card-btn" class="primary">Add card</button>
+                    </header>
+                    <p class="hint" id="cards-hint">The screens on your DeskHog, in the order its buttons step through them. Drag to reorder.</p>
+                    <div id="cards-list" class="tiles"><p class="empty">Loading…</p></div>
                 </div>
-            </form>
-            
-            <div class="button-container">
-                <button type="button" id="refresh-networks-btn">Refresh network list</button>
+                <aside id="card-pane" class="pane" hidden></aside>
             </div>
-        </div>
+        </section>
 
-        <h2>Welcome to DeskHog</h2>
-        <div class="config-section">
-            <p>DeskHog is a tiny platform for having fun with code, hardware and the internet. Check out the <a href="https://github.com/posthog/deskhog/blob/main/README.md" target="_blank">readme</a> to get hacking, especially the <a href="https://github.com/posthog/deskhog/blob/main/tech-details.md" target="_blank">tech details file</a>.</p>
-        </div>
-
-        <h2>PostHog API configuration</h2>
-
-        <div class="config-section">
-            <form id="device-form" onsubmit="return saveDeviceConfig()">
-                <div class="form-group">
-                    <label for="region">Region</label>
-                    <select name="region" id="region" required>
-                        <option value="">Select a region</option>
-                        <option value="us">US</option>
-                        <option value="eu">EU</option>
-                    </select>
+        <section class="page" id="page-connections" hidden>
+            <div class="split">
+                <div class="col">
+                    <header class="page-head"><h1>Connections</h1></header>
+                    <p class="hint">Settings that several cards share, such as an account. Change them here once.</p>
+                    <div id="connections-list" class="list"></div>
+                    <p class="empty" id="connections-empty" hidden>Nothing is shared yet. A connection appears here when you add a card that needs an account, such as PostHog.</p>
                 </div>
-                <div class="form-group">
-                    <label for="teamId">Team ID</label>
-                    <input type="text" name="teamId" id="teamId" min="-1" required>
-                    <p class="tip">This is the numeral that appears at the end of the URL when you're looking at your <a href="https://app.posthog.com/" target="_blank">project's homepage dashboard</a>.</p>
-                </div>
-                
-                <div class="form-group">
-                    <label for="apiKey">API key</label>
-                    <input type="text" name="apiKey" id="apiKey">
-                    <p class="tip">Create a <a href="https://app.posthog.com/settings/user-api-keys" target="_blank">new API key in your project settings</a>. Give it read access to insights.</p>
-                </div>
-                
-                <div class="button-container">
-                    <button type="submit">Save API configuration</button>
-                </div>
-            </form>
-        </div>
-
-        <h2>Add cards</h2>
-
-        <div class="config-section">
-            <div id="available-cards-list">
-                <!-- Will be populated by JavaScript -->
-                <p>Loading available card types...</p>
+                <aside id="connection-pane" class="pane" hidden></aside>
             </div>
-        </div>
+        </section>
 
-        <h2>Manage cards</h2>
-        <div class="config-section">
-            <div id="cards-list">
-                <!-- Will be populated by JavaScript -->
-                <p>Loading cards...</p>
+        <section class="page" id="page-plugins" hidden>
+            <div class="split code-split">
+                <div class="col">
+                    <header class="page-head"><h1>Plugins</h1></header>
+                    <p class="hint">Small Lua programs that draw the cards. Get them from the plugin directory, or write your own.</p>
+                    <div id="plugins-list" class="list"></div>
+                    <div class="row-buttons">
+                        <button type="button" id="get-plugins-btn" class="primary">Get plugins</button>
+                        <button type="button" id="new-plugin-btn">New plugin</button>
+                        <button type="button" id="upload-plugin-btn">Upload a .lua file</button>
+                        <input type="file" id="upload-plugin-input" accept=".lua,text/plain" hidden>
+                    </div>
+                </div>
+                <div id="plugin-editor" class="pane" hidden>
+                    <div class="pane-head">
+                        <h2 id="plugin-heading">New plugin</h2>
+                        <button type="button" id="close-plugin-btn" class="close" aria-label="Close">✕</button>
+                    </div>
+                    <label class="field" id="plugin-name-field"><span>Name</span>
+                        <input type="text" id="plugin-name" placeholder="my-plugin" autocapitalize="off" autocomplete="off" spellcheck="false">
+                        <small>Lowercase letters, digits, - and _. This is also the file name.</small>
+                    </label>
+                    <div class="code">
+                        <pre id="plugin-gutter" class="gutter" aria-hidden="true">1</pre>
+                        <textarea id="plugin-source" aria-label="Source" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+                    </div>
+                    <div class="row-buttons">
+                        <button type="button" id="save-plugin-btn" class="primary">Save and run</button>
+                        <span class="keys" id="save-keys"></span>
+                        <span class="spacer"></span>
+                        <button type="button" id="delete-plugin-btn" class="danger">Delete plugin</button>
+                    </div>
+                    <p id="plugin-result" class="result" role="status"></p>
+                    <pre id="plugin-log" class="log" hidden></pre>
+                </div>
+                <!-- What the plugin directory offers. The browser fetches it, not the device. -->
+                <div id="directory-pane" class="pane" hidden></div>
             </div>
-        </div>
+        </section>
 
-        <!-- Firmware Update Section -->
-        <h2>Firmware update</h2>
-        <div class="config-section" id="firmware-update-section">
-            <p>Current version: <span id="current-version">Checking...</span></p>
-            <p id="available-version-container">Available version: <span id="available-version">N/A</span></p>
-            <div class="button-container">
-                <button type="button" id="check-update-btn">Check for updates</button>
-            </div>
-            <div id="update-available-section" style="display:none;">
-                <h4>Update details:</h4>
-                <pre id="release-notes" class="release-notes-box"></pre>
-                <div class="button-container">
-                    <button type="button" id="install-update-btn">Install update</button>
+        <section class="page" id="page-device" hidden>
+            <header class="page-head"><h1>Device</h1></header>
+            <div class="columns">
+                <div class="panel" id="wifi-panel">
+                    <h2>WiFi</h2>
+                    <div id="wifi-change"></div>
+                </div>
+                <div class="panel">
+                    <h2>About</h2>
+                    <dl id="about-list" class="about"></dl>
+                    <p class="hint">Firmware updates are installed over USB. Plugins update over WiFi, from this page.</p>
                 </div>
             </div>
-            <div id="update-status-container" style="margin-top: 15px;">
-                <p id="update-status-text"></p>
-                <div class="progress" id="update-progress-container" style="display:none;">
-                    <div id="update-progress-bar" class="progress-bar" style="width: 0%;"></div>
-                </div>
-                <p id="update-error-message" class="error-message"></p>
-            </div>
-        </div>
-        <!-- End Firmware Update Section -->
+        </section>
+    </main>
 
-    </div>
-    
-    <footer>People who are really serious about software should make their own hardware. - Alan Kay</footer>
+    <div id="notice" class="notice" role="status" hidden></div>
 
+    <script src="portal.js"></script>
 </body>
 </html>

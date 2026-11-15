@@ -29,10 +29,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install platformio
-        # Install dependencies for the pre-build scripts
-        pip install pillow numpy
-        # Also install in PlatformIO's Python environment
-        ~/.platformio/penv/bin/pip install pillow numpy || true
     
     - name: Get version
       id: get_version
@@ -57,8 +53,6 @@ jobs:
       run: |
         # Initialize PlatformIO to ensure penv exists
         pio system info
-        # Try installing PIL in PlatformIO's environment again after init
-        ~/.platformio/penv/bin/pip install pillow numpy || echo "Warning: Could not install in PIO penv"
         # Build firmware
         pio run -e adafruit_feather_esp32s3_reversetft
         # Verify the firmware was actually built

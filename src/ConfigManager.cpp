@@ -1,5 +1,4 @@
 #include "ConfigManager.h"
-#include "SystemController.h"
 #include <ArduinoJson.h>
 
 ConfigManager::ConfigManager() {
@@ -17,37 +16,15 @@ void ConfigManager::setEventQueue(EventQueue* queue) {
 void ConfigManager::begin() {
     // Initialize preferences
     _preferences.begin(_namespace, false);
-    _insightsPrefs.begin(_insightsNamespace, false);
     _cardPrefs.begin(_cardNamespace, false);
-    
-    // Check initial API configuration state
-    updateApiConfigurationState();
-}
-
-// Private helper to check and update API configuration state
-void ConfigManager::updateApiConfigurationState() {
-    if (!_preferences.isKey(_teamIdKey) || getTeamId() == NO_TEAM_ID) {
-        SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-        return;
-    }
-    
-    if (!_preferences.isKey(_apiKeyKey) || getApiKey().isEmpty()) {
-        SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-        return;
-    }
-    
-    // Both team ID and API key are set
-    SystemController::setApiState(ApiState::API_CONFIGURED);
 }
 
 // Helper method to commit changes to flash
 void ConfigManager::commit() {
     _preferences.end();
-    _insightsPrefs.end();
     _cardPrefs.end();
     
     _preferences.begin(_namespace, false);
-    _insightsPrefs.begin(_insightsNamespace, false);
     _cardPrefs.begin(_cardNamespace, false);
 }
 
@@ -70,7 +47,7 @@ bool ConfigManager::saveWiFiCredentials(const String& ssid, const String& passwo
     
     // Publish event if event queue is available
     if (_eventQueue != nullptr) {
-        _eventQueue->publishEvent(EventType::WIFI_CREDENTIALS_FOUND, "");
+        _eventQueue->publishEvent(EventType::WIFI_CREDENTIALS_FOUND);
     }
     
     return true;
@@ -98,7 +75,7 @@ void ConfigManager::clearWiFiCredentials() {
     
     // Publish event if event queue is available
     if (_eventQueue != nullptr) {
-        _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS, "");
+        _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS);
     }
 }
 
@@ -111,9 +88,9 @@ bool ConfigManager::checkWiFiCredentialsAndPublish() {
     
     if (_eventQueue != nullptr) {
         if (hasCredentials) {
-            _eventQueue->publishEvent(EventType::WIFI_CREDENTIALS_FOUND, "");
+            _eventQueue->publishEvent(EventType::WIFI_CREDENTIALS_FOUND);
         } else {
-            _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS, "");
+            _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS);
         }
     }
     
@@ -121,29 +98,11 @@ bool ConfigManager::checkWiFiCredentialsAndPublish() {
 }
 
 
-void ConfigManager::setTeamId(int teamId) {
-    _preferences.putInt(_teamIdKey, teamId);
-    
-    // Commit changes
-    commit();
-    
-    updateApiConfigurationState();
-}
-
 int ConfigManager::getTeamId() {
     if (!_preferences.isKey(_teamIdKey)) {
         return NO_TEAM_ID;
     }
     return _preferences.getInt(_teamIdKey);
-}
-
-void ConfigManager::setRegion(String region) {
-    _preferences.putString(_regionKey, region);
-    
-    // Commit changes
-    commit();
-    
-    updateApiConfigurationState();
 }
 
 String ConfigManager::getRegion() {
@@ -153,41 +112,36 @@ String ConfigManager::getRegion() {
     return _preferences.getString(_regionKey);
 }
 
-void ConfigManager::clearTeamId() {
-    _preferences.remove(_teamIdKey);
-    
-    // Commit changes
-    commit();
-    
-    SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
-}
-
-bool ConfigManager::setApiKey(const String& apiKey) {
-    if (apiKey.length() == 0 || apiKey.length() > MAX_API_KEY_LENGTH) {
-        SystemController::setApiState(ApiState::API_CONFIG_INVALID);
-        return false;
-    }
-
-    _preferences.putString(_apiKeyKey, apiKey);
-    
-    // Commit changes
-    commit();
-    
-    updateApiConfigurationState();
-    return true;
-}
-
 String ConfigManager::getApiKey() {
     return _preferences.getString(_apiKeyKey, "");
 }
 
-void ConfigManager::clearApiKey() {
+void ConfigManager::clearPostHogSettings() {
+    _preferences.remove(_teamIdKey);
     _preferences.remove(_apiKeyKey);
-    
-    // Commit changes
+    _preferences.remove(_regionKey);
     commit();
-    
-    SystemController::setApiState(ApiState::API_AWAITING_CONFIG);
+
+    // Older firmware also kept the last answer for each insight. Give that space back.
+    Preferences insights;
+    if (insights.begin("insights", false)) {
+        insights.clear();
+        insights.end();
+    }
+}
+
+String ConfigManager::getPluginDirectory() {
+    if (!_preferences.isKey("plugin_dir")) return "";
+    return _preferences.getString("plugin_dir", "");
+}
+
+void ConfigManager::setPluginDirectory(const String& source) {
+    if (source.length()) {
+        _preferences.putString("plugin_dir", source);
+    } else {
+        _preferences.remove("plugin_dir");
+    }
+    commit();
 }
 
 std::vector<CardConfig> ConfigManager::getCardConfigs() {
@@ -216,7 +170,7 @@ std::vector<CardConfig> ConfigManager::getCardConfigs() {
         JsonObject obj = v.as<JsonObject>();
         if (obj.containsKey("type") && obj.containsKey("config") && obj.containsKey("order")) {
             CardConfig config;
-            config.type = stringToCardType(obj["type"].as<String>());
+            config.type = obj["type"].as<String>();
             config.config = obj["config"].as<String>();
             config.order = obj["order"].as<int>();
             config.name = obj["name"].as<String>();
@@ -235,7 +189,7 @@ bool ConfigManager::saveCardConfigs(const std::vector<CardConfig>& configs) {
     // Convert vector to JSON array
     for (const CardConfig& config : configs) {
         JsonObject obj = array.createNestedObject();
-        obj["type"] = cardTypeToString(config.type);
+        obj["type"] = config.type;
         obj["config"] = config.config;
         obj["order"] = config.order;
         obj["name"] = config.name;
@@ -256,7 +210,7 @@ bool ConfigManager::saveCardConfigs(const std::vector<CardConfig>& configs) {
     
     // Publish event if event queue is available
     if (_eventQueue != nullptr) {
-        _eventQueue->publishEvent(EventType::CARD_CONFIG_CHANGED, "");
+        _eventQueue->publishEvent(EventType::CARD_CONFIG_CHANGED);
     }
     
     return true;

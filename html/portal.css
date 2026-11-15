@@ -1,369 +1,470 @@
+/* The DeskHog web page. Written for a phone first; from 900px wide it becomes
+   a sidebar, a grid of cards and a side pane. No web fonts or images: the page
+   is served by the device and has to work without internet. */
+
 :root {
-    background-color: #E5E7DF;
-    --border-color: #DCDED4;
-    --container-color: #F3F4F0;
-    --button-border: #CCCCCC;
-    --button-border-hover: #AAA;
-    --radius: 8px;
-    --input-color: #FFF;
-    --panel-color: #FFF;
-    --label-color: #a0a0a0;
-    --button-shadow: #E1DDDD;
-    --tip-color: #343434;
-    --link-color: rgb(245 78 0);
-    --default-font: system-ui, -apple-system, sans-serif; 
-    font-family: var(--default-font);
-
+    --bg: #eef0ea;
+    --panel: #fbfcf9;
+    --text: #18201b;
+    --muted: #5d695f;
+    --line: #d3d9cf;
+    --accent: #0e7a00;       /* the green of Max's card */
+    --accent-ink: #ffffff;
+    --accent-soft: #dcebd6;
+    --bad: #b3261e;
+    --device: #262a27;       /* the body of the gadget itself */
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.4;
 }
 
-body { 
-    margin: 0; 
-    padding: 1rem; 
-    background-color: var(--container-color); 
-    color: #333; 
-    max-width: 70ch;
-    margin-left: auto;
-    margin-right: auto;
-    border: 1px solid var(--border-color);
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #101411;
+        --panel: #191e1a;
+        --text: #e8ede7;
+        --muted: #97a39a;
+        --line: #2c342d;
+        --accent: #4ac24f;
+        --accent-ink: #071208;
+        --accent-soft: #1c3a1f;
+        --bad: #ff8f80;
+        --device: #2b312c;
+    }
 }
 
-a {
-    color: var(--link-color);
-    font-weight: 600;
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+}
+
+h1 { font-size: 1.5rem; line-height: 1.2; margin: 0; }
+h2 { font-size: 1.05rem; margin: 0 0 8px; }
+a { color: var(--accent); }
+
+main { padding: 16px 16px 96px; }
+
+/* ------------------------------------------------------------------ nav */
+
+.nav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 10px 16px 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+}
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text);
     text-decoration: none;
 }
-
-.tip {
-    font-weight: 400;
-    font-size: 0.9rem;
-    color: var(--tip-color);
-    margin-bottom: 1.5rem;
+/* A tiny picture of the device: a screen with something on it. */
+.brand::before {
+    content: "";
+    width: 26px;
+    height: 15px;
+    border-radius: 3px;
+    background: linear-gradient(var(--accent), var(--accent)) 5px 4px / 9px 7px no-repeat #000;
+    border: 2px solid var(--device);
 }
+.pill {
+    margin-left: auto;
+    font-size: 0.8rem;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60vw;
+}
+.pill.ok::before { content: "●  "; color: var(--accent); font-size: 0.6rem; vertical-align: 1px; }
+.tabs {
+    order: 3;
+    flex-basis: 100%;
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+}
+.tabs a {
+    padding: 8px 12px;
+    color: var(--muted);
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+}
+.tabs a[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
 
-.config-section {
-    background-color: var(--panel-color);
-    padding: 1rem;
+/* ---------------------------------------------------------------- pages */
+
+.page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 40px;
+}
+.hint { color: var(--muted); font-size: 0.9rem; margin: 4px 0 14px; max-width: 62ch; }
+.empty { color: var(--muted); padding: 20px 4px; margin: 0; }
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
-    margin-bottom: 1rem;
-    border: 1px solid var(--border-color);
+    padding: 16px;
 }
+#wifi-setup { margin-bottom: 20px; }
+.columns { display: grid; gap: 16px; margin-top: 14px; }
 
-
-
-h1, h2 { color: #000000;
-}
-
-h1 {
-    font-weight: 700;
-    font-size: 1.5rem;
-
-}
-
-h2 {
-    font-weight: 600;
-    font-size: 1.1rem;
-    margin-bottom: 0.5rem;
-}
-
-.form-group { margin-bottom: 15px; }
-label { 
-    display: block; 
-    margin-bottom: 0.5rem; 
-    font-weight: 600;
-}
-input[type='text'], input[type='password'] { 
-    width: 100%; 
-    padding: 8px; 
-    border: 1px solid #ddd; 
-    border-radius: 8px; 
-    box-sizing: border-box; 
-    font-size: 1rem;
-}
-.button-container { 
-    margin-top: 15px; 
-    text-align: center; 
-}
-button, select { 
-    display: inline-block; 
-    width: 100%;
-    font-size: 16px;
-    font-weight: 600;
-    height: 40px;
-    text-decoration: none; 
-    background-color: var(--input-color);
-    border: 1px solid var(--button-border);
-    border-radius: var(--radius); 
-    cursor: pointer; 
-    padding: 0 16px;
-
-    box-shadow: 0 4px 0 0 var(--button-shadow),
-                0 5px 0 0 var(--button-border);
-    color: inherit;
-    -webkit-tap-highlight-color: transparent;
-}
-
-input, select {
-    height: 40px;
-}
-
-button:active {
-    background-color: #DCDDD9;
-}
-
-ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-li {
-    margin-bottom: 1rem;
-}
-
-li:last-child {
-    margin-bottom: 0;
-}
-
-footer { 
-    text-align: center; 
-    margin-top: 4rem; 
-    color: #777; 
-    font-size: 0.8em; 
-}
-.network-list {
-    max-height: 200px;
+/* The side pane: what you are changing. On a narrow screen it covers the page. */
+.pane {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
     overflow-y: auto;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    margin-bottom: 15px;
+    padding: 16px 16px 96px;
+    background: var(--bg);
 }
-.network-item {
-    padding: 8px 15px;
-    border-bottom: 1px solid #eee;
-    cursor: pointer;
+.pane-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
 }
-.network-item:hover {
-    background-color: #f5f5f5;
+.pane-head h2 { font-size: 1.25rem; margin: 0; overflow-wrap: anywhere; }
+.close { flex: none; padding: 4px 10px; color: var(--muted); }
+.pane-status { color: var(--muted); font-size: 0.9rem; margin: 8px 0 16px; }
+.pane-status.bad { color: var(--bad); }
+
+/* ---------------------------------------------------- lists and tiles */
+
+.list, .tiles { display: flex; flex-direction: column; gap: 8px; }
+
+.item {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
 }
-.network-item.selected {
-    background-color: #e0f0ff;
+.item.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.item.dragging { opacity: 0.55; border-style: dashed; border-color: var(--accent); }
+.item-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: inherit;
+    background: none;
+    text-align: left;
+}
+.tile .item-open { padding: 8px 12px 8px 4px; }
+.item-text { display: block; flex: 1; min-width: 0; }
+.item-title, .item-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-title { font-weight: 600; }
+.item-sub { color: var(--muted); font-size: 0.85rem; min-height: 1.2em; }
+.item-sub.bad { color: var(--bad); white-space: normal; }
+
+.handle {
+    order: -1;
+    flex: none;
+    width: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    font-size: 1.1rem;
 }
 
-.lock-icon {
-    margin-left: 5px;
-}
-.success-icon {
-    color: #28a745;
-    font-size: 48px;
-    text-align: center;
-    margin: 20px 0;
-}
-.progress {
-    height: 6px;
-    background-color: #e9ecef;
-    border-radius: 2px;
-    margin: 20px 0;
+/* A card's screen, as the device has it. */
+.screen {
+    aspect-ratio: 233 / 135;
+    background: #000;
+    border-radius: 5px;
     overflow: hidden;
 }
-.progress-bar {
-    height: 100%;
-    background-color: #cc7000;
-    width: 0%;
-    transition: width 10s linear;
-}
-.hidden {
-    display: none;
-}
+.screen canvas { display: block; width: 100%; height: 100%; }
+.tile .screen { flex: none; width: 104px; }
+/* The card the device is showing right now gets a dot. */
+.tile.live .item-sub::before { content: "●"; color: var(--accent); font-size: 0.6rem; margin-right: 5px; vertical-align: 1px; }
 
-select {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23333333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.7rem top 50%;
-    background-size: 1rem auto;
-    padding-right: 2rem;
-    background-color: var(--input-color);
-    font-family: var(--default-font);
-}
-
-select::-ms-expand {
-    display: none;
-}
-
-/* Status message styling (used by global-action-status) */
-.status-message {
-    padding: 0.75em;
-    margin-bottom: 1em;
-    border-radius: 4px;
-    text-align: center;
-    font-family: monospace; /* Added for fixed-width font */
-}
-
-#firmware-update-section {
-    font-family: monospace;
-}
-
-.status-message.info {
-    background-color: #e7f3fe; /* Light blue for info */
-    border: 1px solid #d0eaff;
-    color: #31708f;
-}
-
-.status-message.success {
-    background-color: #d4edda; /* Light green for success */
-    border: 1px solid #c3e6cb;
-    color: #155724;
-}
-
-.status-message.error {
-    background-color: #f8d7da; /* Light red for error */
-    border: 1px solid #f5c6cb;
-    color: #721c24;
-}
-
-/* Release notes box specific styling */
-#release-notes {
-    /* Assuming .release-notes-box class already exists or you style #release-notes directly */
-    /* If .release-notes-box is the primary selector for layout, add font-family there */
-    /* For direct styling of the <pre> tag by ID: */
-    font-family: monospace; /* Added for fixed-width font */
-    white-space: pre-wrap;  /* Ensures long lines wrap */
-    word-wrap: break-word;  /* Breaks long words if necessary */
-    background-color: #f8f9fa; /* Light background for the box */
-    border: 1px solid #dee2e6;   /* Border for the box */
-    padding: 10px;              /* Padding inside the box */
-    max-height: 200px;          /* Max height with scroll if content exceeds */
-    overflow-y: auto;           /* Enable vertical scroll */
-    border-radius: var(--radius); /* Consistent border radius */
-}
-
-/* Available cards list styling */
-.available-card-item {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    padding: 1rem;
-    margin-bottom: 0.5rem;
-    background-color: var(--input-color);
+/* The device in the side pane. Its three buttons work. */
+.device {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 12px;
+    padding: 14px;
+    background: var(--device);
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    max-width: 460px;
+}
+.device .screen { flex: 1; border-radius: 3px; }
+.hw-buttons { display: flex; flex-direction: column; gap: 10px; }
+.hw {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    background: #3b423c;
+    border: 1px solid #5a635b;
+    color: #e8ede7;
+    font-size: 0.7rem;
+    line-height: 1;
+}
+.hw:active { background: #566057; transform: translateY(1px); }
+
+/* ---------------------------------------------------------------- forms */
+
+.field { display: block; margin-bottom: 12px; }
+.field > span { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; }
+.field small { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+.field.check { display: flex; align-items: center; gap: 8px; }
+.field.check > span { margin: 0; }
+
+input[type="text"], input[type="password"], select, textarea {
+    width: 100%;
+    padding: 9px 10px;
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
-.available-card-info {
-    flex: 1;
+button {
+    font: inherit;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
 }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.danger { color: var(--bad); }
+button:disabled { opacity: 0.5; cursor: default; }
+.row-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.row-buttons .spacer { flex: 1; }
+.keys { color: var(--muted); font-size: 0.8rem; }
 
-.available-card-name {
-    font-weight: 600;
-    margin-bottom: 0.25rem;
-}
+.group-label { font-size: 0.9rem; font-weight: 600; color: var(--muted); margin: 16px 0 8px; }
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.choice { text-align: left; padding: 12px; }
+.choice b { display: block; }
+.choice span { display: block; color: var(--muted); font-size: 0.8rem; }
 
-.available-card-description {
-    font-size: 0.9rem;
-    color: var(--label-color);
-    margin-bottom: 0.25rem;
-}
+.offer { align-items: center; gap: 12px; padding: 10px 12px; }
+.offer .item-text { flex: 1; min-width: 0; }
+.offer .item-sub { white-space: normal; }
+.offer .about-plugin { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+.offer .actions { flex: none; display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: center; }
+.offer .actions small { color: var(--muted); }
+.source-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; color: var(--muted); font-size: 0.9rem; }
+.source-line button { padding: 3px 10px; font-size: 0.85rem; }
+.source-line b { color: var(--text); overflow-wrap: anywhere; }
 
-.available-card-status {
-    font-size: 0.8rem;
-    color: var(--label-color);
-    font-style: italic;
-}
+.used-by { margin: 16px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.used-by button { padding: 4px 10px; font-size: 0.85rem; border-radius: 999px; }
 
-.available-card-actions {
+.networks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; max-height: 280px; overflow-y: auto; }
+.network { display: flex; justify-content: space-between; align-items: center; text-align: left; }
+.network.selected { border-color: var(--accent); background: var(--accent-soft); }
+.network small { color: var(--muted); }
+
+/* --------------------------------------------------------- code editor */
+
+/* The box has the height; the line numbers and the code both fill it. */
+.code {
     display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    min-width: 120px;
+    height: 58vh;
+    min-height: 280px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
 }
-
-.add-card-btn {
-    background-color: var(--input-color);
-    border: 1px solid var(--button-border);
-    padding: 0.5rem 1rem;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-weight: 600;
-    width: 100%;
-    box-shadow: 0 4px 0 0 var(--button-shadow),
-                0 5px 0 0 var(--button-border);
+.code:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gutter, .code textarea {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+    tab-size: 2;
 }
-
-.add-card-btn:hover {
-    background-color: #DCDDD9;
-}
-
-.add-card-btn:active {
-    background-color: #DCDDD9;
-}
-
-.delete-card-btn {
-    background-color: var(--input-color);
-    color: #dc3545;
-    border: 1px solid var(--button-border);
-    padding: 5px 10px;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-weight: 600;
-    box-shadow: 0 2px 0 0 var(--button-shadow),
-                0 3px 0 0 var(--button-border);
-}
-
-.delete-card-btn:hover {
-    background-color: #DCDDD9;
-}
-
-.delete-card-btn:active {
-    background-color: #DCDDD9;
-}
-
-.config-input {
-    padding: 0.25rem 0.5rem;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.9rem;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-/* Drag and drop styling for configured cards */
-.card-item {
-    border: 1px solid var(--border-color);
-    padding: 10px;
-    margin: 5px 0;
-    border-radius: 5px;
-    background: #f9f9f9;
-    cursor: move;
-    transition: all 0.2s ease;
-}
-
-.card-item:hover {
-    background: #f0f0f0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.card-item.dragging {
-    opacity: 0.5;
-    transform: rotate(2deg);
-}
-
-.card-item.drag-over {
-    border-color: #007bff;
-    background: #e3f2fd;
-    border-style: dashed;
-    border-width: 2px;
-}
-
-.drag-handle {
-    color: var(--label-color);
-    cursor: grab;
-    font-size: 1.2rem;
-    margin-right: 0.5rem;
+.gutter {
+    flex: none;
+    min-width: 3.4em;
+    padding: 10px 8px 40px 8px;
+    text-align: right;
+    color: var(--muted);
+    background: var(--bg);
+    border-right: 1px solid var(--line);
+    overflow: hidden;
     user-select: none;
 }
+.code textarea {
+    flex: 1;
+    min-width: 0;
+    padding: 10px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    resize: none;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow: auto;
+    outline: none;
+}
 
-.drag-handle:active {
-    cursor: grabbing;
+.result { min-height: 1.4em; margin: 10px 0 0; }
+.result.error { color: var(--bad); }
+.result.success { color: var(--accent); }
+.log {
+    margin: 10px 0 0;
+    padding: 10px;
+    max-height: 180px;
+    overflow: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+
+.about { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0 0 12px; }
+.about dt { color: var(--muted); }
+.about dd { margin: 0; }
+
+/* Messages about what just happened, out of the way of the page. */
+.notice {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    z-index: 20;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100vw - 32px);
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 0.95rem;
+}
+.notice.error { background: var(--bad); color: #fff; border-radius: var(--radius); }
+
+/* ------------------------------------------ from 600px: cards in a grid */
+
+@media (min-width: 600px) {
+    .tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 14px;
+    }
+    .tile { display: block; user-select: none; }
+    .tile .item-open {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 8px 10px;
+    }
+    .tile .screen { width: 100%; }
+    .tile .item-text { padding: 0 2px; }
+    .handle { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 6px; background: rgba(0, 0, 0, 0.55); color: #fff; }
+    .columns { grid-template-columns: 1fr 1fr; align-items: start; }
+    .offer .actions { flex-direction: row; align-items: center; gap: 8px; }
+}
+/* A mouse drags the whole tile, so it needs no handle. */
+@media (min-width: 600px) and (hover: hover) and (pointer: fine) {
+    .handle { display: none; }
+    .tile { cursor: grab; }
+    .tile .item-open { cursor: inherit; }
+}
+
+/* --------------------------- from 900px: sidebar, and a pane at the side */
+
+@media (min-width: 900px) {
+    body { display: flex; align-items: flex-start; }
+
+    .nav {
+        flex: none;
+        width: 208px;
+        height: 100vh;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 20px;
+        padding: 24px 12px 20px;
+        border-bottom: 0;
+        border-right: 1px solid var(--line);
+    }
+    .brand { padding: 0 10px; font-size: 1.25rem; }
+    .tabs { order: 0; flex-basis: auto; flex-direction: column; overflow: visible; }
+    .tabs a { padding: 8px 10px; border: 0; border-radius: 8px; }
+    .tabs a:hover { color: var(--text); }
+    .tabs a[aria-current="page"] { background: var(--accent-soft); color: var(--text); }
+    .pill { margin: auto 0 0; max-width: none; border-radius: 8px; padding: 8px 10px; white-space: normal; }
+
+    main { flex: 1; min-width: 0; max-width: 1320px; padding: 28px 32px 96px; }
+
+    .split { display: flex; align-items: flex-start; gap: 32px; }
+    .split > .col { flex: 1; min-width: 0; }
+    .pane {
+        position: sticky;
+        top: 28px;
+        inset: auto;
+        z-index: auto;
+        flex: none;
+        width: 400px;
+        max-height: calc(100vh - 56px);
+        padding: 20px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+    }
+    .pane input[type="text"], .pane input[type="password"], .pane select { background: var(--bg); }
+
+    /* Plugins: a narrow list, and the code gets the room. */
+    .code-split > .col { flex: none; width: 300px; }
+    .code-split > .pane { flex: 1; width: auto; min-width: 0; max-height: none; position: static; }
+    .code { height: calc(100vh - 290px); }
+    #directory-pane { max-width: 820px; }
+
+    .columns { max-width: 980px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .item, .tabs a, button { transition: border-color 0.12s, background-color 0.12s, box-shadow 0.12s; }
 }

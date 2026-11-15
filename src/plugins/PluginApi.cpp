@@ -1,0 +1,517 @@
+#include "plugins/PluginApi.h"
+#include "PixelRuns.h"
+
+#include <ArduinoJson.h>
+#include <ESPAsyncWebServer.h>
+
+#include <memory>
+
+#include "plugins/PluginManager.h"
+
+namespace {
+
+const char kPluginsPrefix[] = "/api/plugins";
+
+void addCors(AsyncWebServerResponse* response) {
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    response->addHeader("Access-Control-Allow-Headers", "Content-Type");
+    response->addHeader("Access-Control-Expose-Headers", "X-Width, X-Height");
+}
+
+void sendJson(AsyncWebServerRequest* request, int code, const JsonDocument& doc) {
+    String body;
+    serializeJson(doc, body);
+    AsyncWebServerResponse* response = request->beginResponse(code, "application/json", body);
+    addCors(response);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+}
+
+void sendError(AsyncWebServerRequest* request, int code, const String& message) {
+    DynamicJsonDocument doc(512);
+    doc["ok"] = false;
+    doc["error"] = message;
+    sendJson(request, code, doc);
+}
+
+void sendOk(AsyncWebServerRequest* request, const char* field = nullptr, const String& value = String()) {
+    DynamicJsonDocument doc(256);
+    doc["ok"] = true;
+    if (field) doc[field] = value;
+    sendJson(request, 200, doc);
+}
+
+bool answerPreflight(AsyncWebServerRequest* request) {
+    if (request->method() != HTTP_OPTIONS) return false;
+    AsyncWebServerResponse* response = request->beginResponse(204);
+    addCors(response);
+    request->send(response);
+    return true;
+}
+
+// The body arrives in pieces; collect them in one block the request owns.
+// The web server frees _tempObject when the request ends.
+void collectBody(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+    if (total > PluginManager::MAX_SOURCE_BYTES) return;  // answered with 413 later
+    if (index == 0 && !request->_tempObject) request->_tempObject = malloc(total + 1);
+    if (!request->_tempObject || index + len > total) return;
+    memcpy(static_cast<uint8_t*>(request->_tempObject) + index, data, len);
+}
+
+/** Parse the request body as JSON. Answers the request itself when that fails. */
+bool readJson(AsyncWebServerRequest* request, JsonDocument& doc) {
+    const size_t length = request->contentLength();
+    if (!request->_tempObject || length == 0 || length > PluginManager::MAX_SOURCE_BYTES) {
+        sendError(request, 400, "send a JSON body, labelled application/json");
+        return false;
+    }
+    if (deserializeJson(doc, static_cast<const char*>(request->_tempObject), length)) {
+        sendError(request, 400, "the body is not valid JSON");
+        return false;
+    }
+    return true;
+}
+
+String param(AsyncWebServerRequest* request, const char* name) {
+    return request->hasParam(name) ? request->getParam(name)->value() : String();
+}
+
+PluginSettings settingsFrom(JsonVariantConst source) {
+    PluginSettings settings;
+    if (!source.is<JsonObjectConst>()) return settings;
+    for (JsonPairConst pair : source.as<JsonObjectConst>()) {
+        if (!pair.value().isNull()) settings[pair.key().c_str()] = pair.value().as<String>().c_str();
+    }
+    return settings;
+}
+
+void fieldsToJson(JsonArray target, const std::vector<deskhog::LuaPlugin::ConfigField>& fields) {
+    for (const auto& field : fields) {
+        JsonObject item = target.createNestedObject();
+        item["key"] = field.key.c_str();
+        item["label"] = field.label.c_str();
+        item["type"] = field.type.c_str();
+        item["default"] = field.defaultValue.c_str();
+        if (field.secret) item["secret"] = true;
+        if (!field.options.empty()) {
+            JsonArray options = item.createNestedArray("options");
+            for (const std::string& option : field.options) options.add(option.c_str());
+        }
+    }
+}
+
+// Saved settings, minus the secrets: those are only reported as "set".
+void settingsToJson(JsonObject target, const PluginSettings& settings,
+                    const std::vector<deskhog::LuaPlugin::ConfigField>* schema) {
+    JsonObject values = target.createNestedObject("settings");
+    JsonArray secretsSet = target.createNestedArray("secretsSet");
+    for (const auto& pair : settings) {
+        bool secret = false;
+        if (schema) {
+            for (const auto& field : *schema) secret = secret || (field.key == pair.first && field.secret);
+        }
+        if (!secret) {
+            values[pair.first.c_str()] = pair.second.c_str();
+        } else if (!pair.second.empty()) {
+            secretsSet.add(pair.first.c_str());
+        }
+    }
+}
+
+void systemToJson(JsonObject system, PluginManager& manager) {
+    const PluginSystemInfo info = manager.systemInfo();
+    system["plugin_cards"] = info.cards;
+    system["heap_free"] = info.heapFree;
+    system["heap_lowest"] = info.heapLowest;
+    system["psram_free"] = info.psramFree;
+    system["ui_stack_unused"] = info.uiStackUnused;
+    system["http_stack_unused"] = info.httpStackUnused;
+    system["lvgl_heap_total"] = info.lvglHeapTotal;
+    system["lvgl_heap_peak"] = info.lvglHeapPeak;
+}
+
+void storageToJson(JsonObject storage, PluginManager& manager) {
+    size_t used = 0, total = 0;
+    manager.storageInfo(used, total);
+    storage["used"] = used;
+    storage["total"] = total;
+}
+
+// ------------------------------------------------------------------- state
+
+void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    const std::map<std::string, PluginMeta> metas = manager.metas();
+    const std::vector<PluginConnectionRecord> connections = manager.connections();
+    const std::map<std::string, PluginConnectionState> states = manager.states();
+
+    DynamicJsonDocument doc(32768);
+
+    JsonArray plugins = doc.createNestedArray("plugins");
+    for (const auto& pair : metas) {
+        const PluginMeta& meta = pair.second;
+        JsonObject item = plugins.createNestedObject();
+        item["name"] = pair.first.c_str();
+        item["title"] = meta.title.c_str();
+        if (!meta.description.empty()) item["description"] = meta.description.c_str();
+        if (!meta.version.empty()) item["version"] = meta.version.c_str();
+        if (!meta.author.empty()) item["author"] = meta.author.c_str();
+        char hash[9];
+        snprintf(hash, sizeof(hash), "%08x", (unsigned)meta.hash);
+        item["hash"] = String(hash);
+        item["multiCard"] = meta.multiCard;
+        if (!meta.error.empty()) item["error"] = meta.error.c_str();
+        fieldsToJson(item.createNestedArray("config"), meta.config);
+        JsonArray kinds = item.createNestedArray("kinds");
+        for (const auto& kind : meta.kinds) {
+            JsonObject kindItem = kinds.createNestedObject();
+            kindItem["key"] = kind.key.c_str();
+            kindItem["name"] = kind.name.c_str();
+            fieldsToJson(kindItem.createNestedArray("config"), kind.config);
+        }
+    }
+
+    JsonArray connectionList = doc.createNestedArray("connections");
+    for (const PluginConnectionRecord& record : connections) {
+        const auto meta = metas.find(record.plugin);
+        const auto state = states.find(record.id);
+        JsonObject item = connectionList.createNestedObject();
+        item["id"] = record.id.c_str();
+        item["plugin"] = record.plugin.c_str();
+        item["name"] = record.name.c_str();
+        item["cards"] = record.cards.size();
+        settingsToJson(item, record.settings, meta != metas.end() ? &meta->second.config : nullptr);
+        if (state == states.end()) {
+            item["state"] = "stopped";
+        } else {
+            item["state"] = state->second.failed ? "failed" : "running";
+            item["memory"] = state->second.memory;
+            if (state->second.failed) item["error"] = state->second.error.c_str();
+        }
+    }
+
+    JsonArray cards = doc.createNestedArray("cards");
+    for (const CardConfig& config : manager.cardStack()) {
+        JsonObject item = cards.createNestedObject();
+        item["type"] = config.type;
+        item["config"] = config.config;
+        item["name"] = config.name;
+        item["key"] = config.type + "|" + config.config;
+        if (!config.isPlugin()) continue;
+
+        std::string connectionId, cardId;
+        if (!PluginManager::splitKey(config.config.c_str(), connectionId, cardId)) continue;
+        // String, not c_str(): ArduinoJson keeps a bare pointer to C strings, and
+        // these two are gone before the document is sent.
+        item["connection"] = String(connectionId.c_str());
+        item["card"] = String(cardId.c_str());
+        for (const PluginConnectionRecord& record : connections) {
+            if (record.id != connectionId) continue;
+            item["plugin"] = record.plugin.c_str();
+            const PluginCardRecord* card = record.card(cardId);
+            if (card) {
+                item["kind"] = card->kind.c_str();
+                JsonObject values = item.createNestedObject("settings");
+                for (const auto& pair : card->settings) values[pair.first.c_str()] = pair.second.c_str();
+            }
+        }
+        const auto state = states.find(connectionId);
+        if (state != states.end()) {
+            const auto cardState = state->second.cards.find(cardId);
+            if (cardState != state->second.cards.end()) {
+                item["frames"] = cardState->second.frames;
+                item["onScreen"] = cardState->second.onScreen;
+                if (!cardState->second.title.empty()) item["title"] = cardState->second.title.c_str();
+            }
+        }
+    }
+
+    JsonObject directory = doc.createNestedObject("directory");
+    directory["source"] = manager.directorySource();
+    directory["default"] = PluginManager::defaultDirectorySource();
+
+    storageToJson(doc.createNestedObject("storage"), manager);
+    systemToJson(doc.createNestedObject("system"), manager);
+    sendJson(request, 200, doc);
+}
+
+// The device only remembers where plugins come from. The web page and the
+// command line tool do the fetching: they have the internet connection, the
+// memory and proper certificate checks.
+void handleDirectory(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(1024);
+    if (!readJson(request, doc)) return;
+    String error;
+    if (!manager.setDirectorySource(doc["source"] | "", error)) return sendError(request, 400, error);
+    sendOk(request, "source", manager.directorySource());
+}
+
+// ------------------------------------------------------------------- cards
+
+void handleAddCard(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(8192);
+    if (!readJson(request, doc)) return;
+    String error;
+    const std::string key = manager.addCard(doc["plugin"] | "", doc["connection"] | "", doc["connectionName"] | "",
+                                            settingsFrom(doc["connectionSettings"]), doc["kind"] | "", doc["name"] | "",
+                                            settingsFrom(doc["settings"]), error);
+    if (key.empty()) return sendError(request, 400, error);
+    sendOk(request, "key", key.c_str());
+}
+
+void handleUpdateCard(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(8192);
+    if (!readJson(request, doc)) return;
+    const std::string key = param(request, "key").c_str();
+    std::string name;
+    const bool hasName = doc["name"].is<const char*>();
+    if (hasName) name = doc["name"].as<const char*>();
+    if (!manager.updateCard(key, hasName ? &name : nullptr, settingsFrom(doc["settings"]))) {
+        return sendError(request, 404, "no such card");
+    }
+    sendOk(request);
+}
+
+void handleLayout(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(8192);
+    if (!readJson(request, doc)) return;
+    if (!doc.is<JsonArray>()) return sendError(request, 400, "send the list of card keys in their new order");
+    std::vector<std::string> keys;
+    for (JsonVariantConst item : doc.as<JsonArrayConst>()) keys.push_back(item.as<String>().c_str());
+    if (!manager.saveLayout(keys)) return sendError(request, 500, "could not save the cards");
+    sendOk(request);
+}
+
+void handleScreen(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    auto pixels = std::make_shared<std::vector<uint8_t>>();
+    int width = 0, height = 0;
+    // "since" is the version of the picture the page already has. Sending 63 KB
+    // it does not need, every second, would cost the card on screen its frame rate.
+    uint32_t frames = 0;
+    const bool hasSince = request->hasParam("since");
+    const uint32_t since = hasSince ? static_cast<uint32_t>(strtoul(param(request, "since").c_str(), nullptr, 10)) : 0;
+    if (!manager.copyCardPixels(param(request, "key").c_str(), *pixels, width, height, frames, hasSince ? &since : nullptr)) {
+        return sendError(request, 404, "that card is not on the device right now");
+    }
+    // A web page asks for the picture packed; the command line tool takes it as it is.
+    bool packed = false;
+    if (request->hasParam("packed") && !pixels->empty()) {
+        auto runs = std::make_shared<std::vector<uint8_t>>();
+        if (deskhog::packPixelRuns(*pixels, *runs)) {
+            pixels = runs;
+            packed = true;
+        }
+    }
+    if (pixels->empty()) {
+        AsyncWebServerResponse* unchanged = request->beginResponse(204);
+        addCors(unchanged);
+        unchanged->addHeader("X-Frames", String(frames));
+        request->send(unchanged);
+        return;
+    }
+    AsyncWebServerResponse* response = request->beginResponse(
+        "application/octet-stream", pixels->size(), [pixels](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+            if (index >= pixels->size()) return 0;
+            const size_t count = std::min(maxLen, pixels->size() - index);
+            memcpy(buffer, pixels->data() + index, count);
+            return count;
+        });
+    addCors(response);
+    response->addHeader("Cache-Control", "no-store");
+    response->addHeader("X-Width", String(width));
+    response->addHeader("X-Height", String(height));
+    response->addHeader("X-Frames", String(frames));
+    if (packed) response->addHeader("X-Packed", "runs");
+    request->send(response);
+}
+
+void handlePress(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    const String button = request->hasParam("button") ? param(request, "button") : String("center");
+    const int index = button == "down" ? 0 : button == "center" ? 1 : button == "up" ? 2 : -1;
+    if (index < 0) return sendError(request, 400, "button is up, center or down");
+    manager.press(param(request, "key").c_str(), static_cast<uint8_t>(index));
+    sendOk(request);
+}
+
+void handleShow(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    manager.show(param(request, "key").c_str());
+    sendOk(request);
+}
+
+// ------------------------------------------------------------- connections
+
+void handleAddConnection(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(8192);
+    if (!readJson(request, doc)) return;
+    String error;
+    const std::string id =
+        manager.createConnection(doc["plugin"] | "", doc["name"] | "", settingsFrom(doc["settings"]), error);
+    if (id.empty()) return sendError(request, 400, error);
+    sendOk(request, "id", id.c_str());
+}
+
+void handleUpdateConnection(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(8192);
+    if (!readJson(request, doc)) return;
+    std::string name;
+    const bool hasName = doc["name"].is<const char*>();
+    if (hasName) name = doc["name"].as<const char*>();
+    if (!manager.updateConnection(param(request, "id").c_str(), hasName ? &name : nullptr, settingsFrom(doc["settings"]))) {
+        return sendError(request, 404, "no such connection");
+    }
+    sendOk(request);
+}
+
+void handleRemoveConnection(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    if (!manager.removeConnection(param(request, "id").c_str())) return sendError(request, 404, "no such connection");
+    sendOk(request);
+}
+
+// ----------------------------------------------------------- plugin files
+
+void handlePluginList(AsyncWebServerRequest* request, PluginManager& manager) {
+    const std::map<std::string, PluginMeta> metas = manager.metas();
+    DynamicJsonDocument doc(8192);
+    JsonArray plugins = doc.createNestedArray("plugins");
+    for (const PluginInfo& info : manager.list()) {
+        JsonObject item = plugins.createNestedObject();
+        item["name"] = info.name;
+        item["size"] = info.size;
+        const auto meta = metas.find(info.name.c_str());
+        item["title"] = meta != metas.end() ? String(meta->second.title.c_str()) : info.name;
+        if (meta != metas.end() && !meta->second.error.empty()) item["error"] = meta->second.error.c_str();
+    }
+    storageToJson(doc.createNestedObject("storage"), manager);
+    systemToJson(doc.createNestedObject("system"), manager);
+    sendJson(request, 200, doc);
+}
+
+// How a plugin is doing, across all of its connections.
+void handlePluginStatus(AsyncWebServerRequest* request, PluginManager& manager, const String& name) {
+    const std::map<std::string, PluginMeta> metas = manager.metas();
+    const std::map<std::string, PluginConnectionState> states = manager.states();
+    const auto meta = metas.find(name.c_str());
+
+    DynamicJsonDocument doc(12288);
+    doc["name"] = name;
+    doc["title"] = meta != metas.end() ? String(meta->second.title.c_str()) : name;
+
+    String state = "no card";
+    String error = meta != metas.end() ? meta->second.error.c_str() : "";
+    size_t memory = 0;
+    uint32_t frames = 0;
+    bool onScreen = false;
+    JsonArray cards = doc.createNestedArray("cards");
+    for (const PluginConnectionRecord& record : manager.connections()) {
+        if (record.plugin != name.c_str()) continue;
+        const auto running = states.find(record.id);
+        if (running == states.end()) continue;
+        if (state != "failed") state = running->second.failed ? "failed" : "running";
+        if (running->second.failed) error = running->second.error.c_str();
+        memory += running->second.memory;
+        for (const auto& card : running->second.cards) {
+            frames += card.second.frames;
+            onScreen = onScreen || card.second.onScreen;
+            cards.add(String((record.id + ":" + card.first).c_str()));
+        }
+    }
+    if (error.length() && state == "no card") state = "failed";
+    doc["state"] = state;
+    doc["error"] = error;
+    doc["memory"] = memory;
+    doc["frames"] = frames;
+    doc["on_screen"] = onScreen;
+    JsonArray log = doc.createNestedArray("log");
+    for (const String& line : manager.logLines(name)) log.add(line);
+    sendJson(request, 200, doc);
+}
+
+void handlePlugins(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    const WebRequestMethodComposite method = request->method();
+
+    // Split "/api/plugins/<name>/<action>".
+    String rest = request->url().substring(strlen(kPluginsPrefix));
+    while (rest.startsWith("/")) rest = rest.substring(1);
+    while (rest.endsWith("/")) rest = rest.substring(0, rest.length() - 1);
+    String name = rest;
+    String action;
+    const int slash = rest.indexOf('/');
+    if (slash >= 0) {
+        name = rest.substring(0, slash);
+        action = rest.substring(slash + 1);
+    }
+    if (name.endsWith(".lua")) name = name.substring(0, name.length() - 4);  // so `curl -T weather.lua` just works
+
+    if (name.isEmpty()) {
+        if (method == HTTP_GET) return handlePluginList(request, manager);
+        return sendError(request, 405, "use /api/plugins/<name>");
+    }
+    if (!deskhog::isValidPluginName(std::string(name.c_str()))) {
+        return sendError(request, 400, "plugin names are 1-32 characters: a-z, 0-9, - and _");
+    }
+
+    if (action.isEmpty() && (method == HTTP_PUT || method == HTTP_POST)) {
+        const size_t length = request->contentLength();
+        if (length > PluginManager::MAX_SOURCE_BYTES) return sendError(request, 413, "the plugin is larger than 64 KB");
+        if (!request->_tempObject) {
+            return sendError(request, 400, "send the Lua source as the request body, labelled application/octet-stream");
+        }
+        String error;
+        if (!manager.writeSource(name, static_cast<const uint8_t*>(request->_tempObject), length, error)) {
+            return sendError(request, 400, error);
+        }
+        return sendOk(request, "name", name);
+    }
+
+    if (!manager.exists(name)) return sendError(request, 404, "no plugin named " + name);
+
+    if (action.isEmpty() && method == HTTP_GET) {
+        String source;
+        if (!manager.readSource(name, source)) return sendError(request, 500, "could not read the plugin");
+        AsyncWebServerResponse* response = request->beginResponse(200, "text/plain; charset=utf-8", source);
+        addCors(response);
+        response->addHeader("Cache-Control", "no-store");
+        return request->send(response);
+    }
+    if (action.isEmpty() && method == HTTP_DELETE) {
+        manager.remove(name);
+        return sendOk(request, "name", name);
+    }
+    if (action == "status" && method == HTTP_GET) return handlePluginStatus(request, manager, name);
+
+    sendError(request, 404, "unknown plugin API call");
+}
+
+}  // namespace
+
+void registerPluginRoutes(AsyncWebServer& server, PluginManager& manager) {
+    using Handler = void (*)(AsyncWebServerRequest*, PluginManager&);
+    const auto route = [&server, &manager](const char* uri, Handler handler) {
+        server.on(uri, HTTP_ANY, [&manager, handler](AsyncWebServerRequest* request) { handler(request, manager); },
+                  nullptr, collectBody);
+    };
+    route("/api/state", handleState);
+    route("/api/directory", handleDirectory);
+    route("/api/cards/add", handleAddCard);
+    route("/api/cards/update", handleUpdateCard);
+    route("/api/cards/layout", handleLayout);
+    route("/api/cards/screen", handleScreen);
+    route("/api/cards/press", handlePress);
+    route("/api/cards/show", handleShow);
+    route("/api/connections/add", handleAddConnection);
+    route("/api/connections/update", handleUpdateConnection);
+    route("/api/connections/remove", handleRemoveConnection);
+    route("/api/plugins*", handlePlugins);
+}

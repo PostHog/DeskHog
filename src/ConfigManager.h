@@ -79,58 +79,27 @@ public:
      */
     bool checkWiFiCredentialsAndPublish();
 
-    /**
-     * @brief Store team identifier
-     * @param teamId The team identifier to store
-     */
-    void setTeamId(int teamId);
+    // PostHog used to be built into the firmware, with its settings stored here.
+    // It is a plugin now. These remain only so that settings saved by older
+    // firmware can be moved over to the plugin once.
 
-    /**
-     * @brief Store region of the project
-     * @param region The region of the project
-     */
-    void setRegion(String region);
-
-        /**
-     * @brief Retrieve stored region of the project
-     * @return The region of the project
-     */
-    String getRegion();
-
-    /**
-     * @brief Retrieve stored team identifier
-     * @return The team ID or NO_TEAM_ID if not set
-     */
+    /** @return the PostHog project (team) ID older firmware saved, or NO_TEAM_ID */
     int getTeamId();
-
-    /**
-     * @brief Remove stored team identifier
-     */
-    void clearTeamId();
-
-    /**
-     * @brief Store API key
-     * @param apiKey The API key to store
-     * @return true if saved successfully, false otherwise
-     */
-    bool setApiKey(const String& apiKey);
-
-    /**
-     * @brief Retrieve stored API key
-     * @return The API key or empty string if not set
-     */
+    /** @return the PostHog region older firmware saved ("us" if none) */
+    String getRegion();
+    /** @return the PostHog API key older firmware saved, or "" */
     String getApiKey();
-
-    /**
-     * @brief Remove stored API key
-     */
-    void clearApiKey();
+    /** Forget the PostHog settings older firmware saved. */
+    void clearPostHogSettings();
 
 
     /**
      * @brief Get all configured cards from persistent storage
      * @return Vector of CardConfig objects representing enabled cards
      */
+    /** Where to look for plugins to install, if the user chose somewhere else than the default. */
+    String getPluginDirectory();
+    void setPluginDirectory(const String& source);
     std::vector<CardConfig> getCardConfigs();
 
     /**
@@ -141,16 +110,6 @@ public:
     bool saveCardConfigs(const std::vector<CardConfig>& configs);
 
 private:
-    
-    /**
-     * @brief Validates and updates the API configuration state
-     * 
-     * Checks if both team ID and API key are properly set in preferences.
-     * Updates the system state via SystemController to one of:
-     * - API_AWAITING_CONFIG: if either team ID or API key is missing
-     * - API_CONFIGURED: if both team ID and API key are properly set
-     */
-    void updateApiConfigurationState();
 
     /**
      * @brief Ensures preferences changes are persisted to flash
@@ -163,12 +122,10 @@ private:
 
     // Preferences instances for persistent storage
     Preferences _preferences;      ///< Main preferences storage instance
-    Preferences _insightsPrefs;   ///< Separate storage for insight data
     Preferences _cardPrefs;       ///< Separate storage for card configurations
 
     // Namespace constants for preferences organization
     const char* _namespace = "wifi_config";        ///< Namespace for WiFi and general config
-    const char* _insightsNamespace = "insights";   ///< Namespace for insight data
     const char* _cardNamespace = "cards";          ///< Namespace for card configurations
 
     // Storage keys for WiFi configuration
@@ -188,11 +145,8 @@ private:
     /** @brief Maximum length for WiFi password (per WPA2 spec) */
     static const size_t MAX_PASSWORD_LENGTH = 64;
     /** @brief Maximum length for insight configuration data */
-    static const size_t MAX_INSIGHT_LENGTH = 1024;
     /** @brief Maximum length for API key */
-    static const size_t MAX_API_KEY_LENGTH = 64;
     /** @brief Maximum length for insight identifier */
-    static const size_t MAX_INSIGHT_ID_LENGTH = 64;
 
     // Event system
     EventQueue* _eventQueue = nullptr;  ///< Optional event queue for state notifications

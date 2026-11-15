@@ -1,0 +1,6 @@
+{
+  "name": "plugin_core",
+  "version": "0.1.0",
+  "description": "The Lua plugin runtime for DeskHog. No Arduino or LVGL dependencies, so it also builds on a desktop.",
+  "dependencies": { "lua": "*" }
+}

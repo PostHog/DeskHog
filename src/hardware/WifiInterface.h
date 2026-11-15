@@ -130,6 +130,7 @@ private:
     
     // Flag to indicate we are connecting after portal submission
     bool _attemptingNewConnectionAfterPortal = false;
+    unsigned long _apStartedAt = 0;  ///< When the setup hotspot was last started, for retrying the saved network
     
     // WiFi event handlers
     static void onWiFiEvent(WiFiEvent_t event);

@@ -1,0 +1,27 @@
+name: Tests
+
+# Runs on every push and pull request, which is also what checks a plugin
+# someone proposes for the plugin directory (the plugins/ folder).
+
+permissions:
+  contents: read
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+    - name: The directory's index matches the plugins
+      run: python3 tools/deskhog index --check
+
+    - name: Plugin runtime tests (every plugin in plugins/ has to load)
+      run: test/native/run.sh
+
+    - name: Web page tests
+      run: test/portal/run.sh

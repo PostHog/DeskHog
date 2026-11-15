@@ -1,12 +1,16 @@
 #include "ProvisioningCard.h"
 #include "Style.h"
 #include "SystemController.h"
+#include "UICallback.h"
+#include "hardware/DisplayInterface.h"
+
+// Defined in main.cpp
+extern DisplayInterface* displayInterface;
 
 ProvisioningCard::ProvisioningCard(lv_obj_t* parent, WiFiInterface& wifiInterface, uint16_t width, uint16_t height)
     : _parent(parent), _wifiInterface(wifiInterface), _width(width), _height(height),
     _card(nullptr), _qrScreen(nullptr), _statusScreen(nullptr),
     _qrCode(nullptr), _ssidLabel(nullptr), _statusLabel(nullptr), _ipLabel(nullptr), _signalLabel(nullptr), _versionLabel(nullptr),
-    _apiStatusLabel(nullptr),
     _topLeftVersionLabel(nullptr) {
     
     createCard();
@@ -76,48 +80,28 @@ void ProvisioningCard::updateSignalStrength(int strength) {
 }
 
 void ProvisioningCard::showQRCode() {
-    const String& ssid = _wifiInterface.getSSID();
+    const String ssid = _wifiInterface.getSSID();
     const String qrData = generateQRCodeData(ssid, "");
-    
-    // Create struct for callback data
-    struct QRUpdateData {
-        lv_obj_t* show_screen;
-        lv_obj_t* hide_screen;
-        lv_obj_t* qr_code;
-        String qr_data;
-        lv_obj_t* ssid_label;
-        String ssid_text;
-        
-        QRUpdateData(lv_obj_t* s, lv_obj_t* h, lv_obj_t* q, const String& d, lv_obj_t* sl, const String& st) 
-            : show_screen(s), hide_screen(h), qr_code(q), qr_data(d), ssid_label(sl), ssid_text(st) {}
-    };
-    
-    auto* data = new QRUpdateData(_qrScreen, _statusScreen, _qrCode, qrData, _ssidLabel, "SSID: " + ssid);
-    
-    lv_timer_t* timer = lv_timer_create([](lv_timer_t* timer) {
-        auto* params = static_cast<QRUpdateData*>(lv_timer_get_user_data(timer));
-        if (params) {
-            // Update screen visibility
-            if (params->show_screen && lv_obj_is_valid(params->show_screen)) {
-                lv_obj_clear_flag(params->show_screen, LV_OBJ_FLAG_HIDDEN);
-            }
-            if (params->hide_screen && lv_obj_is_valid(params->hide_screen)) {
-                lv_obj_add_flag(params->hide_screen, LV_OBJ_FLAG_HIDDEN);
-            }
-            
-            // Update QR code
-            if (params->qr_code && lv_obj_is_valid(params->qr_code)) {
-                lv_qrcode_update(params->qr_code, params->qr_data.c_str(), params->qr_data.length());
-            }
+    const String ssidText = "SSID: " + ssid;
+    lv_obj_t* showScreen = _qrScreen;
+    lv_obj_t* hideScreen = _statusScreen;
+    lv_obj_t* qrCode = _qrCode;
+    lv_obj_t* ssidLabel = _ssidLabel;
 
-            // Update SSID label
-            if (params->ssid_label && lv_obj_is_valid(params->ssid_label)) {
-                lv_label_set_text(params->ssid_label, params->ssid_text.c_str());
-            }
+    runOnUiTask([showScreen, hideScreen, qrCode, ssidLabel, qrData, ssidText]() {
+        if (showScreen && lv_obj_is_valid(showScreen)) {
+            lv_obj_clear_flag(showScreen, LV_OBJ_FLAG_HIDDEN);
         }
-        delete params;
-        lv_timer_del(timer);
-    }, 0, data);
+        if (hideScreen && lv_obj_is_valid(hideScreen)) {
+            lv_obj_add_flag(hideScreen, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (qrCode && lv_obj_is_valid(qrCode)) {
+            lv_qrcode_update(qrCode, qrData.c_str(), qrData.length());
+        }
+        if (ssidLabel && lv_obj_is_valid(ssidLabel)) {
+            lv_label_set_text(ssidLabel, ssidText.c_str());
+        }
+    });
 }
 
 void ProvisioningCard::showWiFiStatus() {
@@ -195,11 +179,9 @@ void ProvisioningCard::createStatusScreen() {
     createTableRow(table, "IP", &_ipLabel, Style::labelColor());
     createTableRow(table, "Signal", &_signalLabel, Style::labelColor());
     createTableRow(table, "Version", &_versionLabel, Style::labelColor());
-    createTableRow(table, "API", &_apiStatusLabel, Style::labelColor()); // As per your reordering
     
     // Set initial values (some will be updated by handleSystemStateChange or other methods)
     lv_label_set_text(_statusLabel, "Initializing..."); 
-    lv_label_set_text(_apiStatusLabel, "..."); 
     lv_label_set_text(_ipLabel, "");
     lv_label_set_text(_signalLabel, "0%");
     lv_label_set_text(_versionLabel, CURRENT_FIRMWARE_VERSION);
@@ -257,36 +239,39 @@ String ProvisioningCard::escapeString(const String& input) {
     return result;
 }
 
+// This card is updated from the WiFi task and the event task, but LVGL may only
+// be touched from the UI task or under its mutex. So every update is handed to
+// the UI task, which runs it holding the mutex.
+//
+// (These used to create an LVGL timer from whatever task they were on. That
+// allocates from LVGL's heap with no lock, and it crashed the device when it
+// raced with the UI task drawing.)
+void ProvisioningCard::runOnUiTask(std::function<void()> work) {
+    if (!globalUIDispatch) return;
+    globalUIDispatch([work]() {
+        if (!displayInterface || !displayInterface->takeMutex(pdMS_TO_TICKS(500))) return;
+        work();
+        displayInterface->giveMutex();
+    }, false);
+}
+
 void ProvisioningCard::safeUpdateLabel(lv_obj_t* label, const String& text) {
-    // Make a copy of the string for the callback
-    auto* callback = new std::pair<lv_obj_t*, String>(label, text);
-    
-    lv_timer_t* timer = lv_timer_create([](lv_timer_t* timer) {
-        auto* params = static_cast<std::pair<lv_obj_t*, String>*>(lv_timer_get_user_data(timer));
-        if (params && params->first && lv_obj_is_valid(params->first)) {
-            lv_label_set_text(params->first, params->second.c_str());
+    runOnUiTask([label, text]() {
+        if (label && lv_obj_is_valid(label)) {
+            lv_label_set_text(label, text.c_str());
         }
-        delete params;
-        lv_timer_del(timer);
-    }, 0, callback);
+    });
 }
 
 void ProvisioningCard::toggleScreens(lv_obj_t* showScreen, lv_obj_t* hideScreen) {
-    auto* screens = new std::pair<lv_obj_t*, lv_obj_t*>(showScreen, hideScreen);
-    
-    lv_timer_t* timer = lv_timer_create([](lv_timer_t* timer) {
-        auto* params = static_cast<std::pair<lv_obj_t*, lv_obj_t*>*>(lv_timer_get_user_data(timer));
-        if (params) {
-            if (params->first && lv_obj_is_valid(params->first)) {
-                lv_obj_clear_flag(params->first, LV_OBJ_FLAG_HIDDEN);
-            }
-            if (params->second && lv_obj_is_valid(params->second)) {
-                lv_obj_add_flag(params->second, LV_OBJ_FLAG_HIDDEN);
-            }
+    runOnUiTask([showScreen, hideScreen]() {
+        if (showScreen && lv_obj_is_valid(showScreen)) {
+            lv_obj_clear_flag(showScreen, LV_OBJ_FLAG_HIDDEN);
         }
-        delete params;
-        lv_timer_del(timer);
-    }, 0, screens);
+        if (hideScreen && lv_obj_is_valid(hideScreen)) {
+            lv_obj_add_flag(hideScreen, LV_OBJ_FLAG_HIDDEN);
+        }
+    });
 }
 
 lv_obj_t* ProvisioningCard::getCard() const {
@@ -295,11 +280,6 @@ lv_obj_t* ProvisioningCard::getCard() const {
 
 // Implementation for SystemController integration
 void ProvisioningCard::handleSystemStateChange(const ControllerState& newState) {
-    // Update API Status label
-    if (_apiStatusLabel && lv_obj_is_valid(_apiStatusLabel)) {
-        safeUpdateLabel(_apiStatusLabel, apiStateToString(newState.api_state));
-    }
-
     // Update WiFi Status label (SSID if connected, otherwise relies on updateConnectionStatus)
     if (_statusLabel && lv_obj_is_valid(_statusLabel)) {
         if (newState.wifi_state == WifiState::CONNECTED) {
@@ -308,20 +288,5 @@ void ProvisioningCard::handleSystemStateChange(const ControllerState& newState) 
         // If not connected, updateConnectionStatus() is expected to be called externally 
         // with a more specific status (e.g., "Connecting...", "Failed", "Disconnected").
         // So, we don't set a generic "Disconnected" here to avoid overwriting specific statuses.
-    }
-}
-
-String ProvisioningCard::apiStateToString(ApiState state) {
-    switch (state) {
-        case ApiState::API_NONE:
-            return "Not Set"; // Changed from "Not Configured" for brevity if needed
-        case ApiState::API_AWAITING_CONFIG:
-            return "Awaiting"; // Changed from "Awaiting Config"
-        case ApiState::API_CONFIG_INVALID:
-            return "Invalid";  // Changed from "Invalid Config"
-        case ApiState::API_CONFIGURED:
-            return "Configured";
-        default:
-            return "Unknown"; // Changed from "Unknown API State"
     }
 }

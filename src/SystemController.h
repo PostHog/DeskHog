@@ -8,26 +8,6 @@
 // Use the WiFiInterface's state enum
 using WifiState = WiFiState;
 
-/**
- * @enum ApiState
- * @brief Represents the current state of API configuration
- */
-enum class ApiState {
-    API_NONE,            ///< No API configuration attempted
-    API_AWAITING_CONFIG, ///< Waiting for API configuration
-    API_CONFIG_INVALID,  ///< API configuration is invalid
-    API_CONFIGURED      ///< API is properly configured
-};
-
-/**
- * @enum AuthState
- * @brief Represents the current authentication state
- */
-enum class AuthState {
-    AUTH_NONE,           ///< No authentication attempted
-    AUTH_AWAITING_LOGIN, ///< Waiting for user login
-    AUTH_CONFIRMED      ///< Authentication confirmed
-};
 
 /**
  * @enum SystemState
@@ -35,9 +15,7 @@ enum class AuthState {
  */
 enum class SystemState {
     SYS_BOOTING,         ///< System is initializing
-    SYS_READY,           ///< System is ready for operation
-    SYS_IDLE,            ///< System is in idle state
-    SYS_INSIGHTS_CHANGED ///< Insight configuration has changed
+    SYS_READY            ///< System is ready for operation
 };
 
 /**
@@ -46,8 +24,6 @@ enum class SystemState {
  */
 struct ControllerState {
     WifiState wifi_state;    ///< Current WiFi connection state
-    ApiState api_state;      ///< Current API configuration state
-    AuthState auth_state;    ///< Current authentication state
     SystemState sys_state;   ///< Current system state
 };
 
@@ -64,8 +40,7 @@ typedef std::function<void(const ControllerState&)> StateChangeCallback;
  * @class SystemController
  * @brief Singleton controller managing overall system state
  * 
- * Coordinates system components and maintains state information about WiFi,
- * API configuration, authentication, and system readiness. Provides a 
+ * Keeps track of the WiFi state and whether the device has finished starting. Provides a 
  * callback mechanism for state change notifications.
  * 
  * State changes are logged to Serial for debugging purposes.
@@ -81,7 +56,6 @@ private:
      * 
      * Initializes state to:
      * - WiFi: DISCONNECTED
-     * - API: API_NONE
      * - Auth: AUTH_NONE
      * - System: SYS_BOOTING
      */
@@ -128,18 +102,6 @@ public:
     static WifiState getWifiState();
 
     /**
-     * @brief Get current API state
-     * @return Current API state
-     */
-    static ApiState getApiState();
-
-    /**
-     * @brief Get current authentication state
-     * @return Current authentication state
-     */
-    static AuthState getAuthState();
-
-    /**
      * @brief Get current system state
      * @return Current system state
      */
@@ -150,22 +112,6 @@ public:
      * @return Structure containing all state components
      */
     static ControllerState getFullState();
-    
-    /**
-     * @brief Set API configuration state
-     * @param new_state New API state
-     * 
-     * Only triggers notifications if state actually changes
-     */
-    static void setApiState(ApiState new_state);
-
-    /**
-     * @brief Set authentication state
-     * @param new_state New authentication state
-     * 
-     * Only triggers notifications if state actually changes
-     */
-    static void setAuthState(AuthState new_state);
 
     /**
      * @brief Set system state
@@ -184,19 +130,4 @@ public:
      */
     static void onStateChange(StateChangeCallback callback);
 
-    /**
-     * @brief Remove all registered callbacks
-     */
-    static void removeAllCallbacks();
-    
-    /**
-     * @brief Check if system is fully initialized and ready
-     * @return true if system is ready, false otherwise
-     * 
-     * System is considered ready when:
-     * - WiFi is CONNECTED
-     * - API is CONFIGURED
-     * - System state is READY, IDLE, or INSIGHTS_CHANGED
-     */
-    static bool isSystemFullyReady();
 };  
