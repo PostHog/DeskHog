@@ -228,6 +228,11 @@ function makeDevice() {
             if (!plugin) {
                 plugin = { name, multiCard: false, config: [], kinds: [{ key: 'main', name, config: [] }] };
                 device.plugins.push(plugin);
+                // As the firmware does: a plugin nothing shows yet gets a first card, unless asked not to.
+                if (params.get('card') !== 'no') {
+                    device.connections.push({ id: name, plugin: name, name, settings: {}, secretsSet: [], state: 'running' });
+                    device.cards.push({ type: 'PLUGIN', config: name + ':1', name, plugin: name, connection: name, card: '1', kind: 'main', settings: {}, frames: 0, onScreen: false });
+                }
             }
             // As the firmware does: read the plugin's own description of itself.
             const title = /name\s*=\s*"([^"]*)"/.exec(source);

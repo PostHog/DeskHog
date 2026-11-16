@@ -193,9 +193,12 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         // Remove every plugin card. A running plugin keeps its state for a
         // moment without cards (see PluginConnection), so this does not restart it.
         for (PluginCard* card : pluginCards) {
-            // The stack deletes the LVGL object; tell the card not to do it again.
+            // The stack deletes the LVGL object and forgets the card's input
+            // handler; the card is told not to delete the object again. Ask
+            // for the object first: afterwards the card no longer has it.
+            lv_obj_t* object = card->getCard();
             card->prepareForRemoval();
-            cardStack->removeCard(card->getCard());
+            if (object) cardStack->removeCard(object);
             delete card;
         }
         pluginCards.clear();

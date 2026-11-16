@@ -163,8 +163,14 @@ public:
     std::vector<PluginInfo> list();
     bool exists(const String& name);
     bool readSource(const String& name, String& out);
-    /** Save a plugin and restart everything that runs it. */
-    bool writeSource(const String& name, const uint8_t* data, size_t length, String& error);
+    /**
+     * Save a plugin and restart everything that runs it.
+     * @param addFirstCard If nothing shows the plugin yet, add a card for it, so
+     *                     whoever is writing it sees it run. Installing from a
+     *                     plugin directory passes false: there the person adds
+     *                     the cards they want, with the settings they want.
+     */
+    bool writeSource(const String& name, const uint8_t* data, size_t length, String& error, bool addFirstCard = true);
     /** Remove a plugin with its connections and cards. */
     bool remove(const String& name);
     std::map<std::string, PluginMeta> metas();
@@ -246,7 +252,7 @@ private:
     struct Command {
         CommandKind kind;
         std::string target;
-        uint8_t button = 0;
+        uint8_t button = 0;  ///< For Press: which button. For PluginChanged: 1 to add a first card.
     };
 
     static void httpTaskEntry(void* arg);

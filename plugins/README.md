@@ -13,9 +13,23 @@ folder is also the plugin directory: what the device's web page offers under
 | [flappy.lua](flappy.lua) | A game: per-frame updates, free drawing, saved high score |
 | [webhook.lua](webhook.lua) | A button that calls a URL and lights the LED |
 | [clock.lua](clock.lua) | The time: working with `time.now()`, repainting only when something changed |
+| [pomodoro.lua](pomodoro.lua) | A timer that keeps going while another card is on screen |
+| [pet.lua](pet.lua) | State that survives restarts, and catching up on the time the device was off |
+| [snake.lua](snake.lua), [breakout.lua](breakout.lua) | Games that draw a lot with few calls |
+| [github.lua](github.lua) | Two requests per card, an optional token, the LED as an alarm |
+| [trains.lua](trains.lua) | A list that counts down between answers |
+| [homeassistant.lua](homeassistant.lua) | Reading and controlling something on your own network |
 | [friend.lua](friend.lua) | Max the hedgehog: images and animation |
 | [question.lua](question.lua) | Icebreaker questions: wrapping text, and scrolling what does not fit |
 | [paddle.lua](paddle.lua) | A game with held buttons, that gives the buttons back when it is paused |
+| [rps.lua](rps.lua), [whack.lua](whack.lua) | Games made for three buttons: one button per choice |
+| [trivia.lua](trivia.lua) | A quiz: fetching a batch once and playing from it, leaving out what does not fit |
+| [lander.lua](lander.lua), [runner.lua](runner.lua) | Simple physics, and a button that works pressed and held |
+| [blocks.lua](blocks.lua) | A grid game that shows its chain reactions a step at a time |
+
+The rest of the folder is there to be used rather than studied: countdown, crypto
+prices, dad jokes, a deploy button, Homey, theme park queues, rain, a reaction timer,
+Simon, the space station and rocket launches, a starfield and an uptime check.
 
 ## Five-minute start
 
@@ -187,7 +201,7 @@ For cards that show data. Call these in any order and the device arranges them.
 |---|---|
 | `ui.title(text, [color])` | Small text in the top left |
 | `ui.big(text, [color])` | The main value, large and centred. It shrinks to fit |
-| `ui.label(text, [color])` | A line of small text under the value. Use several for more lines |
+| `ui.label(text, [color])` | Small text under the value. Text too wide for the card continues on the next line. Use several for separate lines |
 | `ui.chart(values, [color])` | A line chart along the bottom, from a list of numbers |
 
 ### `gfx`: draw it yourself
@@ -368,7 +382,8 @@ you can script it.
 ```
 GET    /api/plugins                     plugin files, storage use and headroom
 GET    /api/plugins/<name>              the source
-PUT    /api/plugins/<name>              install or replace (body: the Lua source)
+PUT    /api/plugins/<name>              install or replace (body: the Lua source). A plugin that no card shows yet
+                                        gets a first card, so you see it run; add ?card=no to only install it
 DELETE /api/plugins/<name>              remove the plugin with its connections and cards
 GET    /api/plugins/<name>/status       how it is running, last error, print() output
 

@@ -469,7 +469,9 @@ void handlePlugins(AsyncWebServerRequest* request, PluginManager& manager) {
             return sendError(request, 400, "send the Lua source as the request body, labelled application/octet-stream");
         }
         String error;
-        if (!manager.writeSource(name, static_cast<const uint8_t*>(request->_tempObject), length, error)) {
+        // "?card=no": just install it. Otherwise a plugin that no card shows yet gets a first card.
+        const bool addFirstCard = !(request->hasParam("card") && param(request, "card") == "no");
+        if (!manager.writeSource(name, static_cast<const uint8_t*>(request->_tempObject), length, error, addFirstCard)) {
             return sendError(request, 400, error);
         }
         return sendOk(request, "name", name);

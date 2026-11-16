@@ -641,7 +641,7 @@ def command_install(device, args):
         data = fetch(urllib.parse.urljoin(address, entry["file"]))
         if entry.get("sha256") and hashlib.sha256(data).hexdigest() != entry["sha256"]:
             raise DeviceError("%s is not the file the directory's index describes; not installing it" % entry["file"])
-        device.json("PUT", device.plugin_path(name), data, "application/octet-stream")
+        device.json("PUT", device.plugin_path(name) + "?card=no", data, "application/octet-stream")
         print("Installed %s %s" % (entry.get("title", name), entry.get("version", "")))
         cards = [card for card in device.state()["cards"] if card.get("plugin") == name]
         if not cards:

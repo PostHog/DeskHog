@@ -633,12 +633,13 @@ void PluginManager::runCommand(const Command& command) {
             Locked locked(lock_);
             for (const auto& pair : records_) anyRecord = anyRecord || pair.second.plugin == command.target;
         }
-        if (!anyRecord) {
+        if (!anyRecord && command.button) {
             // Nothing shows this plugin yet: give whoever pushed it a card to look at.
             String error;
             addCard(command.target, "", "", PluginSettings(), "", "", PluginSettings(), error);
             return;
         }
+        if (!anyRecord) return;  // installed, but no card asks for it yet
     }
 
     if (!display_ || !display_->takeMutex(portMAX_DELAY)) return;
@@ -1202,7 +1203,7 @@ bool PluginManager::readSource(const String& name, String& out) {
     return readFile(sourcePath(name), out, MAX_SOURCE_BYTES);
 }
 
-bool PluginManager::writeSource(const String& name, const uint8_t* data, size_t length, String& error) {
+bool PluginManager::writeSource(const String& name, const uint8_t* data, size_t length, String& error, bool addFirstCard) {
     if (!storageReady_) {
         error = "plugin storage is not available";
         return false;
@@ -1227,7 +1228,7 @@ bool PluginManager::writeSource(const String& name, const uint8_t* data, size_t 
         Locked locked(lock_);
         logs_.erase(name.c_str());
     }
-    queue(CommandKind::PluginChanged, name.c_str());
+    queue(CommandKind::PluginChanged, name.c_str(), addFirstCard ? 1 : 0);
     return true;
 }
 

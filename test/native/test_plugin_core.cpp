@@ -172,6 +172,23 @@ TEST(exposes_screen_size_and_text_metrics) {
     CHECK(f.gfx.drew("233x135 24 44"));
 }
 
+TEST(ui_labels_wrap) {
+    Fixture f;
+    // The fake small font is 8 pixels a character: 27 characters fit the card.
+    CHECK(f.start(R"(
+        function draw()
+          ui.title("Status")
+          ui.label("Set the address and the token under Connections", "orange")
+          ui.label("Short one")
+        end
+    )"));
+    f.draw();
+    CHECK(f.gfx.drew("small center Set the address and the"));
+    CHECK(f.gfx.drew("small center token under Connections"));
+    CHECK(f.gfx.drew("small center Short one"));
+    CHECK(!f.plugin.failed());
+}
+
 TEST(wraps_text_to_a_width) {
     Fixture f;
     // The fake small font is 8 pixels a character, so 80 pixels holds ten.
@@ -1677,7 +1694,7 @@ TEST(posthog_explains_what_is_wrong) {
     PostHog noKey("AbC123xy", {{"project", "12345"}});
     CHECK_EQ(noKey.f.services.requests.size(), (size_t)0);
     noKey.f.draw();
-    CHECK(noKey.f.gfx.drew("Add your project ID and API key"));
+    CHECK(noKey.f.gfx.drew("Add your project ID"));
 
     PostHog noId("");
     CHECK_EQ(noId.f.services.requests.size(), (size_t)0);
@@ -1692,7 +1709,7 @@ TEST(posthog_explains_what_is_wrong) {
     PostHog missing;
     missing.answer(0, "posthog-missing");
     missing.f.draw();
-    CHECK(missing.f.gfx.drew("No insight with the ID AbC123xy"));
+    CHECK(missing.f.gfx.drew("No insight with the ID"));
 
     PostHog offline;
     offline.f.respond(0, 0, "", "no WiFi");
@@ -1804,6 +1821,716 @@ TEST(sample_clock) {
     CHECK(unset.gfx.drew("Waiting for the time"));
 }
 
+// ------------------------------------------------- more plugins in plugins/
+
+bool hasHeader(const HttpRequest& request, const std::string& name, const std::string& value) {
+    for (const auto& header : request.headers) {
+        if (header.first == name && header.second == value) return true;
+    }
+    return false;
+}
+
+/** Let `seconds` pass in steps, with the card on screen or not. */
+void pass(Fixture& f, float seconds, bool visible = true) {
+    for (int i = 0; i < (int)(seconds * 10); i++) {
+        f.services.now += 100;
+        f.tick(f.services.now, visible);
+    }
+}
+
+/** Start a plugin with one card of a given kind (instead of its first kind). */
+bool startKind(Fixture& f, const std::string& name, const std::string& kind, const LuaPlugin::Settings& settings = {},
+               const LuaPlugin::Settings& cardSettings = {}) {
+    const std::string source = readFile(g_pluginDir + "/" + name + ".lua");
+    f.plugin.start(name, source.data(), source.size(), settings);
+    f.plugin.addCard("1", kind, cardSettings, f.gfx);
+    return !f.plugin.failed();
+}
+
+TEST(sample_pomodoro) {
+    Fixture f;
+    CHECK(f.startFile("pomodoro", {{"focus", "1"}, {"rest", "2"}}));
+    f.draw();
+    CHECK(f.gfx.drew("large center 1:00"));
+    CHECK_EQ(f.button(Button::Up), false);      // nothing to start over: up switches cards
+    CHECK_EQ(f.button(Button::Center), true);   // start
+    CHECK_EQ(f.services.led, "#e74c3c");        // red: focusing
+    pass(f, 30);
+    f.draw();
+    CHECK(f.gfx.drew("Focus, round 1 of 4"));
+    CHECK(f.gfx.drew("large center 0:30"));
+
+    CHECK_EQ(f.button(Button::Center), true);   // pause
+    CHECK_EQ(f.services.led, "default");
+    pass(f, 20);
+    f.draw();
+    CHECK(f.gfx.drew("large center 0:30"));     // time stands still
+    CHECK_EQ(f.button(Button::Center), true);   // carry on
+
+    // The break starts by itself, also while another card is on screen.
+    pass(f, 40, false);
+    CHECK_EQ(f.services.led, "#2ecc71");
+    f.draw();
+    CHECK(f.gfx.drew("small left Break"));
+    pass(f, 125, false);
+    CHECK_EQ(f.services.led, "default");
+    f.draw();
+    CHECK(f.gfx.drew("Break is over. Centre for"));
+
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Center), true);   // paused
+    CHECK_EQ(f.button(Button::Up), true);       // start over
+    f.draw();
+    CHECK(f.gfx.drew("Centre to start"));
+    CHECK(!f.plugin.failed());
+}
+
+TEST(sample_pet) {
+    Fixture f;  // the fake clock says 09:46 UTC: he is awake
+    CHECK(f.startFile("pet"));
+    f.draw();
+    CHECK(f.gfx.drew("medium left Max"));
+    CHECK(f.gfx.drew("Feeling fine"));
+    CHECK(f.services.stored.count("pet") == 1);
+
+    // Five hours later he is hungry, and says so with the LED.
+    f.services.epoch += 5 * 3600;
+    pass(f, 61, false);
+    CHECK_EQ(f.services.led, "#e67e22");
+    f.draw();
+    CHECK(f.gfx.drew("I'm hungry"));
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("Nom nom nom"));
+    pass(f, 3);
+    f.draw();
+    CHECK(f.gfx.drew("Play with me"));          // fed, but still bored
+    CHECK_EQ(f.button(Button::Center), true);
+    pass(f, 3);
+    f.draw();
+    CHECK(f.gfx.drew("Feeling fine"));
+    CHECK_EQ(f.button(Button::Up), false);
+
+    // What he was like is remembered across a restart, and he sleeps at night.
+    Fixture later;
+    later.services.stored = f.services.stored;
+    later.services.epoch = f.services.epoch + 8 * 3600;  // 22:46
+    CHECK(later.startFile("pet", {{"name", "Spike"}}));
+    later.draw();
+    CHECK(later.gfx.drew("medium left Spike"));
+    CHECK(later.gfx.drew("Zzz..."));
+    CHECK_EQ(later.button(Button::Center), true);
+    later.draw();
+    CHECK(later.gfx.drew("Shh. He's asleep"));
+    CHECK(!later.plugin.failed());
+
+    Fixture garbage;  // saved data that is not what we expect is started afresh
+    garbage.services.stored["pet"] = "\"oops\"";
+    CHECK(garbage.startFile("pet"));
+    garbage.draw();
+    CHECK(garbage.gfx.drew("Feeling fine"));
+}
+
+TEST(sample_snake) {
+    Fixture f;
+    f.services.stored["best"] = "7";
+    CHECK(f.startFile("snake"));
+    f.draw();
+    CHECK(f.gfx.drew("loud center SNAKE"));
+    CHECK_EQ(f.button(Button::Up), false);      // no game on: up and down switch cards
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Up), true);       // now they steer
+    f.runFrames(1.0f);
+    CHECK_EQ(f.button(Button::Center), true);   // pause
+    f.draw();
+    CHECK(f.gfx.drew("Paused"));
+    CHECK_EQ(f.button(Button::Down), false);
+
+    // Ten minutes of steering at random, starting again after every bite.
+    for (int frame = 0; frame < 18000 && !f.plugin.failed(); frame++) {
+        if (frame % 23 == 0) f.button(frame % 3 == 0 ? Button::Up : Button::Down);
+        if (frame % 301 == 0) f.button(Button::Center);
+        f.services.now += 33;
+        f.tick(f.services.now, true);
+        if (f.needsDraw()) f.draw();
+    }
+    CHECK(!f.plugin.failed());
+    CHECK(f.plugin.memoryUsed() < 96 * 1024);
+}
+
+TEST(sample_breakout) {
+    Fixture f;
+    CHECK(f.startFile("breakout"));
+    f.draw();
+    CHECK(f.gfx.drew("loud center BREAKOUT"));
+    CHECK_EQ(f.button(Button::Down), false);
+    CHECK_EQ(f.button(Button::Center), true);   // a new game: the ball waits on the bat
+    f.draw();
+    CHECK(f.gfx.drew("Centre to serve"));
+    CHECK(f.gfx.drew("rect 4,18 225x7 #e74c3c r0"));  // a whole row of bricks is one rectangle
+    f.services.held[(int)Button::Up] = true;
+    f.runFrames(1.5f);
+    f.services.held[(int)Button::Up] = false;
+    CHECK(f.gfx.drew("rect 0,127 38x4 #ffffff r2"));  // held up: the bat is at the left edge
+    CHECK_EQ(f.button(Button::Center), true);   // serve
+
+    for (int frame = 0; frame < 18000 && !f.plugin.failed(); frame++) {
+        f.services.held[(int)Button::Up] = (frame / 40) % 3 == 0;
+        f.services.held[(int)Button::Down] = (frame / 40) % 3 == 1;
+        if (frame % 211 == 0) f.button(Button::Center);
+        f.services.now += 33;
+        f.tick(f.services.now, true);
+        if (f.needsDraw()) f.draw();
+    }
+    CHECK(!f.plugin.failed());
+    CHECK(f.plugin.memoryUsed() < 96 * 1024);
+}
+
+TEST(sample_reaction) {
+    Fixture f;
+    CHECK(f.startFile("reaction"));
+    f.draw();
+    CHECK(f.gfx.drew("Ready?"));
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.services.led, "#e74c3c");
+    pass(f, 0.3f);
+    f.draw();
+    CHECK(f.gfx.drew("Wait for green"));
+    for (int i = 0; i < 60 && f.services.led != "#2ecc71"; i++) pass(f, 0.1f);  // green within five seconds
+    CHECK_EQ(f.services.led, "#2ecc71");
+    f.draw();
+    CHECK(f.gfx.drew("NOW!"));
+    f.services.now += 250;
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("large center 250 ms"));
+    CHECK_EQ(f.services.stored["best"], "250");
+    CHECK_EQ(f.services.led, "default");
+
+    CHECK_EQ(f.button(Button::Center), true);   // again, but too eager this time
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("Too soon"));
+    CHECK_EQ(f.services.stored["best"], "250");
+    CHECK_EQ(f.button(Button::Down), false);
+}
+
+TEST(sample_simon) {
+    Fixture f;
+    CHECK(f.startFile("simon"));
+    f.draw();
+    CHECK(f.gfx.drew("loud center SIMON"));
+    CHECK_EQ(f.button(Button::Down), false);
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Down), true);     // while it shows the pattern, presses are swallowed
+    f.runFrames(3.0f);
+    f.draw();
+    CHECK(f.gfx.drew("Your turn"));
+    // Play for a while by guessing. Right or wrong, it must carry on.
+    for (int i = 0; i < 400 && !f.plugin.failed(); i++) {
+        f.button((Button)(i % 3));
+        f.runFrames(0.5f);
+    }
+    CHECK(!f.plugin.failed());
+    CHECK(f.services.stored.count("best") == 1 || f.gfx.drew("Round"));
+}
+
+TEST(sample_countdown) {
+    // The fake clock says Saturday 15 November 2025, 09:46:40 UTC.
+    struct Case { const char* date; const char* time; const char* offset; const char* expect; };
+    const Case cases[] = {
+        {"2025-12-25", "", "0", "large center 39 days"},
+        {"2025-11-15", "", "0", "Today!"},
+        {"2025-11-16", "", "15", "Today!"},              // fifteen hours ahead it is already tomorrow
+        {"2025-11-16", "9:00", "0", "23h 13m"},
+        {"2025-11-15", "10:00", "0", "13:20"},
+        {"2025-11-15", "9:00", "0", "Today!"},           // earlier today
+        {"2025-11-10", "", "0", "5 days ago"},
+        {"2025-11-14", "", "0", "1 day ago"},
+        {"2100-01-01", "", "0", " days"},                // far beyond what a 32-bit clock counts in seconds
+        {"next week", "", "0", "Write the date as"},
+        {"2025-13-01", "", "0", "Write the date as"},
+    };
+    for (const Case& c : cases) {
+        Fixture f;
+        CHECK(f.startFile("countdown", {{"offset", c.offset}}, {{"what", "Launch"}, {"date", c.date}, {"time", c.time}}));
+        f.draw();
+        if (!f.gfx.drew(c.expect)) printf("  %s %s +%s: expected %s, drew\n%s", c.date, c.time, c.offset, c.expect, f.gfx.dump().c_str());
+        CHECK(f.gfx.drew(c.expect));
+        CHECK(f.gfx.drew("small left Launch"));
+        CHECK(!f.plugin.failed());
+    }
+    Fixture f;
+    CHECK(f.startFile("countdown", {}, {{"what", "Christmas"}, {"date", "2025-12-25"}}));
+    CHECK_EQ(f.plugin.cardTitle("1"), "Christmas");
+    f.draw();
+    CHECK(f.gfx.drew("25 December 2025"));
+    pass(f, 3);
+    f.draw();
+    pass(f, 3);
+    CHECK(!f.needsDraw());  // nothing changed: no repaint
+}
+
+TEST(sample_starfield) {
+    Fixture f;
+    CHECK(f.startFile("starfield"));
+    f.runFrames(5.0f);
+    CHECK(f.gfx.calls.size() > 10);
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Up), false);
+    f.runFrames(20.0f);
+    CHECK(!f.plugin.failed());
+}
+
+TEST(sample_github) {
+    Fixture none;
+    CHECK(none.startFile("github"));
+    none.draw();
+    CHECK(none.gfx.drew("Give the repository as"));
+    CHECK_EQ(none.services.requests.size(), (size_t)0);
+
+    Fixture f;
+    CHECK(f.startFile("github", {{"token", "ghp_x"}}, {{"repo", "acme/app"}}));
+    CHECK_EQ(f.plugin.cardTitle("1"), "app");
+    CHECK_EQ(f.services.requests.size(), (size_t)2);
+    const HttpRequest& runs = f.services.requests[0].request;
+    CHECK(contains(runs.url, "https://api.github.com/repos/acme/app/actions/runs?"));
+    CHECK(contains(runs.url, "branch=main"));
+    CHECK(hasHeader(runs, "Authorization", "Bearer ghp_x"));
+    CHECK(contains(f.services.requests[1].request.url, "q=repo:acme/app+type:pr+state:open"));
+
+    // The newest commit ("a") has a failed run; an older commit's success does not count.
+    f.respond(0, 200, R"({"total_count":3,"workflow_runs":[
+        {"name":"Lint","status":"completed","conclusion":"success","head_sha":"a","id":1},
+        {"name":"CI","status":"completed","conclusion":"failure","head_sha":"a"},
+        {"name":"CI","status":"completed","conclusion":"success","head_sha":"b"}]})");
+    f.respond(1, 200, R"({"total_count":7,"items":[{"title":"not kept"}]})");
+    CHECK_EQ(f.services.led, "#e74c3c");
+    f.draw();
+    CHECK(f.gfx.drew("large center 7"));
+    CHECK(f.gfx.drew("open pull requests"));
+    CHECK(f.gfx.drew("#e74c3c small center main is failing: CI"));
+
+    // Five minutes later it is fixed and building again.
+    pass(f, 301, false);
+    CHECK_EQ(f.services.requests.size(), (size_t)4);
+    f.respond(2, 200, R"({"workflow_runs":[{"name":"CI","status":"in_progress","conclusion":null,"head_sha":"c"}]})");
+    f.respond(3, 200, R"({"total_count":1})");
+    CHECK_EQ(f.services.led, "default");
+    f.draw();
+    CHECK(f.gfx.drew("main is building"));
+    CHECK(f.gfx.drew("open pull request"));
+    CHECK(!f.gfx.drew("open pull requests"));
+
+    Fixture missing;
+    CHECK(missing.startFile("github", {}, {{"repo", "acme/gone"}, {"branch", "trunk"}}));
+    CHECK(missing.services.requests[0].request.headers.size() == 1);  // no token: no Authorization
+    CHECK(contains(missing.services.requests[0].request.url, "branch=trunk"));
+    missing.respond(0, 404, R"({"message":"Not Found"})");
+    missing.draw();
+    CHECK(missing.gfx.drew("No such repository."));
+    CHECK(!missing.plugin.failed());
+}
+
+TEST(sample_uptime) {
+    Fixture none;
+    CHECK(none.startFile("uptime"));
+    none.draw();
+    CHECK(none.gfx.drew("Add the addresses"));
+
+    Fixture f;
+    CHECK(f.startFile("uptime", {{"sites", "a.example  http://b.example/health, c.example"}}));
+    CHECK_EQ(f.services.requests.size(), (size_t)3);
+    CHECK_EQ(f.services.requests[0].request.url, "https://a.example");
+    CHECK_EQ(f.services.requests[1].request.url, "http://b.example/health");
+    f.respond(0, 200, "<html>");
+    f.respond(1, 503, "down for maintenance");
+    f.respond(2, 0, "", "response too large (max 48 KB)");  // a big page is still an answer
+    CHECK_EQ(f.services.led, "#e74c3c");
+    f.draw();
+    CHECK(f.gfx.drew("#e74c3c small left 1 down"));
+    CHECK(f.gfx.drew("small right up"));
+    CHECK(f.gfx.drew("#e74c3c small right answered 503"));
+    CHECK(f.gfx.drew("small left b.example"));
+    CHECK(f.services.logged("b.example: HTTP 503"));
+
+    CHECK_EQ(f.button(Button::Center), true);   // check again now
+    CHECK_EQ(f.services.requests.size(), (size_t)6);
+    f.respond(3, 200, "");
+    f.respond(4, 204, "");
+    f.respond(5, 0, "", "connection refused");
+    CHECK_EQ(f.services.led, "#e74c3c");
+    f.draw();
+    CHECK(f.gfx.drew("small right no answer"));
+    pass(f, 121, false);
+    f.respond(6, 200, "");
+    f.respond(7, 200, "");
+    f.respond(8, 301, "");
+    CHECK_EQ(f.services.led, "default");
+    f.draw();
+    CHECK(f.gfx.drew("small left All up"));
+}
+
+TEST(sample_deploy) {
+    Fixture none;
+    CHECK(none.startFile("deploy"));
+    CHECK_EQ(none.button(Button::Center), true);
+    none.draw();
+    CHECK(none.gfx.drew("Set the web address"));
+    CHECK_EQ(none.services.requests.size(), (size_t)0);
+
+    Fixture f;
+    CHECK(f.startFile("deploy", {{"url", "https://example.com/deploy"}, {"label", "Ship it"}, {"secret", "Bearer abc"}}));
+    f.draw();
+    CHECK(f.gfx.drew("large center Ship it"));
+    CHECK_EQ(f.button(Button::Center), true);   // the first press only asks
+    CHECK_EQ(f.services.requests.size(), (size_t)0);
+    CHECK_EQ(f.services.led, "#e67e22");
+    f.draw();
+    CHECK(f.gfx.drew("Sure?"));
+    pass(f, 5);                                  // not confirmed in time
+    f.draw();
+    CHECK(f.gfx.drew("large center Ship it"));
+    CHECK_EQ(f.services.led, "default");
+
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Center), true);   // confirmed
+    CHECK_EQ(f.services.requests.size(), (size_t)1);
+    const HttpRequest& request = f.services.requests[0].request;
+    CHECK_EQ(request.method, "POST");
+    CHECK(hasHeader(request, "Authorization", "Bearer abc"));
+    CHECK(contains(request.body, R"("label":"Ship it")"));
+    CHECK_EQ(f.button(Button::Center), true);   // while it is on its way, presses do nothing
+    CHECK_EQ(f.services.requests.size(), (size_t)1);
+    f.respond(0, 201, "{}");
+    f.draw();
+    CHECK(f.gfx.drew("large center Done"));
+    CHECK(f.services.stored.count("last") == 1);
+    pass(f, 9);
+    f.draw();
+    CHECK(f.gfx.drew("Last one just now"));
+
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Center), true);
+    f.respond(1, 500, "boom");
+    f.draw();
+    CHECK(f.gfx.drew("large center Failed"));
+    CHECK(f.gfx.drew("The other side answered"));
+    CHECK(!f.plugin.failed());
+}
+
+TEST(sample_homeassistant) {
+    Fixture none;
+    CHECK(none.startFile("homeassistant", {}, {{"entity", "light.desk"}}));
+    none.draw();
+    CHECK(none.gfx.drew("Set the address and the"));
+    CHECK_EQ(none.services.requests.size(), (size_t)0);
+
+    Fixture f;
+    CHECK(f.startFile("homeassistant", {{"url", "http://10.0.0.5:8123/"}, {"token", "tok"}},
+                      {{"entity", "sensor.office_temperature"}}));
+    CHECK_EQ(f.services.requests[0].request.url, "http://10.0.0.5:8123/api/states/sensor.office_temperature");
+    CHECK(hasHeader(f.services.requests[0].request, "Authorization", "Bearer tok"));
+    f.respond(0, 200, R"({"entity_id":"sensor.office_temperature","state":"21.456","last_changed":"x",
+        "attributes":{"friendly_name":"Office","unit_of_measurement":"°C","device_class":"temperature"}})");
+    CHECK_EQ(f.plugin.cardTitle("1"), "Office");
+    f.draw();
+    CHECK(f.gfx.drew("small left Office"));
+    CHECK(f.gfx.drew("large center 21.5 °C"));
+    CHECK_EQ(f.button(Button::Center), false);  // this card's button does nothing: it switches cards
+
+    Fixture light;
+    CHECK(light.startFile("homeassistant", {{"url", "http://10.0.0.5:8123"}, {"token", "tok"}},
+                          {{"entity", "light.desk"}, {"press", "toggle"}}));
+    light.respond(0, 200, R"({"state":"off","attributes":{"friendly_name":"Desk lamp"}})");
+    light.draw();
+    CHECK(light.gfx.drew("large center Off"));
+    CHECK(light.gfx.drew("Centre to toggle"));
+    CHECK_EQ(light.button(Button::Center), true);
+    const HttpRequest& call = light.services.requests[1].request;
+    CHECK_EQ(call.method, "POST");
+    CHECK_EQ(call.url, "http://10.0.0.5:8123/api/services/homeassistant/toggle");
+    CHECK_EQ(call.body, R"({"entity_id":"light.desk"})");
+    light.respond(1, 200, "[]");
+    CHECK_EQ(light.services.requests.size(), (size_t)3);  // and it looks at the new state
+    light.respond(2, 200, R"({"state":"on","attributes":{"friendly_name":"Desk lamp"}})");
+    light.draw();
+    CHECK(light.gfx.drew("large center On"));
+    CHECK(light.gfx.drew("#2ecc71 small center Done"));
+
+    Fixture refused;
+    CHECK(refused.startFile("homeassistant", {{"url", "http://10.0.0.5:8123"}, {"token", "old"}}, {{"entity", "light.desk"}}));
+    refused.respond(0, 401, "401: Unauthorized");
+    refused.draw();
+    CHECK(refused.gfx.drew("Home Assistant refused the"));
+    CHECK_EQ(refused.button(Button::Center), false);
+}
+
+TEST(sample_homey) {
+    Fixture f;
+    CHECK(f.startFile("homey", {{"url", "http://10.0.0.9"}, {"key", "k"}}, {{"device", "abc-123"}, {"flow", "f-1"}}));
+    CHECK_EQ(f.services.requests[0].request.url, "http://10.0.0.9/api/manager/devices/device/abc-123");
+    CHECK(hasHeader(f.services.requests[0].request, "Authorization", "Bearer k"));
+    f.respond(0, 200, R"({"id":"abc-123","name":"Thermostat","zone":"z","capabilitiesObj":{
+        "measure_temperature":{"value":20.5,"units":"°C","title":"Temperature"},"onoff":{"value":true,"title":"On"}}})");
+    f.draw();
+    CHECK(f.gfx.drew("small left Thermostat"));
+    CHECK(f.gfx.drew("large center 20.5 °C"));
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.services.requests[1].request.method, "POST");
+    CHECK_EQ(f.services.requests[1].request.url, "http://10.0.0.9/api/manager/flow/flow/f-1/trigger");
+    f.respond(1, 200, "{}");
+    f.draw();
+    CHECK(f.gfx.drew("Flow started"));
+
+    Fixture other;
+    CHECK(other.startFile("homey", {{"url", "http://10.0.0.9"}, {"key", "k"}},
+                          {{"device", "abc-123"}, {"value", "onoff"}, {"flow", "f-2"}, {"advanced", "true"}}));
+    other.respond(0, 200, R"({"name":"Lamp","capabilitiesObj":{"onoff":{"value":false,"title":"On"}}})");
+    other.draw();
+    CHECK(other.gfx.drew("large center Off"));
+    other.button(Button::Center);
+    CHECK_EQ(other.services.requests[1].request.url, "http://10.0.0.9/api/manager/flow/advancedflow/f-2/trigger");
+
+    Fixture wrong;
+    CHECK(wrong.startFile("homey", {{"url", "http://10.0.0.9"}, {"key", "k"}}, {{"device", "abc-123"}, {"value", "measure_power"}}));
+    wrong.respond(0, 200, R"({"name":"Lamp","capabilitiesObj":{"onoff":{"value":false},"dim":{"value":0.5}}})");
+    wrong.draw();
+    CHECK(wrong.gfx.drew("It has no measure_power."));
+    CHECK(wrong.services.logged("Lamp has: dim, onoff"));
+    CHECK_EQ(wrong.button(Button::Center), false);
+
+    Fixture none;
+    CHECK(none.startFile("homey"));
+    none.draw();
+    CHECK(none.gfx.drew("Set the address and the"));
+}
+
+TEST(sample_trains) {
+    Fixture f;
+    const long long now = f.services.epoch;
+    CHECK(f.startFile("trains", {}, {{"station", "Gent Sint Pieters"}}));
+    CHECK_EQ(f.services.requests[0].request.url,
+             "https://api.irail.be/v1/liveboard?format=json&lang=en&arrdep=departure&station=Gent%20Sint%20Pieters");
+    const std::string board = R"({"version":"1.3","station":"Ghent-Sint-Pieters","departures":{"number":"4","departure":[
+        {"id":"0","station":"Brugge","time":")" + std::to_string(now + 420) + R"(","delay":"0","canceled":"0","platform":"5","vehicle":"x"},
+        {"id":"1","station":"Antwerpen-Centraal","time":")" + std::to_string(now + 900) + R"(","delay":"300","canceled":"0","platform":"8"},
+        {"id":"2","station":"Oostende","time":")" + std::to_string(now + 1200) + R"(","delay":"0","canceled":"1","platform":"3"},
+        {"id":"3","station":"Left already","time":")" + std::to_string(now - 600) + R"(","delay":"0","canceled":"0","platform":"1"}]}})";
+    f.respond(0, 200, board);
+    CHECK_EQ(f.plugin.cardTitle("1"), "Ghent-Sint-Pieters");
+    f.draw();
+    CHECK(f.gfx.drew("small left Ghent-Sint-Pieters"));
+    CHECK(f.gfx.drew("medium left 7 min"));
+    CHECK(f.gfx.drew("medium left Brugge"));
+    CHECK(f.gfx.drew("medium right 5"));
+    CHECK(f.gfx.drew("medium left 20 min"));     // fifteen minutes plus five of delay
+    CHECK(f.gfx.drew("#e74c3c small left +5"));
+    CHECK(f.gfx.drew("#e74c3c small left cancelled"));
+    CHECK(!f.gfx.drew("Left already"));
+
+    // Six minutes on, without a new answer, the minutes have counted down.
+    f.services.epoch += 360;
+    pass(f, 2);
+    f.draw();
+    CHECK(f.gfx.drew("medium left 1 min"));
+    CHECK(f.gfx.drew("medium left 14 min"));
+
+    Fixture filtered;
+    CHECK(filtered.startFile("trains", {}, {{"towards", "ANTW"}}));
+    filtered.respond(0, 200, board);
+    filtered.draw();
+    CHECK(filtered.gfx.drew("Antwerpen-Centraal"));
+    CHECK(!filtered.gfx.drew("Brugge"));
+
+    Fixture unknown;
+    CHECK(unknown.startFile("trains", {}, {{"station", "Nowhere"}}));
+    unknown.respond(0, 404, R"({"error":404,"message":"Could not find station Nowhere"})");
+    unknown.draw();
+    CHECK(unknown.gfx.drew("iRail knows no station"));
+    CHECK(!unknown.plugin.failed());
+}
+
+TEST(sample_rain) {
+    struct Case { const char* amounts; const char* expect; };
+    const Case cases[] = {
+        {"[0,0,0,0,0,0,0,0]", "Dry for the next two"},
+        {"[0,0,0.4,1.2,0,0,0,0]", "Rain in about 30"},
+        {"[0,0,0,0,0,0.3,0,0]", "Rain in about 1.2"},   // an hour and a quarter
+        {"[0.5,0.2,0,0,0,0,0,0]", "Raining. It stops in"},
+        {"[0.5,0.2,0.3,1,2,3,1,1]", "Rain for the next two"},
+        {"[0.05,0.02,0,0,0,0,0,0]", "Dry for the next two"},  // a few drops are not rain
+    };
+    for (const Case& c : cases) {
+        Fixture f;
+        CHECK(f.startFile("rain", {{"city", "Gent"}}));
+        f.respond(0, 200, R"({"results":[{"name":"Ghent","latitude":51.05,"longitude":3.72}]})");
+        CHECK(contains(f.services.requests[1].request.url, "minutely_15=precipitation&forecast_minutely_15=8"));
+        f.respond(1, 200, std::string(R"({"minutely_15":{"time":[],"precipitation":)") + c.amounts + "}}");
+        f.draw();
+        if (!f.gfx.drew(c.expect)) printf("  %s: expected %s, drew\n%s", c.amounts, c.expect, f.gfx.dump().c_str());
+        CHECK(f.gfx.drew(c.expect));
+        CHECK(f.gfx.drew("small left Rain in Ghent"));
+        CHECK(!f.plugin.failed());
+    }
+    Fixture nowhere;
+    CHECK(nowhere.startFile("rain", {{"city", "Xyzzy"}}));
+    nowhere.respond(0, 200, "{}");
+    nowhere.draw();
+    CHECK(nowhere.gfx.drew("No city called Xyzzy"));
+}
+
+TEST(sample_queues) {
+    const std::string park = R"({"lands":[{"id":1,"name":"Land","rides":[
+        {"id":1,"name":"Baron 1898","is_open":true,"wait_time":45,"last_updated":"x"},
+        {"id":2,"name":"Droomvlucht","is_open":true,"wait_time":70},
+        {"id":3,"name":"Python","is_open":false,"wait_time":0}]}],
+        "rides":[{"id":4,"name":"Carrousel","is_open":true,"wait_time":5}]})";
+    Fixture f;
+    CHECK(f.startFile("queues"));
+    CHECK_EQ(f.services.requests[0].request.url, "https://queue-times.com/parks/160/queue_times.json");
+    f.respond(0, 200, park);
+    f.draw();
+    CHECK(f.gfx.drew("small left Efteling"));
+    CHECK(f.gfx.drew("Queue-Times.com"));        // the credit they ask for
+    CHECK(f.gfx.drew("#e74c3c medium right 70 min"));
+    CHECK(f.gfx.drew("#e67e22 medium right 45 min"));
+    CHECK(f.gfx.drew("#2ecc71 medium right 5 min"));
+    CHECK(!f.gfx.drew("Python"));                // closed rides are not among the longest waits
+    // Longest first.
+    CHECK(f.gfx.dump().find("Droomvlucht") < f.gfx.dump().find("Baron 1898"));
+
+    Fixture chosen;
+    CHECK(chosen.startFile("queues", {{"park", "51"}, {"title", "Europa-Park"}, {"rides", " python | baron "}}));
+    CHECK(contains(chosen.services.requests[0].request.url, "/parks/51/"));
+    chosen.respond(0, 200, park);
+    chosen.draw();
+    CHECK(chosen.gfx.drew("medium right closed"));
+    CHECK(chosen.gfx.drew("45 min"));
+    CHECK(!chosen.gfx.drew("Droomvlucht"));
+
+    Fixture closed;
+    CHECK(closed.startFile("queues"));
+    closed.respond(0, 200, R"({"lands":[{"rides":[{"name":"Python","is_open":false,"wait_time":0}]}],"rides":[]})");
+    closed.draw();
+    CHECK(closed.gfx.drew("large center Closed"));
+
+    Fixture gone;
+    CHECK(gone.startFile("queues", {{"park", "99999"}}));
+    gone.respond(0, 404, "Not found");
+    gone.draw();
+    CHECK(gone.gfx.drew("Queue-Times has no park"));
+}
+
+TEST(sample_joke) {
+    Fixture f;
+    CHECK(f.startFile("joke"));
+    f.draw();
+    CHECK(f.gfx.drew("Thinking of one..."));
+    CHECK_EQ(f.services.requests[0].request.url, "https://icanhazdadjoke.com/");
+    CHECK(hasHeader(f.services.requests[0].request, "Accept", "application/json"));
+    f.respond(0, 200, R"({"id":"x","joke":"Why did the scarecrow win an award? He was outstanding in his field.","status":200})");
+    f.draw();
+    CHECK(f.gfx.drew("medium center Why did the scarecrow"));
+    pass(f, 3);
+    f.draw();
+    pass(f, 3);
+    CHECK(!f.needsDraw());                       // a joke that fits stays put
+
+    CHECK_EQ(f.button(Button::Center), true);   // another one
+    CHECK_EQ(f.services.requests.size(), (size_t)2);
+    std::string longJoke;
+    for (int i = 0; i < 40; i++) longJoke += "and then the hedgehog said ";
+    f.respond(1, 200, "{\"joke\":\"" + longJoke + "\"}");
+    f.draw();
+    CHECK(f.gfx.drew("small center and then the hedgehog"));   // too long for the bigger font
+    pass(f, 4);
+    CHECK(f.needsDraw());                        // and it scrolls
+    f.draw();
+
+    Fixture offline;
+    CHECK(offline.startFile("joke"));
+    offline.respond(0, 0, "", "no WiFi");
+    offline.draw();
+    CHECK(offline.gfx.drew("no WiFi"));
+}
+
+TEST(sample_crypto) {
+    Fixture f;
+    CHECK(f.startFile("crypto", {{"currency", "usd"}}, {{"coin", " Bitcoin "}}));
+    CHECK_EQ(f.plugin.cardTitle("1"), "Bitcoin");
+    CHECK_EQ(f.services.requests[0].request.url,
+             "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?days=1&vs_currency=usd");
+    f.respond(0, 200, R"({"prices":[[1794685800000,50000.25],[1794686100000,50500],[1794686400000,51000.4]],
+        "market_caps":[[1,2]],"total_volumes":[[1,2]]})");
+    f.draw();
+    CHECK(f.gfx.drew("large center 51,000"));
+    CHECK(f.gfx.drew("#2ecc71 small center USD, +2.0% in a day"));
+    CHECK(f.gfx.drew("line "));
+
+    pass(f, 301, false);
+    f.respond(1, 200, R"({"prices":[[1,0.5],[2,0.25]]})");
+    f.draw();
+    CHECK(f.gfx.drew("center 0.2500"));
+    CHECK(f.gfx.drew("#e74c3c small center USD, -50.0% in a day"));
+
+    Fixture unknown;
+    CHECK(unknown.startFile("crypto", {}, {{"coin", "notacoin"}}));
+    CHECK(contains(unknown.services.requests[0].request.url, "vs_currency=eur"));
+    unknown.respond(0, 404, R"({"error":"coin not found"})");
+    unknown.draw();
+    CHECK(unknown.gfx.drew("CoinGecko has no coin"));
+    CHECK(!unknown.plugin.failed());
+}
+
+TEST(sample_space) {
+    Fixture f;
+    CHECK(startKind(f, "space", "station", {}, {{"city", "Gent"}}));
+    CHECK(contains(f.services.requests[0].request.url, "geocoding-api.open-meteo.com/v1/search?count=1&name=Gent"));
+    f.respond(0, 200, R"({"results":[{"name":"Ghent","latitude":51.05,"longitude":3.72}]})");
+    CHECK_EQ(f.services.requests[1].request.url, "https://api.wheretheiss.at/v1/satellites/25544");
+    // Over Western Australia: a long way to the east.
+    f.respond(1, 200, R"({"name":"iss","latitude":-29.17,"longitude":123.61,"visibility":"daylight","velocity":27538.3})");
+    f.draw();
+    CHECK(f.gfx.drew(" km"));
+    CHECK(f.gfx.drew("to the east of Ghent"));
+    CHECK(f.gfx.drew("Over 29°S 124°E, in"));
+    CHECK_EQ(f.services.led, "default");
+
+    // Half a minute later it is over the Netherlands: look up.
+    pass(f, 31, false);
+    CHECK_EQ(f.services.requests.size(), (size_t)3);   // the city is not looked up again
+    f.respond(2, 200, R"({"latitude":52.4,"longitude":4.9,"visibility":"eclipsed"})");
+    CHECK_EQ(f.services.led, "#3498db for 20000ms");
+    f.draw();
+    CHECK(f.gfx.drew("large center 171 km"));
+    CHECK(f.gfx.drew("above your horizon"));
+    CHECK(f.gfx.drew("in the dark"));
+
+    Fixture launch;
+    const long long now = launch.services.epoch;
+    CHECK(startKind(launch, "space", "launch"));
+    CHECK_EQ(launch.services.requests[0].request.url, "https://fdo.rocketlaunch.live/json/launches/next/1");
+    launch.respond(0, 200, R"({"valid_auth":false,"count":1,"result":[{"id":1,"name":"Starlink 12-3","sort_date":")" +
+        std::to_string(now + 7260) + R"(","provider":{"id":1,"name":"SpaceX"},"vehicle":{"name":"Falcon 9"},
+        "pad":{"name":"SLC-40","location":{"name":"Cape Canaveral SFS","country":"United States"}},"weather_summary":"x"}]})");
+    launch.draw();
+    CHECK(launch.gfx.drew("RocketLaunch.Live"));
+    CHECK(launch.gfx.drew("large center 2h 01m"));
+    CHECK(launch.gfx.drew("small center Falcon 9, Starlink 12-3"));
+    CHECK(launch.gfx.drew("small center SpaceX, Cape Canaveral"));
+    pass(launch, 65);
+    CHECK_EQ(launch.services.requests.size(), (size_t)1);   // launches are not asked for every half minute
+    launch.services.epoch += 7000;
+    pass(launch, 2);
+    launch.draw();
+    CHECK(launch.gfx.drew("large center 4:"));             // minutes and seconds in the last hour
+    launch.services.epoch += 1000;                          // it has gone: ask what is next
+    pass(launch, 31);
+    CHECK_EQ(launch.services.requests.size(), (size_t)2);
+    CHECK(!launch.plugin.failed());
+}
+
 TEST(pictures_pack_into_runs) {
     // 600 black pixels, then one white, then 3 red: (255,0)(255,0)(90,0)(1,white)(3,red).
     std::vector<uint8_t> raw(600 * 2, 0);
@@ -1837,6 +2564,306 @@ TEST(plugin_names) {
     CHECK(!isValidPluginName("../etc"));
     CHECK(!isValidPluginName("a.lua"));
     CHECK(!isValidPluginName(std::string(33, 'a')));
+}
+
+// ------------------------------------------------------- three-button games
+
+TEST(sample_rps) {
+    Fixture f;
+    CHECK(f.startFile("rps"));
+    f.draw();
+    CHECK(f.gfx.drew("Centre to start"));
+    CHECK_EQ(f.button(Button::Down), false);    // no match on: up and down switch cards
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("Pick a hand"));
+    CHECK(f.gfx.drew("small left Scissors"));
+    CHECK_EQ(f.button(Button::Up), true);       // rock
+    CHECK_EQ(f.button(Button::Down), true);     // too late to change your mind
+    f.runFrames(0.5f);
+    f.draw();
+    CHECK(f.gfx.drew("loud center Paper..."));  // the count: rock, paper, scissors
+    f.runFrames(0.6f);
+    f.draw();
+    CHECK(f.gfx.drew("You win") || f.gfx.drew("Max wins") || f.gfx.drew("Draw"));
+    CHECK(f.gfx.drew("small center You"));
+
+    // Whole matches, one after the other: every one ends with a winner.
+    for (int i = 0; i < 300 && !f.plugin.failed(); i++) {
+        f.button((Button)(i % 3));
+        f.runFrames(0.7f);
+    }
+    CHECK(!f.plugin.failed());
+    const int matches = atoi(f.services.stored["won"].c_str()) + atoi(f.services.stored["lost"].c_str());
+    CHECK(matches >= 5);
+
+    Fixture later;  // the tally is kept
+    later.services.stored["won"] = "4";
+    later.services.stored["lost"] = "2";
+    CHECK(later.startFile("rps"));
+    later.draw();
+    CHECK(later.gfx.drew("Matches 4 - 2"));
+}
+
+TEST(sample_whack) {
+    Fixture f;
+    f.services.stored["best"] = "4";
+    CHECK(f.startFile("whack"));
+    f.draw();
+    CHECK(f.gfx.drew("Best 4"));
+    CHECK_EQ(f.button(Button::Up), false);
+    CHECK_EQ(f.button(Button::Center), true);
+
+    // Wait for the first hedgehog. Which burrow it is in shows from where the drawing is clipped.
+    const Button buttons[] = {Button::Up, Button::Center, Button::Down};
+    int burrow = -1;
+    for (int i = 0; i < 40 && burrow < 0; i++) {
+        f.runFrames(0.1f);
+        f.draw();
+        for (int b = 0; b < 3; b++) {
+            if (f.gfx.drew("clip 0," + std::to_string(20 + b * 42 - 22) + " ")) burrow = b;
+        }
+    }
+    CHECK(burrow >= 0);
+    CHECK_EQ(f.button(buttons[burrow]), true);
+    CHECK(contains(f.services.led, "#2ecc71"));
+    f.draw();
+    CHECK(f.gfx.drew("large center 1"));
+    CHECK(f.gfx.drew("Bonk!"));
+    CHECK_EQ(f.button(buttons[burrow]), true);  // a second tap on the same one is forgiven
+    f.runFrames(0.5f);                          // long enough for "Bonk!" to go, too short for the next one to get away
+    CHECK_EQ(f.button(buttons[(burrow + 1) % 3]), true);  // an empty burrow, or the wrong one: a life
+    CHECK(contains(f.services.led, "#e74c3c"));
+
+    f.runFrames(12.0f);                         // the rest get away
+    f.draw();
+    CHECK(f.gfx.drew("Game over"));
+    CHECK(f.gfx.drew("Best 4"));
+    CHECK_EQ(f.services.stored["best"], "4");
+    CHECK_EQ(f.button(Button::Down), false);
+
+    for (int i = 0; i < 600 && !f.plugin.failed(); i++) {
+        f.button((Button)(i % 3));
+        f.runFrames(0.3f);
+    }
+    CHECK(!f.plugin.failed());
+}
+
+std::string triviaQuestion(const std::string& question, int number) {
+    const std::string n = std::to_string(number);
+    return "{\"type\":\"multiple\",\"difficulty\":\"hard\",\"category\":\"Science%3A%20Computers\",\"question\":\"" +
+           question + "\",\"correct_answer\":\"Right%20" + n +
+           "\",\"incorrect_answers\":[\"Wrong%20A\",\"Wrong%20B\",\"Caf%C3%A9%20C\"]}";
+}
+
+TEST(sample_trivia) {
+    Fixture f;
+    CHECK(f.startFile("trivia", {{"category", "Computers"}, {"difficulty", "Hard"}}));
+    CHECK_EQ(f.services.requests[0].request.url,
+             "https://opentdb.com/api.php?amount=12&type=multiple&encode=url3986&category=18&difficulty=hard");
+    f.draw();
+    CHECK(f.gfx.drew("Fetching questions..."));
+    CHECK_EQ(f.button(Button::Down), false);
+
+    // Twelve questions, one of them far too long for the card.
+    std::string body = "{\"response_code\":0,\"results\":[";
+    for (int i = 1; i <= 11; i++) body += triviaQuestion("Is%20this%20%22question%22%20" + std::to_string(i) + "%3F", i) + ",";
+    std::string longQuestion;
+    for (int i = 0; i < 30; i++) longQuestion += "and%20then%20some%20more%20";
+    body += triviaQuestion(longQuestion, 12) + "]}";
+    f.respond(0, 200, body);
+    f.draw();
+    CHECK(f.gfx.drew("Centre to start"));
+    CHECK_EQ(f.button(Button::Center), true);
+
+    const Button buttons[] = {Button::Up, Button::Center, Button::Down};
+    for (int asked = 1; asked <= 10; asked++) {
+        f.draw();
+        CHECK(f.gfx.drew("small center Is this \"question\" "));
+        CHECK(!f.gfx.drew("and then some more"));
+        int right = -1;
+        for (int row = 0; row < 3; row++) {
+            if (f.gfx.drew("text 28," + std::to_string(71 + row * 22) + " #ffffff small left Right ")) right = row;
+        }
+        CHECK(right >= 0);
+        const bool answerRight = asked <= 7;
+        CHECK_EQ(f.button(buttons[answerRight ? right : (right + 1) % 3]), true);
+        CHECK_EQ(f.services.led, answerRight ? "#2ecc71 for 1000ms" : "#e74c3c for 1000ms");
+        CHECK_EQ(f.button(Button::Up), true);   // while the answer shows, presses are swallowed
+        f.draw();
+        CHECK(f.gfx.drew("#1e6b3a"));           // the right answer lights up either way
+        pass(f, 2);
+    }
+    f.draw();
+    CHECK(f.gfx.drew("large center 7 / 10"));
+    CHECK(f.gfx.drew("Best 7."));
+    CHECK_EQ(f.services.stored["best"], "7");
+    CHECK_EQ(f.services.requests.size(), (size_t)2);   // one question left: it fetched more for the next round
+    CHECK_EQ(f.button(Button::Up), false);
+
+    // Told to slow down: it asks again by itself, a few times.
+    Fixture busy;
+    CHECK(busy.startFile("trivia"));
+    CHECK_EQ(busy.services.requests[0].request.url, "https://opentdb.com/api.php?amount=30&type=multiple&encode=url3986");
+    busy.respond(0, 429, "{\"response_code\":5,\"results\":[]}");
+    busy.draw();
+    CHECK(busy.gfx.drew("Fetching questions..."));
+    pass(busy, 7);
+    CHECK_EQ(busy.services.requests.size(), (size_t)2);
+    busy.respond(1, 200, "{\"response_code\":1,\"results\":[]}");
+    busy.draw();
+    CHECK(busy.gfx.drew("Too few questions"));
+
+    Fixture offline;
+    CHECK(offline.startFile("trivia"));
+    offline.respond(0, 0, "", "no WiFi");
+    offline.draw();
+    CHECK(offline.gfx.drew("no WiFi"));
+    CHECK(!offline.plugin.failed());
+}
+
+TEST(sample_runner) {
+    Fixture f;
+    f.services.stored["best"] = "3";
+    CHECK(f.startFile("runner"));
+    f.draw();
+    CHECK(f.gfx.drew("loud center HOG RUN"));
+    CHECK_EQ(f.button(Button::Up), false);      // no run on: up and down switch cards
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Up), true);       // a jump
+    CHECK_EQ(f.button(Button::Down), true);     // a roll
+    f.runFrames(20.0f);                         // nobody steering: it runs into something
+    f.draw();
+    CHECK(f.gfx.drew("Ouch"));
+    CHECK_EQ(f.services.led, "#e74c3c for 1500ms");
+    CHECK(atoi(f.services.stored["best"].c_str()) >= 3);
+    CHECK_EQ(f.button(Button::Down), false);
+
+    // Ten minutes of jumping and rolling at random, starting again after every fall.
+    for (int frame = 0; frame < 18000 && !f.plugin.failed(); frame++) {
+        if (frame % 17 == 0) f.button(frame % 5 == 0 ? Button::Down : Button::Up);
+        if (frame % 101 == 0) f.button(Button::Center);
+        f.services.held[(int)Button::Down] = (frame / 50) % 7 == 0;
+        f.services.now += 33;
+        f.tick(f.services.now, true);
+        if (f.needsDraw()) f.draw();
+    }
+    CHECK(!f.plugin.failed());
+    CHECK(atoi(f.services.stored["best"].c_str()) > 3);   // somewhere in there it got further than 3
+    CHECK(f.plugin.memoryUsed() < 96 * 1024);
+}
+
+TEST(sample_lander) {
+    Fixture f;
+    CHECK(f.startFile("lander"));
+    f.draw();
+    CHECK(f.gfx.drew("loud center LANDER"));
+    CHECK_EQ(f.button(Button::Down), false);
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Up), true);       // in flight all three belong to the game
+    f.draw();
+    CHECK(f.gfx.drew("Level 1"));
+    f.runFrames(15.0f);                         // no engine: it comes down hard, or beside the pad
+    f.draw();
+    CHECK(f.gfx.drew("Too fast") || f.gfx.drew("Missed the pad") || f.gfx.drew("Too much sideways"));
+    CHECK(f.gfx.drew("Centre to fly again"));
+    CHECK_EQ(f.button(Button::Up), false);
+
+    // Flown by a small autopilot, to see landings count and levels follow. It reads the
+    // craft's position, which the plugin keeps to itself, so those are made global here.
+    std::string source = readFile(g_pluginDir + "/lander.lua");
+    const std::string keep = "local x, y, vx, vy, fuel, gravity\n";
+    const std::string keepToo = "local ground, pad, stars ";
+    CHECK(source.find(keep) != std::string::npos);
+    CHECK(source.find(keepToo) != std::string::npos);
+    source.replace(source.find(keep), keep.size(), "\n");
+    source.replace(source.find(keepToo), keepToo.size(), "ground, pad, stars = nil, nil, nil ");
+    source += R"(
+        function input.held(name)
+          if not pad or not x then return false end
+          local target = (pad.from + pad.to) / 2
+          local want = math.max(-10, math.min(10, (target - x) * 0.4))
+          if name == "up" then return vx > want + 1.5 end
+          if name == "down" then return vx < want - 1.5 end
+          local above = pad.y - y
+          local lined = math.abs(target - x) < 6
+          if not lined and above < 45 then return vy > -4 end   -- wait above the hills until over the pad
+          return vy > (above > 40 and 24 or 10)
+        end
+    )";
+    Fixture pilot;
+    CHECK(pilot.begin("lander", source, {}));
+    CHECK_EQ(pilot.button(Button::Center), true);
+    int landings = 0;
+    for (int frame = 0; frame < 30000 && !pilot.plugin.failed() && landings < 3; frame++) {
+        pilot.services.now += 33;
+        pilot.tick(pilot.services.now, true);
+        if (!pilot.needsDraw()) continue;
+        pilot.draw();
+        if (pilot.gfx.drew("Landed!")) {
+            landings++;
+            CHECK(pilot.gfx.drew("Centre for the next one"));
+            CHECK_EQ(pilot.button(Button::Center), true);
+            pilot.draw();
+            CHECK(pilot.gfx.drew("Level " + std::to_string(landings + 1)));
+        } else if (pilot.gfx.drew("Centre to fly again")) {
+            CHECK_EQ(pilot.button(Button::Center), true);
+            landings = 0;
+        }
+    }
+    CHECK(!pilot.plugin.failed());
+    CHECK_EQ(landings, 3);
+    CHECK(atoi(pilot.services.stored["best"].c_str()) >= 150);   // three landings at 50 each, plus fuel
+}
+
+TEST(sample_blocks) {
+    Fixture f;
+    CHECK(f.startFile("blocks"));
+    f.draw();
+    CHECK(f.gfx.drew("loud center BLOCKS"));
+    CHECK_EQ(f.button(Button::Up), false);
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("Next"));
+    CHECK(f.gfx.drew("rect 37,5 12x12"));       // the pair starts at the top of the third column
+    CHECK_EQ(f.button(Button::Up), true);       // one column along
+    f.draw();
+    CHECK(f.gfx.drew("rect 51,5 12x12"));
+    for (int i = 0; i < 5; i++) f.button(Button::Up);  // and all the way round to where it started
+    f.draw();
+    CHECK(f.gfx.drew("rect 37,5 12x12"));
+    CHECK_EQ(f.button(Button::Center), true);   // swap the two colours
+    CHECK_EQ(f.button(Button::Down), true);     // dropped: it lies on the floor of the well
+    f.draw();
+    CHECK(f.gfx.drew("rect 37,117 12x12"));
+    CHECK(f.gfx.drew("rect 37,103 12x12"));
+
+    // With one colour only, the second pair makes four in a column: they light up, then go.
+    Fixture red;
+    CHECK(red.begin("blocks", "math.random = function() return 1 end\n" + readFile(g_pluginDir + "/blocks.lua"), {}));
+    CHECK_EQ(red.button(Button::Center), true);
+    CHECK_EQ(red.button(Button::Down), true);
+    CHECK_EQ(red.button(Button::Down), true);
+    red.draw();
+    CHECK(red.gfx.drew("rect 37,117 12x12 #ffffff"));
+    CHECK_EQ(red.button(Button::Down), true);   // swallowed while they go
+    red.runFrames(0.4f);
+    red.draw();
+    CHECK(red.gfx.drew("large left 40"));
+    CHECK(!red.gfx.drew("rect 37,117 12x12"));
+    CHECK(!red.plugin.failed());
+
+    // Ten minutes of pressing at random: chains, full wells and new games.
+    for (int frame = 0; frame < 18000 && !f.plugin.failed(); frame++) {
+        if (frame % 7 == 0) f.button((Button)((frame / 7) % 3));
+        if (frame % 53 == 0) f.button(Button::Down);
+        f.services.now += 33;
+        f.tick(f.services.now, true);
+        if (f.needsDraw()) f.draw();
+    }
+    CHECK(!f.plugin.failed());
+    CHECK(atoi(f.services.stored["best"].c_str()) > 0);
+    CHECK(f.plugin.memoryUsed() < 96 * 1024);
 }
 
 }  // namespace

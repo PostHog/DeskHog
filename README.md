@@ -57,7 +57,13 @@ Plugins can fetch JSON from any API, draw freely, react to the three buttons, se
 
 One plugin can provide several cards that share settings, such as one account with a card per chart. The device's web page (open `http://deskhog.local`) is where you add, arrange and set up cards. It shows a live picture of each one, and the device's three buttons work from the page, so you can try a card without reaching for the device. On a computer it has a wide layout with an editor for plugin code.
 
-[**Read the plugin guide**](plugins/README.md), or start from the examples in [`plugins/`](plugins): weather, PostHog insights, Max the hedgehog, icebreaker questions, Flappy Hog, Paddle, a clock, a webhook button and a hello world.
+[**Read the plugin guide**](plugins/README.md), or start from the ones in [`plugins/`](plugins):
+
+- **On your desk:** a clock, a countdown, a Pomodoro timer, Max the hedgehog, a pet hedgehog that wants feeding, icebreaker questions, dad jokes, a starfield.
+- **Games:** Flappy Hog, Paddle, Snake, Breakout, Simon, a reaction timer, rock-paper-scissors, Whack-a-hog, a trivia quiz, Hog run, Lander and Blocks.
+- **For work:** PostHog insights, GitHub pull requests and build status, an uptime check, a deploy button, a webhook button.
+- **Around you:** weather, rain in the next two hours, Belgian train departures, theme park queue times, crypto prices, the space station and the next rocket launch.
+- **Your home:** Home Assistant and Homey Pro.
 
 Every card is a plugin. The cards that used to be compiled into the firmware (Max, the question card, Flappy Hog, Paddle, hello world) are Lua files now, which you can read and change on the device's web page. Only the WiFi and status screen is still part of the firmware.
 

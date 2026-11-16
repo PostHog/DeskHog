@@ -1107,9 +1107,11 @@ void LuaPlugin::flushUi(Gfx& gfx) {
 
     // Everything else is stacked and centred in the space that is left.
     struct Row {
-        const UiItem* item;
+        std::string text;
+        uint32_t color;
         Font font;
         int height;
+        int gap;  ///< Space above it
     };
     std::vector<Row> rows;
     int total = 0;
@@ -1126,17 +1128,28 @@ void LuaPlugin::flushUi(Gfx& gfx) {
                 if (gfx.textWidth(item.text.c_str(), font) > width - 2 * kPad) font = Font::Medium;
             }
             const int rowHeight = gfx.textHeight(font);
-            if (!rows.empty()) total += 2;
-            total += rowHeight;
-            rows.push_back({&item, font, rowHeight});
+            if (item.kind == UiItem::Label) {
+                // A label that is too wide continues on the next line (four at most).
+                const std::vector<std::string> lines = wrapText(gfx, item.text, font, width - 2 * kPad);
+                for (size_t line = 0; line < lines.size() && line < 4; line++) {
+                    const int gap = rows.empty() ? 0 : line == 0 ? 2 : 0;
+                    total += gap + rowHeight;
+                    rows.push_back({lines[line], item.color, font, rowHeight, gap});
+                }
+                continue;
+            }
+            const int gap = rows.empty() ? 0 : 2;
+            total += gap + rowHeight;
+            rows.push_back({item.text, item.color, font, rowHeight, gap});
         }
         if (total <= bottom - top) break;
     }
     int y = top + (bottom - top - total) / 2;
     if (y < top) y = top;
     for (const Row& row : rows) {
-        gfx.text(width / 2, y, row.item->text.c_str(), row.item->color, row.font, Align::Center);
-        y += row.height + 2;
+        y += row.gap;
+        gfx.text(width / 2, y, row.text.c_str(), row.color, row.font, Align::Center);
+        y += row.height;
     }
 }
 

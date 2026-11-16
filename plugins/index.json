@@ -2,6 +2,28 @@
   "format": 1,
   "plugins": [
     {
+      "name": "blocks",
+      "title": "Blocks",
+      "description": "Falling pairs of colours: bring three together and they are gone",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "blocks.lua",
+      "size": 7005,
+      "hash": "ce65d37c",
+      "sha256": "8e167ccbcc5e5d043c3025b69f1114c841fb51aaeb7ebd03aa6c1da206163aaa"
+    },
+    {
+      "name": "breakout",
+      "title": "Breakout",
+      "description": "A bat, a ball and a wall of bricks. Three lives",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "breakout.lua",
+      "size": 5306,
+      "hash": "d0709d9b",
+      "sha256": "4a87e0542c2b61c169c0876b69d8f24fbca263d40539fdf2b86a7ad3827aa2f1"
+    },
+    {
       "name": "clock",
       "title": "Clock",
       "description": "The time in large digits, with the date under it",
@@ -11,6 +33,50 @@
       "size": 2743,
       "hash": "657fd6bc",
       "sha256": "1d5e3e390db8fd72a1cea84c68aded7e58530ac7172670ac01ab8648a25affec"
+    },
+    {
+      "name": "countdown",
+      "title": "Countdown",
+      "description": "How long until the launch, the holiday, the birthday. A card per date",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "countdown.lua",
+      "size": 3357,
+      "hash": "5b001d08",
+      "sha256": "718b5260ddd675cf368cee825f44e87e9e26e6f47e815395f8e227cafc6843f5"
+    },
+    {
+      "name": "crypto",
+      "title": "Crypto prices",
+      "description": "The price of a coin, how it moved today, and the last 24 hours as a chart",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "crypto.lua",
+      "size": 2912,
+      "hash": "dc04ffab",
+      "sha256": "cb6d42140ce4ad9fc4a38bc62fb95357fba70ca1bd142b2f38d028d7ffcd5991"
+    },
+    {
+      "name": "joke",
+      "title": "Dad jokes",
+      "description": "A new dad joke every half hour, or whenever you press the button",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "joke.lua",
+      "size": 2166,
+      "hash": "6c23750f",
+      "sha256": "ae5406a67321183d6bb5cf68debb8909a706257c02a2fff833379db33f77d309"
+    },
+    {
+      "name": "deploy",
+      "title": "Deploy button",
+      "description": "Press, confirm, and your deploy hook is called. Shows whether it worked and when it last ran",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "deploy.lua",
+      "size": 3184,
+      "hash": "3016cd9e",
+      "sha256": "cf9879a476b6ef6613d83aee4e9c0748e7a1df7d2b37861ab121a156f5cba40a"
     },
     {
       "name": "flappy",
@@ -24,6 +90,17 @@
       "sha256": "cd23c3d2620fac69e527ed4c2ddfd818d37bcd3e018a5fd34e64537937ff9513"
     },
     {
+      "name": "github",
+      "title": "GitHub",
+      "description": "Open pull requests and whether the build passes, per repository. Red LED on failure",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "github.lua",
+      "size": 4533,
+      "hash": "5ed823b7",
+      "sha256": "3cfb61114de422d1aa36176ea37f20b3272ba673793043dac4721060c00673ef"
+    },
+    {
       "name": "hello",
       "title": "Hello",
       "description": "The smallest useful plugin: three lines of text and a press counter",
@@ -33,6 +110,50 @@
       "size": 566,
       "hash": "2cfbecc6",
       "sha256": "33119d67bcc1191fe454ddba5d5ba1f2f675d304135272e405745f6553de655d"
+    },
+    {
+      "name": "runner",
+      "title": "Hog run",
+      "description": "An endless run: jump the logs, roll under the bees",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "runner.lua",
+      "size": 5435,
+      "hash": "ffabae8f",
+      "sha256": "b6cfc6eade6d17db13c17baa42d8ea2c337af60f774b77822978be2bdea5694b"
+    },
+    {
+      "name": "homeassistant",
+      "title": "Home Assistant",
+      "description": "A card per entity: its state, and a button to toggle it or run a script or scene",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "homeassistant.lua",
+      "size": 4011,
+      "hash": "73850e13",
+      "sha256": "4810250e4fabd4d9ea69e34619f203383bb9ca4f5c76fad9c634b95b8c18e9c8"
+    },
+    {
+      "name": "homey",
+      "title": "Homey",
+      "description": "A card per Homey Pro device: one of its values, and a button that starts a flow",
+      "author": "DeskHog",
+      "version": "0.9",
+      "file": "homey.lua",
+      "size": 4594,
+      "hash": "27f4fb90",
+      "sha256": "b4b1570128904548f64456387fd86570a46eb1137c13477adafc8f0469227df2"
+    },
+    {
+      "name": "lander",
+      "title": "Lander",
+      "description": "Three thrusters, a little fuel and a landing pad that keeps shrinking",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "lander.lua",
+      "size": 6797,
+      "hash": "2d4fa690",
+      "sha256": "865c60bb3b400490ce98f6e31d2d4fbb977b8a23fb4c5e5821adec094602ffb5"
     },
     {
       "name": "friend",
@@ -57,6 +178,28 @@
       "sha256": "75c045548a76214c67fa5af31308d5d93275cf15fbdf92ea75f8b6c0e5336940"
     },
     {
+      "name": "pet",
+      "title": "Pet hedgehog",
+      "description": "A hedgehog that gets hungry and bored, sleeps at night and likes a pat",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "pet.lua",
+      "size": 5861,
+      "hash": "8d1473b8",
+      "sha256": "33bb169e49813b3ad657df1ed169ace76226f8666715d2905e8dca82058d0904"
+    },
+    {
+      "name": "pomodoro",
+      "title": "Pomodoro",
+      "description": "Focus for 25 minutes, take a break, repeat. The LED shows which it is",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "pomodoro.lua",
+      "size": 3738,
+      "hash": "1ad371ef",
+      "sha256": "fe5e39a1aa108ac65410c3b7feaab8b81be5c25c04ab947c1a09ebcab1249e59"
+    },
+    {
       "name": "posthog",
       "title": "PostHog",
       "description": "PostHog insights on your desk: big numbers, line charts and funnels",
@@ -79,6 +222,127 @@
       "sha256": "b1f235cd2fc0ffd003b709268ce0bdca0fde615cdac300488cf88bbd0ef75694"
     },
     {
+      "name": "rain",
+      "title": "Rain",
+      "description": "Whether it will rain in the next two hours, where you are, quarter by quarter",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "rain.lua",
+      "size": 3487,
+      "hash": "6a42cde8",
+      "sha256": "5bf8d4b7e2ae161eb68a695004b51d99dad7efcf284460e143ed49ee3cd615b8"
+    },
+    {
+      "name": "reaction",
+      "title": "Reaction timer",
+      "description": "Wait for green, then press. How many milliseconds did you need?",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "reaction.lua",
+      "size": 1966,
+      "hash": "e0916a84",
+      "sha256": "167e2c0820a2c0fb05d2d80a25c4aac0f9e77355a0795c98f06e1310980f0748"
+    },
+    {
+      "name": "rps",
+      "title": "Rock paper scissors",
+      "description": "One button per hand. First to three beats the hedgehog",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "rps.lua",
+      "size": 5160,
+      "hash": "fee43bce",
+      "sha256": "48240f2367951a19d581e8ba500a7c5638cafe46ed2760785f06af96082670f5"
+    },
+    {
+      "name": "simon",
+      "title": "Simon",
+      "description": "Watch the pattern, repeat the pattern. It gets longer every round",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "simon.lua",
+      "size": 3371,
+      "hash": "bd818b9c",
+      "sha256": "fe2d6dfd440fefc93fe3be2aa68a3eaee9637a537bdea90bfdbadde814d3cd17"
+    },
+    {
+      "name": "snake",
+      "title": "Snake",
+      "description": "Two buttons to steer, one to pause. Eat, grow, don't bite yourself",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "snake.lua",
+      "size": 4208,
+      "hash": "48b5de7e",
+      "sha256": "267058c80d82b6fc6fc6c809aac56f8a75faf199c9414bc493748a8eac7a5510"
+    },
+    {
+      "name": "space",
+      "title": "Space",
+      "description": "How far away the space station is right now, and a countdown to the next rocket launch",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "space.lua",
+      "size": 6259,
+      "hash": "8b1f188e",
+      "sha256": "e3b90592167e0f4ca34e060e5aacb04fd58dd90f580ae40b2eb63fac301cb56c"
+    },
+    {
+      "name": "starfield",
+      "title": "Starfield",
+      "description": "Stars flying past, for when the desk needs to look busy",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "starfield.lua",
+      "size": 1350,
+      "hash": "3ca5206f",
+      "sha256": "18b90f7017ef5ffeb015b8643da9a3cfd1de1b4d1ce7b2b5a3f38dd011e79a45"
+    },
+    {
+      "name": "queues",
+      "title": "Theme park queues",
+      "description": "The longest waits in a theme park right now, or the rides you care about",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "queues.lua",
+      "size": 3323,
+      "hash": "80d27b49",
+      "sha256": "fc9a032d37b9a2300cc06cd593eab3ff37233a43416c5f937f31da72e7069fea"
+    },
+    {
+      "name": "trains",
+      "title": "Trains (Belgium)",
+      "description": "The next departures from a Belgian station, with delays and platforms",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "trains.lua",
+      "size": 4451,
+      "hash": "8af439dc",
+      "sha256": "c7b8b7a23bbe1844ee63c0ab50ba4a217d8ad5abcc0e830110f2221f94030db6"
+    },
+    {
+      "name": "trivia",
+      "title": "Trivia",
+      "description": "Ten questions, three answers, one button each. From the Open Trivia Database",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "trivia.lua",
+      "size": 7217,
+      "hash": "b7a04c9c",
+      "sha256": "8181daa86bf123c0dde4cfa847e76bef15c5176bb7049b82d8d4ab095b4a7fdc"
+    },
+    {
+      "name": "uptime",
+      "title": "Uptime",
+      "description": "Checks up to five web addresses every two minutes. Red LED when one is down",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "uptime.lua",
+      "size": 2678,
+      "hash": "68e018c5",
+      "sha256": "5e4bb8d1f44d13fae280ed0fe36ae58d4b5b9eda3a28a9552cbea95476528453"
+    },
+    {
       "name": "weather",
       "title": "Weather",
       "description": "The temperature now and today's curve, for any number of cities",
@@ -99,6 +363,17 @@
       "size": 1202,
       "hash": "142c371b",
       "sha256": "5d239fa95b1ac0bd21c10ed4b241857b5fe0f5b190dc2710af27a00b62ae77af"
+    },
+    {
+      "name": "whack",
+      "title": "Whack-a-hog",
+      "description": "Three burrows, three buttons. Bonk the hedgehog before it ducks",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "whack.lua",
+      "size": 4546,
+      "hash": "421b9ef3",
+      "sha256": "a7f38210f1b0040128b3d45a779bb13a77554e53fbbec9e034f11e286e31d316"
     }
   ]
 }

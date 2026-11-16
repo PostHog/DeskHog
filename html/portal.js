@@ -1034,7 +1034,8 @@ async function installEntry(entry) {
         if (entry.hash && sourceHash(bytes) !== entry.hash) {
             throw new Error(entry.file + ' is not the file the directory describes. Try again in a few minutes; it may be in the middle of an update.');
         }
-        await api('PUT', '/api/plugins/' + encode(entry.name), bytes, 'application/octet-stream');
+        // "card=no": installing is not adding a card. That is the next step, with the settings you want.
+        await api('PUT', '/api/plugins/' + encode(entry.name) + '?card=no', bytes, 'application/octet-stream');
     }, (entry.title || entry.name) + ' is on your DeskHog.');
     directory.busy = '';
     if (done) {

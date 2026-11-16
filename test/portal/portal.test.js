@@ -425,13 +425,14 @@ test('plugins page: starts a new plugin and deletes one', async () => {
     document.getElementById('plugin-name').value = 'counter';
     await click(window, document.getElementById('save-plugin-btn'));
     equal(lastRequest(device, '/api/plugins/counter').method, 'PUT', 'saved under its name');
+    check(device.cards.some(card => card.plugin === 'counter'), 'a plugin you write gets a first card, to see it run');
     equal(text(document.getElementById('plugin-heading')), 'counter.lua', 'the editor now shows the file');
 
     await click(window, document.querySelector('#plugins-list .item[data-name="weather"] .item-open'));
     await click(window, document.getElementById('delete-plugin-btn'));
     equal(lastRequest(device, '/api/plugins/weather').method, 'DELETE', 'deleted');
     check(document.getElementById('plugin-editor').hidden, 'the editor closes');
-    equal(titles(document), ['Hello', 'Webhook', 'Insight'], 'its cards are gone');
+    equal(titles(document), ['Hello', 'Webhook', 'Insight', 'My plugin'], 'its cards are gone');
 });
 
 // ------------------------------------------------------ plugin directory
@@ -474,6 +475,8 @@ test('directory: installs a plugin, then offers a card of it', async () => {
     await afterInstall(window);
     const put = lastRequest(device, '/api/plugins/clock');
     equal([put.method, put.type, put.body], ['PUT', 'application/octet-stream', device.internet.files['clock.lua']], 'the file goes to the device as it is');
+    equal(put.url, '/api/plugins/clock?card=no', 'without the first card a developer\'s upload gets');
+    check(!device.cards.some(card => card.plugin === 'clock'), 'so installing adds no card');
     equal(text(document.getElementById('notice')), 'Clock is on your DeskHog.', 'says so');
     equal(offers(document)[0], { name: 'clock', title: 'Clock', note: 'Installed', buttons: ['Add a card'] }, 'now it is installed');
     check([...document.querySelectorAll('#plugins-list .item-title')].map(text).includes('Clock'), 'and in the list of plugins');
