@@ -1,0 +1,32 @@
+{
+ "ttl": 60,
+ "version": "2.0",
+ "data": {
+  "stations": [
+   {
+    "station_id": "001",
+    "num_bikes_available": 7,
+    "num_docks_available": 26,
+    "is_installed": true,
+    "is_renting": true,
+    "is_returning": true
+   },
+   {
+    "station_id": "002",
+    "num_bikes_available": 28,
+    "num_docks_available": 8,
+    "is_installed": true,
+    "is_renting": true,
+    "is_returning": true
+   },
+   {
+    "station_id": "036",
+    "num_bikes_available": 0,
+    "num_docks_available": 0,
+    "is_installed": true,
+    "is_renting": false,
+    "is_returning": false
+   }
+  ]
+ }
+}

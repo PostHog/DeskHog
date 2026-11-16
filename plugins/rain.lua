@@ -5,12 +5,12 @@ plugin = {
   name = "Rain",
   description = "Whether it will rain in the next two hours, where you are, quarter by quarter",
   author = "DeskHog",
-  version = "1.2",
+  version = "1.3",
   refresh = 600,
 }
 
 config = {
-  city = { label = "City", default = "Ghent" },
+  city = { label = "City", default = "Antwerp" },
 }
 
 local W, H = gfx.width, gfx.height

@@ -693,7 +693,7 @@ void LuaPlugin::readKinds(lua_State* L) {
 }
 
 // Reads a settings table such as
-//   { city = { label = "City", default = "Ghent" }, days = 3 }
+//   { city = { label = "City", default = "Antwerp" }, days = 3 }
 // (the second form is short for "just a default").
 //  - With `schema`, describes each entry.
 //  - With `target` (a stack index), stores each entry's value there: the saved

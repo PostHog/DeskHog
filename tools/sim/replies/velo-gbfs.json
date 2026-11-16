@@ -1,0 +1,18 @@
+{
+ "ttl": 60,
+ "version": "2.0",
+ "data": {
+  "nl": {
+   "feeds": [
+    {
+     "name": "station_information",
+     "url": "https://gbfs.smartbike.com/antwerp/1.0/nl/station_information.json"
+    },
+    {
+     "name": "station_status",
+     "url": "https://gbfs.smartbike.com/antwerp/1.0/nl/station_status.json"
+    }
+   ]
+  }
+ }
+}

@@ -5,7 +5,7 @@ plugin = {
   name = "Trains (Belgium)",
   description = "The next departures from a Belgian station, with delays and platforms",
   author = "DeskHog",
-  version = "1.2",
+  version = "1.3",
   refresh = 60,
   fps = 1,
 }
@@ -33,7 +33,7 @@ cards = {
   station = {
     name = "Station",
     config = {
-      station = { label = "Station", default = "Gent-Sint-Pieters", order = 1 },
+      station = { label = "Station", default = "Antwerpen-Centraal", order = 1 },
       towards = { label = "Only trains to (part of the destination; optional)", default = "", order = 2 },
     },
 

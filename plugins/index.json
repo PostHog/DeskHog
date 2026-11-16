@@ -2,6 +2,18 @@
   "format": 1,
   "plugins": [
     {
+      "name": "air",
+      "title": "Air",
+      "description": "Air quality and pollen where you are, with a bar per hour of today",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "air.lua",
+      "size": 8021,
+      "hash": "3d143b7b",
+      "sha256": "b21c5397eca2d8221542aef2c7e5894292ad63ba54a2868e75e8c7d8ce816f7b",
+      "screenshot": "screenshots/air.png"
+    },
+    {
       "name": "blocks",
       "title": "Blocks",
       "description": "Falling pairs of colours: bring three together and they are gone",
@@ -74,6 +86,18 @@
       "screenshot": "screenshots/joke.png"
     },
     {
+      "name": "daylight",
+      "title": "Daylight",
+      "description": "Sunrise, sunset and the length of the day, how it changed since yesterday, and the moon",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "daylight.lua",
+      "size": 11996,
+      "hash": "b296aa44",
+      "sha256": "efc067cbf8199b1f29c03b17128cd18d99e1012868d6a789ea9633c5f7c548b9",
+      "screenshot": "screenshots/daylight.png"
+    },
+    {
       "name": "deploy",
       "title": "Deploy button",
       "description": "Press, confirm, and your deploy hook is called. Shows whether it worked and when it last ran",
@@ -84,6 +108,18 @@
       "hash": "d6303cc4",
       "sha256": "956414357f76c29b1774df6547ccf63ae5a6f5bfd6fae9971ec7a2222d72b2b7",
       "screenshot": "screenshots/deploy.png"
+    },
+    {
+      "name": "expiry",
+      "title": "Expiry",
+      "description": "Days until the certificates and domain names of your sites expire. Orange LED a month ahead",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "expiry.lua",
+      "size": 10532,
+      "hash": "7dfd0854",
+      "sha256": "c01d28352c569d1081db0a773bbe8bb4aa14630cc9f2ec9c6fcef618a80d1cb8",
+      "screenshot": "screenshots/expiry.png"
     },
     {
       "name": "flappy",
@@ -108,6 +144,30 @@
       "hash": "7e555421",
       "sha256": "6c467d794606decedb5ff574b739b07c9dfa7543fd150db10e1f0717c644f2ff",
       "screenshot": "screenshots/github.png"
+    },
+    {
+      "name": "habits",
+      "title": "Habits",
+      "description": "Tick off a daily habit and see the last twelve weeks, your streak and your best",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "habits.lua",
+      "size": 11423,
+      "hash": "b4487c23",
+      "sha256": "11ab926f65f380e5f42bc69e99f64249605d5bab53028a1ce6f2fcc482755482",
+      "screenshot": "screenshots/habits.png"
+    },
+    {
+      "name": "hackernews",
+      "title": "Hacker News",
+      "description": "The top stories on Hacker News, one at a time, with points and comments",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "hackernews.lua",
+      "size": 7937,
+      "hash": "12570681",
+      "sha256": "218d980318a309213a257e7bfe7ec058527702ca525888d1b01d7250fc32ded9",
+      "screenshot": "screenshots/hackernews.png"
     },
     {
       "name": "hello",
@@ -182,6 +242,18 @@
       "screenshot": "screenshots/friend.png"
     },
     {
+      "name": "onthisday",
+      "title": "On this day",
+      "description": "Events, births and deaths from Wikipedia that happened on today's date",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "onthisday.lua",
+      "size": 14515,
+      "hash": "2986f0fb",
+      "sha256": "265b8e04c9c3889f7b0373a87c2b4726521f8ff913984204e97da500e0fbce26",
+      "screenshot": "screenshots/onthisday.png"
+    },
+    {
       "name": "paddle",
       "title": "Paddle",
       "description": "First to five points beats the hedgehog on the other side",
@@ -204,6 +276,18 @@
       "hash": "edb75e66",
       "sha256": "7f06cda2899ef666221eda7da31c0377ffd75256b96885818b87acc6c4a9eb5e",
       "screenshot": "screenshots/pet.png"
+    },
+    {
+      "name": "planes",
+      "title": "Planes",
+      "description": "The aircraft overhead right now, on a small radar, with callsign, height, speed and type",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "planes.lua",
+      "size": 10719,
+      "hash": "698b3705",
+      "sha256": "37521924218fba68715cc5dc1893c50c722753dcd648bd660f99ad485ad09050",
+      "screenshot": "screenshots/planes.png"
     },
     {
       "name": "pomodoro",
@@ -246,11 +330,11 @@
       "title": "Rain",
       "description": "Whether it will rain in the next two hours, where you are, quarter by quarter",
       "author": "DeskHog",
-      "version": "1.2",
+      "version": "1.3",
       "file": "rain.lua",
-      "size": 3487,
-      "hash": "81f82052",
-      "sha256": "f78730b7f1302957e1890046b6be0ce5a2c3c462bac3fe326393aae9cc5a7d52",
+      "size": 3489,
+      "hash": "233d19e8",
+      "sha256": "54e0eb919b1695deed65eee6c13be62a1861a4404138810faa3489f4945c3db8",
       "screenshot": "screenshots/rain.png"
     },
     {
@@ -264,6 +348,18 @@
       "hash": "fb887bc6",
       "sha256": "1bb715af6597043bc7ba98aac948b3a08da069b33aa0acaeb94bcf9c65181016",
       "screenshot": "screenshots/reaction.png"
+    },
+    {
+      "name": "releases",
+      "title": "Release radar",
+      "description": "The latest release of the GitHub repositories you follow, with new ones marked",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "releases.lua",
+      "size": 13613,
+      "hash": "23e0bad2",
+      "sha256": "7209326618ee7914cefa002a9757d6d88202124e3e83a333e52921e110c4bc1b",
+      "screenshot": "screenshots/releases.png"
     },
     {
       "name": "rps",
@@ -306,11 +402,11 @@
       "title": "Space",
       "description": "How far away the space station is right now, and a countdown to the next rocket launch",
       "author": "DeskHog",
-      "version": "1.2",
+      "version": "1.3",
       "file": "space.lua",
-      "size": 6259,
-      "hash": "d0ee2588",
-      "sha256": "a6b630e99de86d9ccf9f2d5d3269fd9c2225c743e0848a1fb756cc65e904ffd6",
+      "size": 6261,
+      "hash": "d9c09d24",
+      "sha256": "23e23c33d82ca4e52efcf1a047271665e6876fc371e1e3e79120115e1ded8d1e",
       "screenshot": "screenshots/space.png"
     },
     {
@@ -326,6 +422,30 @@
       "screenshot": "screenshots/starfield.png"
     },
     {
+      "name": "status",
+      "title": "Status board",
+      "description": "How the services you depend on are doing, from their status pages. Red LED during an outage",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "status.lua",
+      "size": 5639,
+      "hash": "73d15204",
+      "sha256": "dc38011d0f1ef88208bf13514ce769dc5575c53ec44bf75485fe5f04bf7393cd",
+      "screenshot": "screenshots/status.png"
+    },
+    {
+      "name": "tally",
+      "title": "Tally",
+      "description": "Count things through the day, with a goal or a limit and the last two weeks",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "tally.lua",
+      "size": 9258,
+      "hash": "9dc036ef",
+      "sha256": "c2fda2ac69495fc29869d7e78fdb2d077da1494573213c02dd18ee9e509a4bf5",
+      "screenshot": "screenshots/tally.png"
+    },
+    {
       "name": "queues",
       "title": "Theme park queues",
       "description": "The longest waits in a theme park right now, or the rides you care about",
@@ -338,15 +458,27 @@
       "screenshot": "screenshots/queues.png"
     },
     {
+      "name": "timers",
+      "title": "Timers",
+      "description": "Three kitchen timers, one press away. The LED blinks when time is up",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "timers.lua",
+      "size": 11252,
+      "hash": "d62ff827",
+      "sha256": "2e70d3367d554f1ffc3ae8e7a7886ce13a7587d4b5198e815f200c53445af38e",
+      "screenshot": "screenshots/timers.png"
+    },
+    {
       "name": "trains",
       "title": "Trains (Belgium)",
       "description": "The next departures from a Belgian station, with delays and platforms",
       "author": "DeskHog",
-      "version": "1.2",
+      "version": "1.3",
       "file": "trains.lua",
-      "size": 4451,
-      "hash": "d82b5b1e",
-      "sha256": "d95375cdffdf5ff1bd0487e7889c109099d8bcc5c692dac8ce3e3dda2a6f5351",
+      "size": 4452,
+      "hash": "b6df8f6c",
+      "sha256": "1144de6a84cfde3025308a7730009b7ee2c94e62f36e7b913f81aeb47df48edc",
       "screenshot": "screenshots/trains.png"
     },
     {
@@ -374,15 +506,27 @@
       "screenshot": "screenshots/uptime.png"
     },
     {
+      "name": "velo",
+      "title": "Velo",
+      "description": "Bikes and free docks at your Velo Antwerpen station, or at another bike share's",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "velo.lua",
+      "size": 13355,
+      "hash": "319ea025",
+      "sha256": "7bc8fc837ff59e6aa745430afe49f3018703a2a289c3c067b782febc6bd9e41e",
+      "screenshot": "screenshots/velo.png"
+    },
+    {
       "name": "weather",
       "title": "Weather",
       "description": "The temperature now and today's curve, for any number of cities",
       "author": "DeskHog",
-      "version": "1.2",
+      "version": "1.3",
       "file": "weather.lua",
-      "size": 3055,
-      "hash": "543769bb",
-      "sha256": "f68b24cf51c1666effec6fbdab4c21260260e433393c902d955a4b33df0f4f38",
+      "size": 3057,
+      "hash": "ff6beced",
+      "sha256": "2d7d835486f71a73e86fa3d9de842a33d8d6ce47f0d246ce338d7265ce203556",
       "screenshot": "screenshots/weather.png"
     },
     {
@@ -408,6 +552,18 @@
       "hash": "64ac3f29",
       "sha256": "4a03a0ee61e44a1f2fe9ac7caf39fcda92766bd054628a7dda1c4b77cd05b9c0",
       "screenshot": "screenshots/whack.png"
+    },
+    {
+      "name": "word",
+      "title": "Word of the day",
+      "description": "A new word every day, with what it means, from Wiktionary",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "word.lua",
+      "size": 27814,
+      "hash": "89c84948",
+      "sha256": "23144b755af8ae3730afd852071d68ac53b0f53432fb7654c92b989d5146a3f3",
+      "screenshot": "screenshots/word.png"
     }
   ]
 }

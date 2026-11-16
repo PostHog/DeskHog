@@ -27,9 +27,12 @@ folder is also the plugin directory: what the device's web page offers under
 | [lander.lua](lander.lua), [runner.lua](runner.lua) | Simple physics, and a button that works pressed and held |
 | [blocks.lua](blocks.lua) | A grid game that shows its chain reactions a step at a time |
 
-The rest of the folder is there to be used rather than studied: countdown, crypto
-prices, dad jokes, a deploy button, Homey, theme park queues, rain, a reaction timer,
-Simon, the space station and rocket launches, a starfield and an uptime check.
+The rest of the folder is there to be used rather than studied: air quality and pollen,
+bike share stations, certificate and domain expiry, countdown, crypto prices, daylight and
+the moon, dad jokes, a deploy button, habits, Hacker News, Homey, on this day, the planes
+overhead, theme park queues, rain, a reaction timer, GitHub releases, Simon, the space
+station and rocket launches, a starfield, service status pages, a tally counter, kitchen
+timers, an uptime check and a word of the day.
 
 ## Five-minute start
 
@@ -105,14 +108,14 @@ plugin = {
 }
 
 config = {
-  city = { label = "City", default = "Ghent" },
+  city = { label = "City", default = "Antwerp" },
   days = 3,           -- short form: just the default
 }
 ```
 
 After the file has run, each `config` entry is replaced by its value: the saved
 setting if there is one, otherwise the default. So in `load()` and everywhere else,
-`config.city` is simply `"Ghent"`. People change settings on the device's web page;
+`config.city` is simply `"Antwerp"`. People change settings on the device's web page;
 the plugin restarts with the new values. A setting keeps the type of its default
 (text, number or true/false).
 
@@ -145,7 +148,7 @@ cards = {
   city = {                                   -- a kind of card
     name = "City",
     config = {                               -- set per card
-      city = { label = "City", default = "Ghent" },
+      city = { label = "City", default = "Antwerp" },
     },
     load = function(card) ... end,           -- at start, on refresh, when WiFi connects
     update = function(card, dt) ... end,     -- every frame while this card is on screen

@@ -1,0 +1,1 @@
+{"objectClassName": "domain", "ldhName": "EXAMPLE.COM", "events": [{"eventAction": "registration", "eventDate": "2010-01-01T00:00:00Z"}, {"eventAction": "expiration", "eventDate": "2029-08-13T04:00:00Z"}]}

@@ -126,7 +126,7 @@ void appendJsonString(std::string& out, const std::string& value) {
 
 // A connection is saved as one small JSON file:
 //   {"plugin":"weather","name":"Weather","next":3,"settings":{"unit":"C"},
-//    "cards":[{"id":"1","kind":"city","settings":{"city":"Ghent"}}]}
+//    "cards":[{"id":"1","kind":"city","settings":{"city":"Antwerp"}}]}
 
 void settingsToJson(JsonObject target, const PluginSettings& settings) {
     for (const auto& pair : settings) target[pair.first.c_str()] = pair.second.c_str();

@@ -8,7 +8,7 @@ plugin = {
   name = "Weather",
   description = "The temperature now and today's curve, for any number of cities",
   author = "DeskHog",
-  version = "1.2",
+  version = "1.3",
   refresh = 900, -- every card's load() runs again every 15 minutes
 }
 
@@ -63,7 +63,7 @@ cards = {
 
     -- Set per card.
     config = {
-      city = { label = "City", default = "Ghent" },
+      city = { label = "City", default = "Antwerp" },
     },
 
     load = function(card)

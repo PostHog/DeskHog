@@ -63,7 +63,7 @@ function makeDevice() {
             {
                 name: 'weather', title: 'Weather', multiCard: true,
                 config: [field('unit', 'Unit', { default: 'C', options: ['C', 'F'] })],
-                kinds: [{ key: 'city', name: 'City', config: [field('city', 'City', { default: 'Ghent' })] }],
+                kinds: [{ key: 'city', name: 'City', config: [field('city', 'City', { default: 'Antwerp' })] }],
             },
             {
                 name: 'posthog', title: 'PostHog', multiCard: true,
@@ -83,7 +83,7 @@ function makeDevice() {
         ],
         cards: [
             { type: 'PLUGIN', config: 'weather:1', name: 'City', plugin: 'weather', connection: 'weather', card: '1', kind: 'city', settings: { city: 'Lisbon' }, title: 'Lisbon', frames: 3, onScreen: true },
-            { type: 'PLUGIN', config: 'weather:2', name: 'Home', plugin: 'weather', connection: 'weather', card: '2', kind: 'city', settings: { city: 'Ghent' }, title: 'Ghent', frames: 1, onScreen: false },
+            { type: 'PLUGIN', config: 'weather:2', name: 'Home', plugin: 'weather', connection: 'weather', card: '2', kind: 'city', settings: { city: 'Antwerp' }, title: 'Antwerp', frames: 1, onScreen: false },
             { type: 'PLUGIN', config: 'hello:1', name: 'Hello', plugin: 'hello', connection: 'hello', card: '1', kind: 'main', settings: {}, frames: 2, onScreen: false },
             { type: 'PLUGIN', config: 'webhook:1', name: 'Webhook', plugin: 'webhook', connection: 'webhook', card: '1', kind: 'main', settings: {}, frames: 2, onScreen: false },
             { type: 'PLUGIN', config: 'posthog:1', name: 'Insight', plugin: 'posthog', connection: 'posthog', card: '1', kind: 'insight', settings: { id: '42' }, frames: 1, onScreen: false },

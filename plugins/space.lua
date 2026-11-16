@@ -10,7 +10,7 @@ plugin = {
   name = "Space",
   description = "How far away the space station is right now, and a countdown to the next rocket launch",
   author = "DeskHog",
-  version = "1.2",
+  version = "1.3",
   refresh = 30,
   fps = 1,
 }
@@ -77,7 +77,7 @@ cards = {
   station = {
     name = "Space station",
     config = {
-      city = { label = "Where you are (a city)", default = "Ghent" },
+      city = { label = "Where you are (a city)", default = "Antwerp" },
     },
     load = function(card)
       if card.place then return whereIsIt(card) end

@@ -1,0 +1,1 @@
+{"status": "OK", "meta": {"protocol": "https:", "hostname": "expired.badssl.com", "port": 443}, "certificate": {"issued_to": "*.badssl.com", "valid_to": "2015-04-12T23:59:59.000Z"}}

@@ -303,7 +303,7 @@ TEST(ui_lays_out_a_data_screen) {
     Fixture f;
     CHECK(f.start(R"(
         function draw()
-          ui.title("Ghent")
+          ui.title("Antwerp")
           ui.big("21°")
           ui.label("Cloudy")
           ui.chart({1, 2, 3})
@@ -311,7 +311,7 @@ TEST(ui_lays_out_a_data_screen) {
     )"));
     f.draw();
     CHECK(!f.plugin.failed());
-    CHECK(f.gfx.drew("text 8,6 #aaaaaa small left Ghent"));
+    CHECK(f.gfx.drew("text 8,6 #aaaaaa small left Antwerp"));
     // With the fake font sizes: the title takes 6..24 and the chart 99..129, so
     // the big value (44px) and the label (18px) are centred between 24 and 95.
     CHECK(f.gfx.drew("text 116,27 #ffffff large center 21°"));
@@ -465,7 +465,7 @@ TEST(config_uses_defaults_and_saved_settings) {
     Fixture f;
     const char* source = R"(
         config = {
-          city = { label = "City", default = "Ghent" },
+          city = { label = "City", default = "Antwerp" },
           days = { label = "Days", default = 3 },
           metric = { default = true },
           short = "plain",
@@ -477,7 +477,7 @@ TEST(config_uses_defaults_and_saved_settings) {
     )";
     CHECK(f.start(source));
     f.draw();
-    CHECK(f.gfx.drew("Ghent 3 integer true plain"));
+    CHECK(f.gfx.drew("Antwerp 3 integer true plain"));
     CHECK_EQ(f.plugin.configSchema().size(), (size_t)4);
 
     bool sawCity = false;
@@ -486,7 +486,7 @@ TEST(config_uses_defaults_and_saved_settings) {
         sawCity = true;
         CHECK_EQ(field.label, "City");
         CHECK_EQ(field.type, "string");
-        CHECK_EQ(field.defaultValue, "Ghent");
+        CHECK_EQ(field.defaultValue, "Antwerp");
     }
     CHECK(sawCity);
 
@@ -498,7 +498,7 @@ TEST(config_uses_defaults_and_saved_settings) {
     Fixture h;  // a saved value that is not a number keeps the default
     CHECK(h.start(source, {{"days", "lots"}}));
     h.draw();
-    CHECK(h.gfx.drew("Ghent 3 integer"));
+    CHECK(h.gfx.drew("Antwerp 3 integer"));
 }
 
 // --------------------------------------------------------------------- http
@@ -1357,12 +1357,12 @@ TEST(sample_weather_handles_bad_answers) {
 }
 
 TEST(sample_weather_two_cities_share_the_unit) {
-    RecordingGfx ghent, lisbon;
+    RecordingGfx antwerp, lisbon;
     MockServices services;
-    LuaPlugin plugin(ghent, services);
+    LuaPlugin plugin(antwerp, services);
     const std::string source = readFile(g_pluginDir + "/weather.lua");
     CHECK(plugin.start("weather", source.data(), source.size(), {{"unit", "F"}}));
-    CHECK(plugin.addCard("a", "city", {{"city", "Ghent"}}, ghent));
+    CHECK(plugin.addCard("a", "city", {{"city", "Antwerp"}}, antwerp));
     CHECK(plugin.addCard("b", "city", {{"city", "Lisbon"}}, lisbon));
     CHECK_EQ(services.requests.size(), (size_t)2);
 
@@ -1380,8 +1380,8 @@ TEST(sample_weather_two_cities_share_the_unit) {
 
     plugin.draw("a");
     plugin.draw("b");
-    CHECK(ghent.drew("small left Ghent"));
-    CHECK(ghent.drew("Loading..."));        // its own lookup has not come back yet
+    CHECK(antwerp.drew("small left Antwerp"));
+    CHECK(antwerp.drew("Loading..."));        // its own lookup has not come back yet
     CHECK(lisbon.drew("large center 64°"));
     CHECK(lisbon.drew("small center Clear"));
     CHECK_EQ(plugin.cardTitle("a"), "");
@@ -2312,15 +2312,15 @@ TEST(sample_trains) {
     CHECK(f.startFile("trains", {}, {{"station", "Gent Sint Pieters"}}));
     CHECK_EQ(f.services.requests[0].request.url,
              "https://api.irail.be/v1/liveboard?format=json&lang=en&arrdep=departure&station=Gent%20Sint%20Pieters");
-    const std::string board = R"({"version":"1.3","station":"Ghent-Sint-Pieters","departures":{"number":"4","departure":[
+    const std::string board = R"({"version":"1.3","station":"Antwerp-Central","departures":{"number":"4","departure":[
         {"id":"0","station":"Brugge","time":")" + std::to_string(now + 420) + R"(","delay":"0","canceled":"0","platform":"5","vehicle":"x"},
-        {"id":"1","station":"Antwerpen-Centraal","time":")" + std::to_string(now + 900) + R"(","delay":"300","canceled":"0","platform":"8"},
+        {"id":"1","station":"Antwerp-Central","time":")" + std::to_string(now + 900) + R"(","delay":"300","canceled":"0","platform":"8"},
         {"id":"2","station":"Oostende","time":")" + std::to_string(now + 1200) + R"(","delay":"0","canceled":"1","platform":"3"},
         {"id":"3","station":"Left already","time":")" + std::to_string(now - 600) + R"(","delay":"0","canceled":"0","platform":"1"}]}})";
     f.respond(0, 200, board);
-    CHECK_EQ(f.plugin.cardTitle("1"), "Ghent-Sint-Pieters");
+    CHECK_EQ(f.plugin.cardTitle("1"), "Antwerp-Central");
     f.draw();
-    CHECK(f.gfx.drew("small left Ghent-Sint-Pieters"));
+    CHECK(f.gfx.drew("small left Antwerp-Central"));
     CHECK(f.gfx.drew("medium left 7 min"));
     CHECK(f.gfx.drew("medium left Brugge"));
     CHECK(f.gfx.drew("medium right 5"));
@@ -2340,7 +2340,7 @@ TEST(sample_trains) {
     CHECK(filtered.startFile("trains", {}, {{"towards", "ANTW"}}));
     filtered.respond(0, 200, board);
     filtered.draw();
-    CHECK(filtered.gfx.drew("Antwerpen-Centraal"));
+    CHECK(filtered.gfx.drew("Antwerp-Central"));
     CHECK(!filtered.gfx.drew("Brugge"));
 
     Fixture unknown;
@@ -2363,14 +2363,14 @@ TEST(sample_rain) {
     };
     for (const Case& c : cases) {
         Fixture f;
-        CHECK(f.startFile("rain", {{"city", "Gent"}}));
-        f.respond(0, 200, R"({"results":[{"name":"Ghent","latitude":51.05,"longitude":3.72}]})");
+        CHECK(f.startFile("rain", {{"city", "Antwerpen"}}));
+        f.respond(0, 200, R"({"results":[{"name":"Antwerp","latitude":51.22,"longitude":4.40}]})");
         CHECK(contains(f.services.requests[1].request.url, "minutely_15=precipitation&forecast_minutely_15=8"));
         f.respond(1, 200, std::string(R"({"minutely_15":{"time":[],"precipitation":)") + c.amounts + "}}");
         f.draw();
         if (!f.gfx.drew(c.expect)) printf("  %s: expected %s, drew\n%s", c.amounts, c.expect, f.gfx.dump().c_str());
         CHECK(f.gfx.drew(c.expect));
-        CHECK(f.gfx.drew("small left Rain in Ghent"));
+        CHECK(f.gfx.drew("small left Rain in Antwerp"));
         CHECK(!f.plugin.failed());
     }
     Fixture nowhere;
@@ -2485,15 +2485,15 @@ TEST(sample_crypto) {
 
 TEST(sample_space) {
     Fixture f;
-    CHECK(startKind(f, "space", "station", {}, {{"city", "Gent"}}));
-    CHECK(contains(f.services.requests[0].request.url, "geocoding-api.open-meteo.com/v1/search?count=1&name=Gent"));
-    f.respond(0, 200, R"({"results":[{"name":"Ghent","latitude":51.05,"longitude":3.72}]})");
+    CHECK(startKind(f, "space", "station", {}, {{"city", "Antwerpen"}}));
+    CHECK(contains(f.services.requests[0].request.url, "geocoding-api.open-meteo.com/v1/search?count=1&name=Antwerpen"));
+    f.respond(0, 200, R"({"results":[{"name":"Antwerp","latitude":51.22,"longitude":4.40}]})");
     CHECK_EQ(f.services.requests[1].request.url, "https://api.wheretheiss.at/v1/satellites/25544");
     // Over Western Australia: a long way to the east.
     f.respond(1, 200, R"({"name":"iss","latitude":-29.17,"longitude":123.61,"visibility":"daylight","velocity":27538.3})");
     f.draw();
     CHECK(f.gfx.drew(" km"));
-    CHECK(f.gfx.drew("to the east of Ghent"));
+    CHECK(f.gfx.drew("to the east of Antwerp"));
     CHECK(f.gfx.drew("Over 29°S 124°E, in"));
     CHECK_EQ(f.services.led, "default");
 
@@ -2503,7 +2503,7 @@ TEST(sample_space) {
     f.respond(2, 200, R"({"latitude":52.4,"longitude":4.9,"visibility":"eclipsed"})");
     CHECK_EQ(f.services.led, "#3498db for 20000ms");
     f.draw();
-    CHECK(f.gfx.drew("large center 171 km"));
+    CHECK(f.gfx.drew("large center 136 km"));
     CHECK(f.gfx.drew("above your horizon"));
     CHECK(f.gfx.drew("in the dark"));
 
