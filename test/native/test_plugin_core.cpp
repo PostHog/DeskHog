@@ -2631,8 +2631,9 @@ TEST(sample_whack) {
     CHECK(f.gfx.drew("large center 1"));
     CHECK(f.gfx.drew("Bonk!"));
     CHECK_EQ(f.button(buttons[burrow]), true);  // a second tap on the same one is forgiven
-    f.runFrames(0.5f);                          // long enough for "Bonk!" to go, too short for the next one to get away
-    CHECK_EQ(f.button(buttons[(burrow + 1) % 3]), true);  // an empty burrow, or the wrong one: a life
+    CHECK(contains(f.services.led, "#2ecc71"));
+    // Straight away, before the next hedgehog can be up: a tap on an empty burrow costs a life.
+    CHECK_EQ(f.button(buttons[(burrow + 1) % 3]), true);
     CHECK(contains(f.services.led, "#e74c3c"));
 
     f.runFrames(12.0f);                         // the rest get away
