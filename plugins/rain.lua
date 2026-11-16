@@ -4,8 +4,8 @@
 plugin = {
   name = "Rain",
   description = "Whether it will rain in the next two hours, where you are, quarter by quarter",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 600,
 }
 

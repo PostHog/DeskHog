@@ -7,8 +7,8 @@
 plugin = {
   name = "Weather",
   description = "The temperature now and today's curve, for any number of cities",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 900, -- every card's load() runs again every 15 minutes
 }
 

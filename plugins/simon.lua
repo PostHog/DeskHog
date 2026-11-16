@@ -7,8 +7,8 @@
 plugin = {
   name = "Simon",
   description = "Watch the pattern, repeat the pattern. It gets longer every round",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 30,
 }
 

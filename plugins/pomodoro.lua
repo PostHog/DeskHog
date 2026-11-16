@@ -12,8 +12,8 @@
 plugin = {
   name = "Pomodoro",
   description = "Focus for 25 minutes, take a break, repeat. The LED shows which it is",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 2,
   refresh = 5, -- load() every five seconds, also while another card is showing
 }

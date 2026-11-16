@@ -9,8 +9,8 @@
 plugin = {
   name = "Space",
   description = "How far away the space station is right now, and a countdown to the next rocket launch",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 30,
   fps = 1,
 }

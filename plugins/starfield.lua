@@ -3,8 +3,8 @@
 plugin = {
   name = "Starfield",
   description = "Stars flying past, for when the desk needs to look busy",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 20,
 }
 

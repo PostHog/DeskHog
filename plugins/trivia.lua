@@ -11,8 +11,8 @@
 plugin = {
   name = "Trivia",
   description = "Ten questions, three answers, one button each. From the Open Trivia Database",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 10,
 }
 

@@ -5,8 +5,8 @@
 plugin = {
   name = "Deploy button",
   description = "Press, confirm, and your deploy hook is called. Shows whether it worked and when it last ran",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 4,
 }
 

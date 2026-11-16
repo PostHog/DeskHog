@@ -4,8 +4,8 @@
 plugin = {
   name = "Trains (Belgium)",
   description = "The next departures from a Belgian station, with delays and platforms",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 60,
   fps = 1,
 }

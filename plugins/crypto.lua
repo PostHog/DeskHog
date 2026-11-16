@@ -7,8 +7,8 @@
 plugin = {
   name = "Crypto prices",
   description = "The price of a coin, how it moved today, and the last 24 hours as a chart",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 300,
 }
 

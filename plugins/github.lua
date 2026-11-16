@@ -9,8 +9,8 @@
 plugin = {
   name = "GitHub",
   description = "Open pull requests and whether the build passes, per repository. Red LED on failure",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 300,
 }
 

@@ -4,8 +4,8 @@
 plugin = {
   name = "Breakout",
   description = "A bat, a ball and a wall of bricks. Three lives",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 30,
 }
 

@@ -14,8 +14,8 @@
 plugin = {
   name = "Homey",
   description = "A card per Homey Pro device: one of its values, and a button that starts a flow",
-  author = "Tim Broddin",
-  version = "0.9.1",
+  author = "DeskHog",
+  version = "0.9.2",
   refresh = 30,
 }
 

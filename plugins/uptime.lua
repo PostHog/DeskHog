@@ -4,8 +4,8 @@
 plugin = {
   name = "Uptime",
   description = "Checks up to five web addresses every two minutes. Red LED when one is down",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 120,
 }
 

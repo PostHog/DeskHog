@@ -9,8 +9,8 @@
 plugin = {
   name = "Pet hedgehog",
   description = "A hedgehog that gets hungry and bored, sleeps at night and likes a pat",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 4,
   refresh = 60, -- he also gets hungry while another card is showing
 }

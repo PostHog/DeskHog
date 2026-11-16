@@ -4,8 +4,8 @@
 plugin = {
   name = "Countdown",
   description = "How long until the launch, the holiday, the birthday. A card per date",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   fps = 1,
 }
 

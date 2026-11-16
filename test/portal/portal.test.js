@@ -463,7 +463,7 @@ test('directory: shows what there is and how it relates to the device', async ()
         { name: 'webhook', title: 'Webhook', note: 'Changed on this device', buttons: ['Replace with this one', 'Add a card'] },
     ], 'each plugin says what can be done with it');
     equal(offer(document, 'clock').querySelector('a').href, 'https://github.com/TimBroddin/DeskHog/blob/HEAD/plugins/clock.lua', 'and links to its code');
-    check(text(offer(document, 'clock')).includes('By Tim Broddin, version 1.0'), 'with who wrote it');
+    check(text(offer(document, 'clock')).includes('By DeskHog, version 1.0'), 'with who wrote it');
     equal(offer(document, 'clock').querySelector('img.shot').src, 'https://raw.githubusercontent.com/TimBroddin/DeskHog/HEAD/plugins/screenshots/clock.png', 'and a picture of its card, from the directory');
     check(!offer(document, 'hello').querySelector('img'), 'a plugin without a picture has none');
     offer(document, 'weather').querySelector('img.shot').dispatchEvent(new window.Event('error'));

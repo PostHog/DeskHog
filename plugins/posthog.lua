@@ -7,8 +7,8 @@
 plugin = {
   name = "PostHog",
   description = "PostHog insights on your desk: big numbers, line charts and funnels",
-  author = "Tim Broddin",
-  version = "1.1",
+  author = "DeskHog",
+  version = "1.2",
   refresh = 600, -- every card's load() runs again every 10 minutes
 }
 
