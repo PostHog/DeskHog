@@ -8,8 +8,8 @@
 plugin = {
   name = "Hog run",
   description = "An endless run: jump the logs, roll under the bees",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

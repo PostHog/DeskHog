@@ -30,7 +30,8 @@ function makeDirectory() {
         'clock.lua': sourceOf('Clock', '1.0'),
     };
     const entry = (name, title, version, description) => ({
-        name, title, version, description, author: 'DeskHog', file: name + '.lua',
+        name, title, version, description, author: 'Tim Broddin', file: name + '.lua',
+        screenshot: name === 'hello' ? undefined : 'screenshots/' + name + '.png',   // not every plugin has a picture
         size: files[name + '.lua'].length, hash: sourceHash(files[name + '.lua']),
     });
     const index = {

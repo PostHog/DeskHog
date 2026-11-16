@@ -4,8 +4,8 @@
 plugin = {
   name = "Reaction timer",
   description = "Wait for green, then press. How many milliseconds did you need?",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

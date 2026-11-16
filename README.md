@@ -27,7 +27,7 @@ A [plug-and-play DeskHog hardware kit](https://posthog.com/merch) is coming soon
 
 DeskHog runs plugins: small Lua files that show up as cards. You install them over WiFi from the device's web page or the command line, with no recompiling and no reflashing.
 
-The web page has a plugin directory (Plugins, Get plugins): pick what you want and it is installed. The directory is the [`plugins/`](plugins) folder of this repository on GitHub, so adding a plugin for everyone is a pull request, and you can point a device at a directory of your own. A freshly flashed device starts empty; the firmware carries no plugins unless you list some in `plugins/bundled.txt`.
+The web page has a plugin directory, with a picture of every card: it is the Plugins page, and what it offers is also among the choices when you add a card. Pick what you want and it is installed. The directory is the [`plugins/`](plugins) folder of this repository on GitHub, so adding a plugin for everyone is a pull request, and you can point a device at a directory of your own. A freshly flashed device starts empty; the firmware carries no plugins unless you list some in `plugins/bundled.txt`.
 
 ```lua
 plugin = { name = "Counter" }
@@ -57,13 +57,74 @@ Plugins can fetch JSON from any API, draw freely, react to the three buttons, se
 
 One plugin can provide several cards that share settings, such as one account with a card per chart. The device's web page (open `http://deskhog.local`) is where you add, arrange and set up cards. It shows a live picture of each one, and the device's three buttons work from the page, so you can try a card without reaching for the device. On a computer it has a wide layout with an editor for plugin code.
 
-[**Read the plugin guide**](plugins/README.md), or start from the ones in [`plugins/`](plugins):
+[**Read the plugin guide**](plugins/README.md) to write your own.
 
-- **On your desk:** a clock, a countdown, a Pomodoro timer, Max the hedgehog, a pet hedgehog that wants feeding, icebreaker questions, dad jokes, a starfield.
-- **Games:** Flappy Hog, Paddle, Snake, Breakout, Simon, a reaction timer, rock-paper-scissors, Whack-a-hog, a trivia quiz, Hog run, Lander and Blocks.
-- **For work:** PostHog insights, GitHub pull requests and build status, an uptime check, a deploy button, a webhook button.
-- **Around you:** weather, rain in the next two hours, Belgian train departures, theme park queue times, crypto prices, the space station and the next rocket launch.
-- **Your home:** Home Assistant and Homey Pro.
+### The plugins
+
+These are in [`plugins/`](plugins), which is also the plugin directory: on the device's web page, Get plugins shows them all, and Add card offers them too. None is built into the firmware.
+
+<!-- plugin-list:start (written by `tools/deskhog index`; do not edit by hand) -->
+<table>
+<tr>
+<td width="33%" valign="top"><a href="plugins/blocks.lua"><img src="plugins/screenshots/blocks.png" width="233" alt="Blocks"></a><br><b><a href="plugins/blocks.lua">Blocks</a></b><br>Falling pairs of colours: bring three together and they are gone</td>
+<td width="33%" valign="top"><a href="plugins/breakout.lua"><img src="plugins/screenshots/breakout.png" width="233" alt="Breakout"></a><br><b><a href="plugins/breakout.lua">Breakout</a></b><br>A bat, a ball and a wall of bricks. Three lives</td>
+<td width="33%" valign="top"><a href="plugins/clock.lua"><img src="plugins/screenshots/clock.png" width="233" alt="Clock"></a><br><b><a href="plugins/clock.lua">Clock</a></b><br>The time in large digits, with the date under it</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/countdown.lua"><img src="plugins/screenshots/countdown.png" width="233" alt="Countdown"></a><br><b><a href="plugins/countdown.lua">Countdown</a></b><br>How long until the launch, the holiday, the birthday. A card per date</td>
+<td width="33%" valign="top"><a href="plugins/crypto.lua"><img src="plugins/screenshots/crypto.png" width="233" alt="Crypto prices"></a><br><b><a href="plugins/crypto.lua">Crypto prices</a></b><br>The price of a coin, how it moved today, and the last 24 hours as a chart</td>
+<td width="33%" valign="top"><a href="plugins/joke.lua"><img src="plugins/screenshots/joke.png" width="233" alt="Dad jokes"></a><br><b><a href="plugins/joke.lua">Dad jokes</a></b><br>A new dad joke every half hour, or whenever you press the button</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/deploy.lua"><img src="plugins/screenshots/deploy.png" width="233" alt="Deploy button"></a><br><b><a href="plugins/deploy.lua">Deploy button</a></b><br>Press, confirm, and your deploy hook is called. Shows whether it worked and when it last ran</td>
+<td width="33%" valign="top"><a href="plugins/flappy.lua"><img src="plugins/screenshots/flappy.png" width="233" alt="Flappy Hog"></a><br><b><a href="plugins/flappy.lua">Flappy Hog</a></b><br>One button. Endless frustration. Infinite glory.</td>
+<td width="33%" valign="top"><a href="plugins/github.lua"><img src="plugins/screenshots/github.png" width="233" alt="GitHub"></a><br><b><a href="plugins/github.lua">GitHub</a></b><br>Open pull requests and whether the build passes, per repository. Red LED on failure</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/hello.lua"><img src="plugins/screenshots/hello.png" width="233" alt="Hello"></a><br><b><a href="plugins/hello.lua">Hello</a></b><br>The smallest useful plugin: three lines of text and a press counter</td>
+<td width="33%" valign="top"><a href="plugins/runner.lua"><img src="plugins/screenshots/runner.png" width="233" alt="Hog run"></a><br><b><a href="plugins/runner.lua">Hog run</a></b><br>An endless run: jump the logs, roll under the bees</td>
+<td width="33%" valign="top"><a href="plugins/homeassistant.lua"><img src="plugins/screenshots/homeassistant.png" width="233" alt="Home Assistant"></a><br><b><a href="plugins/homeassistant.lua">Home Assistant</a></b><br>A card per entity: its state, and a button to toggle it or run a script or scene</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/homey.lua"><img src="plugins/screenshots/homey.png" width="233" alt="Homey"></a><br><b><a href="plugins/homey.lua">Homey</a></b><br>A card per Homey Pro device: one of its values, and a button that starts a flow</td>
+<td width="33%" valign="top"><a href="plugins/lander.lua"><img src="plugins/screenshots/lander.png" width="233" alt="Lander"></a><br><b><a href="plugins/lander.lua">Lander</a></b><br>Three thrusters, a little fuel and a landing pad that keeps shrinking</td>
+<td width="33%" valign="top"><a href="plugins/friend.lua"><img src="plugins/screenshots/friend.png" width="233" alt="Max"></a><br><b><a href="plugins/friend.lua">Max</a></b><br>Max the hedgehog keeps you company and thinks you are doing fine</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/paddle.lua"><img src="plugins/screenshots/paddle.png" width="233" alt="Paddle"></a><br><b><a href="plugins/paddle.lua">Paddle</a></b><br>First to five points beats the hedgehog on the other side</td>
+<td width="33%" valign="top"><a href="plugins/pet.lua"><img src="plugins/screenshots/pet.png" width="233" alt="Pet hedgehog"></a><br><b><a href="plugins/pet.lua">Pet hedgehog</a></b><br>A hedgehog that gets hungry and bored, sleeps at night and likes a pat</td>
+<td width="33%" valign="top"><a href="plugins/pomodoro.lua"><img src="plugins/screenshots/pomodoro.png" width="233" alt="Pomodoro"></a><br><b><a href="plugins/pomodoro.lua">Pomodoro</a></b><br>Focus for 25 minutes, take a break, repeat. The LED shows which it is</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/posthog.lua"><img src="plugins/screenshots/posthog.png" width="233" alt="PostHog"></a><br><b><a href="plugins/posthog.lua">PostHog</a></b><br>PostHog insights on your desk: big numbers, line charts and funnels</td>
+<td width="33%" valign="top"><a href="plugins/question.lua"><img src="plugins/screenshots/question.png" width="233" alt="Questions"></a><br><b><a href="plugins/question.lua">Questions</a></b><br>Icebreaker questions for the minutes before a meeting starts</td>
+<td width="33%" valign="top"><a href="plugins/rain.lua"><img src="plugins/screenshots/rain.png" width="233" alt="Rain"></a><br><b><a href="plugins/rain.lua">Rain</a></b><br>Whether it will rain in the next two hours, where you are, quarter by quarter</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/reaction.lua"><img src="plugins/screenshots/reaction.png" width="233" alt="Reaction timer"></a><br><b><a href="plugins/reaction.lua">Reaction timer</a></b><br>Wait for green, then press. How many milliseconds did you need?</td>
+<td width="33%" valign="top"><a href="plugins/rps.lua"><img src="plugins/screenshots/rps.png" width="233" alt="Rock paper scissors"></a><br><b><a href="plugins/rps.lua">Rock paper scissors</a></b><br>One button per hand. First to three beats the hedgehog</td>
+<td width="33%" valign="top"><a href="plugins/simon.lua"><img src="plugins/screenshots/simon.png" width="233" alt="Simon"></a><br><b><a href="plugins/simon.lua">Simon</a></b><br>Watch the pattern, repeat the pattern. It gets longer every round</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/snake.lua"><img src="plugins/screenshots/snake.png" width="233" alt="Snake"></a><br><b><a href="plugins/snake.lua">Snake</a></b><br>Two buttons to steer, one to pause. Eat, grow, don&#x27;t bite yourself</td>
+<td width="33%" valign="top"><a href="plugins/space.lua"><img src="plugins/screenshots/space.png" width="233" alt="Space"></a><br><b><a href="plugins/space.lua">Space</a></b><br>How far away the space station is right now, and a countdown to the next rocket launch</td>
+<td width="33%" valign="top"><a href="plugins/starfield.lua"><img src="plugins/screenshots/starfield.png" width="233" alt="Starfield"></a><br><b><a href="plugins/starfield.lua">Starfield</a></b><br>Stars flying past, for when the desk needs to look busy</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/queues.lua"><img src="plugins/screenshots/queues.png" width="233" alt="Theme park queues"></a><br><b><a href="plugins/queues.lua">Theme park queues</a></b><br>The longest waits in a theme park right now, or the rides you care about</td>
+<td width="33%" valign="top"><a href="plugins/trains.lua"><img src="plugins/screenshots/trains.png" width="233" alt="Trains (Belgium)"></a><br><b><a href="plugins/trains.lua">Trains (Belgium)</a></b><br>The next departures from a Belgian station, with delays and platforms</td>
+<td width="33%" valign="top"><a href="plugins/trivia.lua"><img src="plugins/screenshots/trivia.png" width="233" alt="Trivia"></a><br><b><a href="plugins/trivia.lua">Trivia</a></b><br>Ten questions, three answers, one button each. From the Open Trivia Database</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/uptime.lua"><img src="plugins/screenshots/uptime.png" width="233" alt="Uptime"></a><br><b><a href="plugins/uptime.lua">Uptime</a></b><br>Checks up to five web addresses every two minutes. Red LED when one is down</td>
+<td width="33%" valign="top"><a href="plugins/weather.lua"><img src="plugins/screenshots/weather.png" width="233" alt="Weather"></a><br><b><a href="plugins/weather.lua">Weather</a></b><br>The temperature now and today&#x27;s curve, for any number of cities</td>
+<td width="33%" valign="top"><a href="plugins/webhook.lua"><img src="plugins/screenshots/webhook.png" width="233" alt="Webhook"></a><br><b><a href="plugins/webhook.lua">Webhook</a></b><br>A button that calls a web address and lights the LED</td>
+</tr>
+<tr>
+<td width="33%" valign="top"><a href="plugins/whack.lua"><img src="plugins/screenshots/whack.png" width="233" alt="Whack-a-hog"></a><br><b><a href="plugins/whack.lua">Whack-a-hog</a></b><br>Three burrows, three buttons. Bonk the hedgehog before it ducks</td>
+</tr>
+</table>
+<!-- plugin-list:end -->
 
 Every card is a plugin. The cards that used to be compiled into the firmware (Max, the question card, Flappy Hog, Paddle, hello world) are Lua files now, which you can read and change on the device's web page. Only the WiFi and status screen is still part of the firmware.
 

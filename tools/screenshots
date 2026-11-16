@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Make the pictures in plugins/screenshots/ with the simulator.
+
+    tools/screenshots               every plugin
+    tools/screenshots snake trivia  only these
+
+Each plugin is run by tools/sim/run.sh the way its recipe below says: which
+settings, which buttons when, and for the plugins that need an account, a
+sample answer from tools/sim/replies/ instead of the network. A plugin without
+a recipe is simply run for two seconds.
+
+The picture is the card at twice its size, 466 by 270 pixels. Afterwards run
+`tools/deskhog index`, which lists the pictures in plugins/index.json and in
+the README.
+"""
+
+import os
+import shlex
+import struct
+import subprocess
+import sys
+import tempfile
+import zlib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLUGINS = os.path.join(ROOT, "plugins")
+SHOTS = os.path.join(PLUGINS, "screenshots")
+REPLIES = os.path.join(ROOT, "tools", "sim", "replies")
+FIXTURES = os.path.join(ROOT, "test", "native", "fixtures")
+
+# Arguments for tools/sim/run.sh. {replies} and {fixtures} are folders with sample answers.
+RECIPES = {
+    "blocks": "--seconds 9.5 --press center@0.3,down@0.8,up@1.2,down@1.5,up@2,up@2.2,down@2.5,up@3,up@3.2,up@3.4,down@3.7,"
+    "center@4.2,up@4.4,up@4.6,up@4.8,up@5,down@5.3,up@5.8,down@6.1,up@6.6,up@6.8,down@7.1,up@7.6,up@7.8,up@8,down@8.3",
+    "breakout": "--seconds 2.3 --press center@0.3,center@0.8 --hold down@1-1.5",
+    "clock": "--set offset=1",
+    "countdown": "--set what=Holiday --set date=2027-07-01",
+    "crypto": "--seconds 6 --set coin=bitcoin",
+    "deploy": "--set url=https://example.com/deploy --set label='Ship it'",
+    "flappy": "--seconds 2.3 --press center@0.5,center@1.1,center@1.7,center@2.1",
+    "github": "--set repo=acme/app --reply /actions/runs={replies}/github-runs.json --reply /search/issues={replies}/github-pulls.json",
+    "homeassistant": "--set url=http://homeassistant.local:8123 --set token=sample --set entity=sensor.office_temperature "
+    "--reply /api/states/={replies}/homeassistant.json",
+    "homey": "--set url=http://homey.local --set key=sample --set device=abc-123 --reply /api/manager/devices/={replies}/homey.json",
+    "joke": "--reply icanhazdadjoke={replies}/joke.json",
+    "lander": "--seconds 2.9 --press center@0.3 --hold center@2-3",
+    "paddle": "--seconds 2.6 --press center@0.3,center@0.8 --hold down@1-1.6",
+    "pomodoro": "--seconds 4 --press center@0.5",
+    "posthog": "--set project=1 --set key=sample --set id=sample --reply /insights/={fixtures}/posthog-line.json",
+    "queues": "--set title=Park --reply queue-times.com={replies}/queues.json",
+    "rain": "--reply geocoding={replies}/rain-place.json --reply minutely_15={replies}/rain.json",
+    "reaction": "--seconds 1 --press center@0.4",
+    "rps": "--seconds 2.4 --press center@0.3,down@0.6",
+    "runner": "--seconds 2.9 --press center@0.3,center@1.5,center@2.6",
+    "simon": "--seconds 1.25 --press center@0.3",
+    "snake": "--seconds 7 --press center@0.3,down@1.2,down@2.4,up@3.2,up@4.4,down@5.3,down@6.2",
+    "space": "--seconds 6 --card station",
+    "starfield": "--seconds 4",
+    "trains": "--seconds 6 --set station=Gent-Sint-Pieters",
+    "trivia": "--seconds 1.5 --press center@0.5 --reply opentdb.com={replies}/trivia.json",
+    "uptime": "--seconds 8 --set sites='example.com example.org'",
+    "weather": "--seconds 6",
+    "webhook": "--set url=https://example.com/hook --set label='Open the door'",
+    "whack": "--seconds 1.6 --press center@0.3",
+}
+
+
+def read_png(path):
+    """Width, height and raw scanlines of a PNG as the simulator writes it (8-bit RGB)."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    position, header, packed = 8, None, b""
+    while position < len(data):
+        length, kind = struct.unpack(">I4s", data[position:position + 8])
+        body = data[position + 8:position + 8 + length]
+        if kind == b"IHDR":
+            header = body
+        elif kind == b"IDAT":
+            packed += body
+        position += 12 + length
+    width, height = struct.unpack(">II", header[:8])
+    return width, height, header, zlib.decompress(packed)
+
+
+def write_png(path, header, raw):
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    with open(path, "wb") as handle:
+        handle.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def main():
+    names = sys.argv[1:]
+    if any(name.startswith("-") for name in names):
+        print(__doc__.strip())
+        return 0
+    if not names:
+        names = sorted(name[:-4] for name in os.listdir(PLUGINS) if name.endswith(".lua"))
+    os.makedirs(SHOTS, exist_ok=True)
+    failed = []
+    with tempfile.TemporaryDirectory() as scratch:
+        for name in names:
+            source = os.path.join(PLUGINS, name + ".lua")
+            if not os.path.exists(source):
+                print("%-14s there is no plugins/%s.lua" % (name, name))
+                failed.append(name)
+                continue
+            recipe = RECIPES.get(name, "").format(replies=REPLIES, fixtures=FIXTURES)
+            large = os.path.join(scratch, name + ".png")
+            command = [os.path.join(ROOT, "tools", "sim", "run.sh"), source, "--scale", "2", "--out", large] + shlex.split(recipe)
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0 or not os.path.exists(large):
+                print("%-14s failed:\n%s" % (name, (result.stdout + result.stderr).strip()))
+                failed.append(name)
+                continue
+            width, height, header, raw = read_png(large)
+            target = os.path.join(SHOTS, name + ".png")
+            write_png(target, header, raw)
+            print("%-14s %dx%d, %.1f KB" % (name, width, height, os.path.getsize(target) / 1024))
+    if failed:
+        print("No picture for: %s" % ", ".join(failed), file=sys.stderr)
+        return 1
+    print("Now run tools/deskhog index, so the index and the README list them.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -32,7 +32,10 @@
                 <div class="col">
                     <header class="page-head">
                         <h1>Cards</h1>
-                        <button type="button" id="add-card-btn" class="primary">Add card</button>
+                        <span class="head-buttons">
+                            <button type="button" id="cards-get-plugins-btn">Get plugins</button>
+                            <button type="button" id="add-card-btn" class="primary">Add card</button>
+                        </span>
                     </header>
                     <p class="hint" id="cards-hint">The screens on your DeskHog, in the order its buttons step through them. Drag to reorder.</p>
                     <div id="cards-list" class="tiles"><p class="empty">Loading…</p></div>
@@ -57,10 +60,10 @@
             <div class="split code-split">
                 <div class="col">
                     <header class="page-head"><h1>Plugins</h1></header>
-                    <p class="hint">Small Lua programs that draw the cards. Get them from the plugin directory, or write your own.</p>
+                    <p class="hint">Small Lua programs that draw the cards. Install them from the plugin directory, or write your own.</p>
+                    <h2 class="sub">On this DeskHog</h2>
                     <div id="plugins-list" class="list"></div>
                     <div class="row-buttons">
-                        <button type="button" id="get-plugins-btn" class="primary">Get plugins</button>
                         <button type="button" id="new-plugin-btn">New plugin</button>
                         <button type="button" id="upload-plugin-btn">Upload a .lua file</button>
                         <input type="file" id="upload-plugin-input" accept=".lua,text/plain" hidden>
@@ -88,8 +91,9 @@
                     <p id="plugin-result" class="result" role="status"></p>
                     <pre id="plugin-log" class="log" hidden></pre>
                 </div>
-                <!-- What the plugin directory offers. The browser fetches it, not the device. -->
-                <div id="directory-pane" class="pane" hidden></div>
+                <!-- What the plugin directory offers: what this page shows unless a plugin's code is open.
+                     The browser fetches it, not the device. -->
+                <div id="directory-pane" class="pane"></div>
             </div>
         </section>
 

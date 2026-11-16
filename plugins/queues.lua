@@ -8,8 +8,8 @@
 plugin = {
   name = "Theme park queues",
   description = "The longest waits in a theme park right now, or the rides you care about",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   refresh = 300,
 }
 

@@ -55,9 +55,11 @@ http.createServer(async (request, response) => {
     const pathname = request.url.split('?')[0];
     if (pathname.startsWith('/directory/')) {
         // Like raw.githubusercontent.com: plain files that any page may fetch.
-        const file = path.join(pluginDir, path.basename(pathname));
-        const found = /\.(lua|json)$/.test(file) && fs.existsSync(file);
-        response.writeHead(found ? 200 : 404, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        const picture = /^\/directory\/screenshots\/[a-z0-9_-]+\.png$/.test(pathname);
+        const file = path.join(pluginDir, picture ? 'screenshots' : '', path.basename(pathname));
+        const found = (picture || /\.(lua|json)$/.test(file)) && fs.existsSync(file);
+        const type = found && picture ? 'image/png' : 'text/plain; charset=utf-8';
+        response.writeHead(found ? 200 : 404, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
         response.end(found ? fs.readFileSync(file) : 'Not found');
         return;
     }

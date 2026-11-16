@@ -4,8 +4,8 @@
 plugin = {
   name = "Flappy Hog",
   description = "One button. Endless frustration. Infinite glory.",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

@@ -97,7 +97,7 @@ The three levels are plugin (the code), connection (a plugin plus settings its c
 
 Plugins only ever run on the UI task (core 1). The web server and the network task reach them through queues that `PluginManager::tick()` drains on the UI task, which fits the task rules above.
 
-Plugins reach a device from a plugin directory: a folder with an `index.json` in a git repository, by default `plugins/` in this one (`PLUGIN_DIRECTORY` in `PluginManager.cpp`, changeable per device on the web page). The device only stores the directory's address. The web page and `tools/deskhog` do the fetching, because the browser has the internet connection, the memory and certificate checks that the device would have to spend scarce internal RAM on. `tools/deskhog index` writes the index; `plugins2c.py` embeds the plugins named in `plugins/bundled.txt` (none by default) into the firmware for a first boot without internet.
+Plugins reach a device from a plugin directory: a folder with an `index.json` in a git repository, by default `plugins/` in this one (`PLUGIN_DIRECTORY` in `PluginManager.cpp`, changeable per device on the web page). The device only stores the directory's address. The web page and `tools/deskhog` do the fetching, because the browser has the internet connection, the memory and certificate checks that the device would have to spend scarce internal RAM on. `tools/deskhog index` writes the index and the list of plugins in the README, and `tools/screenshots` makes the picture of each plugin's card (`plugins/screenshots/`) with the simulator; `plugins2c.py` embeds the plugins named in `plugins/bundled.txt` (none by default) into the firmware for a first boot without internet.
 
 Two ways to check plugin work without a device:
 

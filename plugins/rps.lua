@@ -7,8 +7,8 @@
 plugin = {
   name = "Rock paper scissors",
   description = "One button per hand. First to three beats the hedgehog",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

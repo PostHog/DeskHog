@@ -226,6 +226,12 @@ struct Press {
     uint32_t atMs;
 };
 
+struct Hold {
+    Button button;
+    uint32_t fromMs;
+    uint32_t toMs;
+};
+
 bool parseButton(const std::string& name, Button& out) {
     if (name == "down") out = Button::Down;
     else if (name == "center") out = Button::Center;
@@ -239,6 +245,8 @@ void usage() {
            "  --out FILE        where to save the PNG (default: <plugin>.png)\n"
            "  --seconds N       how long to run before the screenshot (default: 2)\n"
            "  --press LIST      button presses, e.g. center@0.5,center@1.2,up@3\n"
+           "  --hold LIST       buttons held down for a while, e.g. center@1-2.5,up@3-4\n"
+           "  --store KEY=JSON  a value the plugin saved earlier, e.g. best=42; repeat for more\n"
            "  --card KIND       which kind of card to show, for plugins with several (default: the first)\n"
            "  --set KEY=VALUE   a setting, of the plugin or of the card; repeat for more\n"
            "  --scale N         enlarge the PNG N times (default: 3)\n"
@@ -258,6 +266,7 @@ int main(int argc, char** argv) {
     double seconds = 2;
     int scale = 3;
     std::vector<Press> presses;
+    std::vector<Hold> holds;
     std::string kind;
     std::map<std::string, std::string> settings;
     SimServices services;
@@ -292,6 +301,29 @@ int main(int argc, char** argv) {
                 return 2;
             }
             settings[pair.substr(0, equals)] = pair.substr(equals + 1);
+        } else if (arg == "--store" && hasValue) {
+            const std::string pair = argv[++i];
+            const size_t equals = pair.find('=');
+            if (equals == std::string::npos) {
+                usage();
+                return 2;
+            }
+            services.stored[pair.substr(0, equals)] = pair.substr(equals + 1);
+        } else if (arg == "--hold" && hasValue) {
+            std::stringstream list(argv[++i]);
+            std::string item;
+            while (std::getline(list, item, ',')) {
+                const size_t at = item.find('@');
+                const size_t dash = item.find('-', at == std::string::npos ? 0 : at);
+                Hold hold{Button::Center, 0, 0};
+                if (at == std::string::npos || dash == std::string::npos || !parseButton(item.substr(0, at), hold.button)) {
+                    usage();
+                    return 2;
+                }
+                hold.fromMs = (uint32_t)(atof(item.c_str() + at + 1) * 1000);
+                hold.toMs = (uint32_t)(atof(item.c_str() + dash + 1) * 1000);
+                holds.push_back(hold);
+            }
         } else if (arg == "--press" && hasValue) {
             std::stringstream list(argv[++i]);
             std::string item;
@@ -370,6 +402,11 @@ int main(int argc, char** argv) {
                 const bool used = plugin.button(card, press.button);
                 printf("[button] %s at %.2fs%s\n", names[(int)press.button], services.now / 1000.0,
                        used ? "" : " (not used by the plugin: the card stack would move)");
+            }
+
+            for (bool& held : services.held) held = false;
+            for (const Hold& hold : holds) {
+                if (services.now >= hold.fromMs && services.now < hold.toMs) services.held[(int)hold.button] = true;
             }
 
             plugin.tick(services.now);

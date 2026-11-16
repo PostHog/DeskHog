@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-    - name: The directory's index matches the plugins
+    - name: The directory's index and the README's list match the plugins
       run: python3 tools/deskhog index --check
 
     - name: Plugin runtime tests (every plugin in plugins/ has to load)

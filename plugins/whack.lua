@@ -8,8 +8,8 @@
 plugin = {
   name = "Whack-a-hog",
   description = "Three burrows, three buttons. Bonk the hedgehog before it ducks",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

@@ -6,8 +6,8 @@
 plugin = {
   name = "Clock",
   description = "The time in large digits, with the date under it",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 1, -- look at the time once a second; it is only repainted when the minute changes
 }
 

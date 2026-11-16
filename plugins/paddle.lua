@@ -8,8 +8,8 @@
 plugin = {
   name = "Paddle",
   description = "First to five points beats the hedgehog on the other side",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

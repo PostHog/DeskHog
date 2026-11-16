@@ -4,8 +4,8 @@
 plugin = {
   name = "Hello",
   description = "The smallest useful plugin: three lines of text and a press counter",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
 }
 
 local presses = 0

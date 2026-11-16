@@ -207,8 +207,8 @@ test('adds a card to an existing connection', async () => {
     await click(window, document.getElementById('add-card-btn'));
     const pane = document.getElementById('card-pane');
     check(!pane.hidden, 'the steps open in the pane');
-    const choices = [...pane.querySelectorAll('.choice')].map(c => c.querySelector('b').textContent);
-    equal(choices, ['Max', 'Hello', 'Webhook', 'City', 'Funnel', 'Insight'], 'choices offered');
+    const choices = [...pane.querySelectorAll('.choices:not(.more) .choice')].map(c => c.querySelector('b').textContent);
+    equal(choices, ['Max', 'Hello', 'Webhook', 'City', 'Funnel', 'Insight'], 'choices offered: a card of anything that is installed');
     check(!choices.includes('broken'), 'a plugin that does not load is not offered');
     check(!pane.textContent.includes('null') && !pane.textContent.includes('undefined'), 'nothing stray in the pane');
 
@@ -449,9 +449,11 @@ const afterInstall = async window => { await new Promise(resolve => window.setTi
 
 test('directory: shows what there is and how it relates to the device', async () => {
     const device = makeDevice();
-    const { window, document } = await openPage(device, { hash: '#plugins' });
-    check(document.getElementById('directory-pane').hidden, 'closed until asked for');
-    await click(window, document.getElementById('get-plugins-btn'));
+    const { window, document } = await openPage(device);
+    equal(device.outside, [], 'nothing is fetched from the internet while nobody looks');
+    await click(window, document.getElementById('cards-get-plugins-btn'));
+    equal(visiblePage(document), ['page-plugins'], 'the button beside "Add card" goes to the plugins page');
+    check(!document.getElementById('directory-pane').hidden, 'where the directory is in plain sight');
     equal(device.outside, ['https://raw.githubusercontent.com/TimBroddin/DeskHog/HEAD/plugins/index.json'], 'the browser fetches the index from GitHub');
     check(!device.requests.some(r => r.url.includes('github')), 'the device is not asked to');
     equal(offers(document), [
@@ -461,11 +463,22 @@ test('directory: shows what there is and how it relates to the device', async ()
         { name: 'webhook', title: 'Webhook', note: 'Changed on this device', buttons: ['Replace with this one', 'Add a card'] },
     ], 'each plugin says what can be done with it');
     equal(offer(document, 'clock').querySelector('a').href, 'https://github.com/TimBroddin/DeskHog/blob/HEAD/plugins/clock.lua', 'and links to its code');
-    check(text(offer(document, 'clock')).includes('By DeskHog, version 1.0'), 'with who wrote it');
-    equal(window.location.hash, '#plugins/~directory', 'the address remembers it');
+    check(text(offer(document, 'clock')).includes('By Tim Broddin, version 1.0'), 'with who wrote it');
+    equal(offer(document, 'clock').querySelector('img.shot').src, 'https://raw.githubusercontent.com/TimBroddin/DeskHog/HEAD/plugins/screenshots/clock.png', 'and a picture of its card, from the directory');
+    check(!offer(document, 'hello').querySelector('img'), 'a plugin without a picture has none');
+    offer(document, 'weather').querySelector('img.shot').dispatchEvent(new window.Event('error'));
+    check(!offer(document, 'weather').querySelector('img'), 'a picture that does not load goes away');
+    equal(window.shotAddress({ screenshot: 'https://elsewhere.example/x.png' }), null, 'a picture has to be a file in the directory');
+    equal(window.shotAddress({ screenshot: '../x.png' }), null, 'and not outside it');
+    equal(window.location.hash, '#plugins', 'the address remembers the page');
 
     await click(window, document.querySelector('#plugins-list .item .item-open'));
     check(document.getElementById('directory-pane').hidden && !document.getElementById('plugin-editor').hidden, 'opening a plugin\'s code replaces it');
+    await click(window, document.getElementById('close-plugin-btn'));
+    check(!document.getElementById('directory-pane').hidden && offers(document).length === 4, 'and closing the code brings it back');
+
+    const straight = await openPage(makeDevice(), { hash: '#plugins' });
+    equal(offers(straight.document).length, 4, 'opening the plugins page shows it without asking');
 });
 
 test('directory: installs a plugin, then offers a card of it', async () => {
@@ -484,6 +497,34 @@ test('directory: installs a plugin, then offers a card of it', async () => {
     await click(window, buttonNamed(offer(document, 'clock'), 'Add a card'));
     equal(visiblePage(document), ['page-cards'], 'goes to the cards');
     equal(text(document.querySelector('#card-pane .pane-head h2')), 'New card: Clock', 'with the new card ready to add');
+});
+
+test('adding a card offers what the directory has, and installs it on the way', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device);
+    await click(window, document.getElementById('add-card-btn'));
+    const pane = document.getElementById('card-pane');
+    const more = () => [...pane.querySelectorAll('.choices.more .choice')];
+    equal(more().map(choice => choice.dataset.name), ['clock'], 'the one plugin this device does not have yet');
+    check(text(more()[0]).includes('The time in large digits'), 'with what it is');
+    equal(more()[0].querySelector('img.shot').src, 'https://raw.githubusercontent.com/TimBroddin/DeskHog/HEAD/plugins/screenshots/clock.png', 'and its picture');
+    const webhook = [...pane.querySelectorAll('.choices:not(.more) .choice')].find(choice => text(choice).startsWith('Webhook'));
+    check(webhook.querySelector('img.shot') !== null, 'installed ones show their picture too');
+
+    await click(window, more()[0]);
+    await afterInstall(window);
+    equal(lastRequest(device, '/api/plugins/clock').url, '/api/plugins/clock?card=no', 'choosing it installs the plugin');
+    equal(text(pane.querySelector('.pane-head h2')), 'New card: Clock', 'and carries on with the new card');
+    await click(window, buttonNamed(pane, 'Add card'));
+    check(titles(document).includes('Clock'), 'which is added');
+
+    const offline = makeDevice();
+    offline.internet = null;
+    const second = await openPage(offline);
+    await click(second.window, second.document.getElementById('add-card-btn'));
+    const choices = [...second.document.querySelectorAll('#card-pane .choice b')].map(text);
+    equal(choices, ['Max', 'Hello', 'Webhook', 'City', 'Funnel', 'Insight'], 'without internet the installed ones are still offered');
+    check(text(second.document.getElementById('card-pane')).includes('needs internet'), 'and it says why there are no more');
 });
 
 test('directory: updates a plugin and replaces a changed one', async () => {

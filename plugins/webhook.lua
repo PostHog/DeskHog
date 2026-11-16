@@ -7,8 +7,8 @@
 plugin = {
   name = "Webhook",
   description = "A button that calls a web address and lights the LED",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
 }
 
 config = {

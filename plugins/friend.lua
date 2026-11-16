@@ -8,8 +8,8 @@
 plugin = {
   name = "Max",
   description = "Max the hedgehog keeps you company and thinks you are doing fine",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 6, -- six frames of walking a second
 }
 

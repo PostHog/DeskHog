@@ -7,8 +7,8 @@
 plugin = {
   name = "Questions",
   description = "Icebreaker questions for the minutes before a meeting starts",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 20,
 }
 

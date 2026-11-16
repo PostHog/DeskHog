@@ -11,8 +11,8 @@
 plugin = {
   name = "Home Assistant",
   description = "A card per entity: its state, and a button to toggle it or run a script or scene",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   refresh = 30,
 }
 

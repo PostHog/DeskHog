@@ -39,6 +39,7 @@ Only the Python standard library is used.
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
@@ -562,44 +563,87 @@ def build_index(folder):
             raise DeviceError(
                 '%s: its `plugin = { ... }` table needs %s, written as text ("...")' % (file_name, " and ".join(missing))
             )
-        plugins.append(
-            {
-                "name": name,
-                "title": about["name"],
-                "description": about["description"],
-                "author": about.get("author", ""),
-                "version": about["version"],
-                "file": file_name,
-                "size": len(data),
-                "hash": source_hash(data),
-                "sha256": hashlib.sha256(data).hexdigest(),
-            }
-        )
+        entry = {
+            "name": name,
+            "title": about["name"],
+            "description": about["description"],
+            "author": about.get("author", ""),
+            "version": about["version"],
+            "file": file_name,
+            "size": len(data),
+            "hash": source_hash(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        # A picture of the card, if there is one: screenshots/<name>.png.
+        if os.path.exists(os.path.join(folder, "screenshots", name + ".png")):
+            entry["screenshot"] = "screenshots/%s.png" % name
+        plugins.append(entry)
     plugins.sort(key=lambda plugin: plugin["title"].lower())
     return {"format": INDEX_FORMAT, "plugins": plugins}
 
 
+LIST_START = "<!-- plugin-list:start (written by `tools/deskhog index`; do not edit by hand) -->"
+LIST_END = "<!-- plugin-list:end -->"
+LIST_COLUMNS = 3
+
+
+def plugin_list(index, prefix):
+    """The directory as a grid for a README: a picture, the name and one line about each plugin."""
+    cells = []
+    for plugin in index["plugins"]:
+        title, link = html.escape(plugin["title"]), prefix + plugin["file"]
+        picture = ""
+        if plugin.get("screenshot"):
+            picture = '<a href="%s"><img src="%s" width="233" alt="%s"></a><br>' % (link, prefix + plugin["screenshot"], title)
+        cells.append(
+            '<td width="33%%" valign="top">%s<b><a href="%s">%s</a></b><br>%s</td>'
+            % (picture, link, title, html.escape(plugin["description"]))
+        )
+    rows = ["<tr>\n%s\n</tr>" % "\n".join(cells[at:at + LIST_COLUMNS]) for at in range(0, len(cells), LIST_COLUMNS)]
+    return "%s\n<table>\n%s\n</table>\n%s" % (LIST_START, "\n".join(rows), LIST_END)
+
+
+def readme_with_list(folder, index):
+    """(path, current text, text with the list brought up to date) of the README that lists this folder, or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(folder)), "README.md")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        current = handle.read()
+    start, end = current.find("<!-- plugin-list:start"), current.find(LIST_END)
+    if start < 0 or end < start:
+        return None
+    prefix = os.path.basename(os.path.abspath(folder)) + "/"
+    return path, current, current[:start] + plugin_list(index, prefix) + current[end + len(LIST_END):]
+
+
 def command_index(device, args):
     folder = args.folder
-    target = os.path.join(folder, "index.json")
-    content = json.dumps(build_index(folder), indent=2, ensure_ascii=False) + "\n"
-    current = None
-    if os.path.exists(target):
-        with open(target, "r", encoding="utf-8") as handle:
-            current = handle.read()
-    if args.check:
-        if current != content:
-            print("%s is out of date. Run `tools/deskhog index` and commit the result." % target, file=sys.stderr)
-            return 1
-        print("%s is up to date" % target)
-        return 0
-    if current == content:
-        print("%s is up to date" % target)
-        return 0
-    with open(target, "w", encoding="utf-8") as handle:
-        handle.write(content)
-    print("Wrote %s (%d plugins)" % (target, len(json.loads(content)["plugins"])))
-    return 0
+    index = build_index(folder)
+    files = [(os.path.join(folder, "index.json"), None, json.dumps(index, indent=2, ensure_ascii=False) + "\n")]
+    if os.path.exists(files[0][0]):
+        with open(files[0][0], "r", encoding="utf-8") as handle:
+            files[0] = (files[0][0], handle.read(), files[0][2])
+    # The README next to the folder lists the plugins too, between two marker comments.
+    readme = readme_with_list(folder, index)
+    if readme:
+        files.append(readme)
+
+    result = 0
+    for path, current, content in files:
+        if current == content:
+            print("%s is up to date" % path)
+        elif args.check:
+            print("%s is out of date. Run `tools/deskhog index` and commit the result." % path, file=sys.stderr)
+            result = 1
+        else:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            print("Wrote %s (%d plugins)" % (path, len(index["plugins"])))
+    without = [plugin["name"] for plugin in index["plugins"] if "screenshot" not in plugin]
+    if without and not args.check:
+        print("No picture yet for: %s. Make them with `tools/screenshots %s`." % (", ".join(without), " ".join(without)))
+    return result
 
 
 def compare(entry, installed):

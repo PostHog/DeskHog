@@ -11,8 +11,8 @@
 plugin = {
   name = "Blocks",
   description = "Falling pairs of colours: bring three together and they are gone",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

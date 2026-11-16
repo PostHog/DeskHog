@@ -10,8 +10,8 @@
 plugin = {
   name = "Lander",
   description = "Three thrusters, a little fuel and a landing pad that keeps shrinking",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 

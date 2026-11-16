@@ -421,9 +421,15 @@ device uses unless told otherwise. To add yours to it:
 
 1. Put `yourplugin.lua` in `plugins/`. Its `plugin = { ... }` table needs `name`,
    `description` and `version`, each written as plain text in quotes.
-2. Run `tools/deskhog index`. It rewrites `plugins/index.json`.
-3. Open a pull request with both files. The checks run the plugin through the
-   runtime's tests (it has to load) and make sure the index matches.
+2. Add a picture of its card: `plugins/screenshots/yourplugin.png`. `tools/screenshots
+   yourplugin` makes one with the simulator, at twice the card's size. If the card
+   needs settings, button presses or an account to show something, give it a recipe
+   in that script (the others are examples). A screenshot of the real thing works
+   too: `tools/deskhog screenshot yourplugin plugins/screenshots/yourplugin.png`.
+3. Run `tools/deskhog index`. It rewrites `plugins/index.json` and the list of
+   plugins in the main README.
+4. Open a pull request with these files. The checks run the plugin through the
+   runtime's tests (it has to load) and make sure the index and the list match.
 
 Once it is merged, it shows up on every device's web page under Plugins, Get
 plugins, with an Install button, and with Update when the published file differs
@@ -455,10 +461,14 @@ on this device" are told apart.
   "format": 1,
   "plugins": [
     { "name": "clock", "title": "Clock", "description": "…", "author": "…", "version": "1.0",
-      "file": "clock.lua", "size": 2743, "hash": "657fd6bc", "sha256": "…" }
+      "file": "clock.lua", "size": 2743, "hash": "657fd6bc", "sha256": "…",
+      "screenshot": "screenshots/clock.png" }
   ]
 }
 ```
+
+`screenshot` is optional: a PNG inside the directory, which the web page shows next
+to the plugin. Like the plugin files, it is fetched by the browser, not by the device.
 
 A firmware build can also carry plugins inside it, for devices that have to work
 without any of this: list their names in `plugins/bundled.txt`. By default it
@@ -469,8 +479,11 @@ carries none.
 - `tools/sim/run.sh <file>` runs a plugin through the same Lua runtime, drawing code,
   graphics library and fonts as the device and saves a PNG. `http` calls go out for
   real through `curl`. Options: `--seconds`, `--press center@0.5,up@2`,
-  `--set key=value`, `--card <kind>`, `--reply <part of URL>=<file>` (answer matching
-  requests from a file, for services that need a login), `--no-http`, `--scale`, `--out`.
+  `--hold center@1-2.5` (a button held down for a while), `--set key=value`,
+  `--store key=value` (something the plugin saved earlier, such as `best=42`),
+  `--card <kind>`, `--reply <part of URL>=<file>` (answer matching requests from a
+  file, for services that need a login), `--no-http`, `--scale`, `--out`.
+- `tools/screenshots` makes the pictures in `plugins/screenshots/` that way.
 - `test/native/run.sh` runs the runtime's own tests, including each example here.
 - `test/portal/run.sh` tests the web page against a pretend device.
 - `node test/portal/serve.js` serves the web page from `html/` on your computer, against

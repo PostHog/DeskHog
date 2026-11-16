@@ -92,8 +92,8 @@ const ui = {
     adding: null,         // null, or {step, plugin, kind}: the side pane shows the "add card" steps
     openConnection: null, // id of the connection in the side pane
     openPlugin: null,     // name of the plugin in the editor; '' while it is new and unsaved
-    browsing: false,      // the plugin directory is open beside the plugin list
     directorySignature: '',
+    showingDirectory: false, // someone asked for the directory: scroll to it when it is there
     dragging: false,
     justDragged: false,
     choseFirstCard: false,
@@ -181,8 +181,8 @@ function showPage(name, remember) {
     // "#plugins/weather" is the plugins page with that plugin's code open.
     const [first, detail] = String(name || '').split('/');
     name = PAGES.includes(first) ? first : 'cards';
-    if (name === 'plugins' && detail === '~directory') { if (!ui.browsing) openDirectory(); }
-    else if (name === 'plugins' && detail && detail !== ui.openPlugin) editPlugin(detail);
+    // ("#plugins/~directory" is an address from when the directory had to be opened first.)
+    if (name === 'plugins' && detail && detail !== '~directory' && detail !== ui.openPlugin) editPlugin(detail);
     // "#cards/PLUGIN|weather:1" is the cards page with that card in the pane.
     if (name === 'cards' && detail) {
         try { ui.openCard = decodeURIComponent(detail); } catch (error) { ui.openCard = null; }
@@ -196,12 +196,12 @@ function showPage(name, remember) {
         else link.removeAttribute('aria-current');
     });
     if (remember) rememberPage();
+    if (state) renderDirectory(); // the plugins page shows the directory: fetch it on the first look
 }
 
 /** Keep the address in step, so reloading comes back to the same place. */
 function rememberPage() {
-    const detail = ui.page === 'plugins' && ui.browsing ? '/~directory'
-        : ui.page === 'plugins' && ui.openPlugin ? '/' + ui.openPlugin
+    const detail = ui.page === 'plugins' && ui.openPlugin ? '/' + ui.openPlugin
         : ui.page === 'cards' && ui.openCard && !ui.adding ? '/' + encode(ui.openCard) : '';
     try { history.replaceState(null, '', '#' + ui.page + detail); } catch (error) { /* a page without history still works */ }
 }
@@ -316,7 +316,7 @@ function renderCardPane() {
     if (!ui.adding && ui.openCard && !cardByKey(ui.openCard)) ui.openCard = null; // it was removed
     const card = ui.adding ? null : cardByKey(ui.openCard);
     const adding = ui.adding;
-    const signature = adding ? 'add|' + adding.step + '|' + (adding.plugin ? adding.plugin.name + '/' + adding.kind.key : '')
+    const signature = adding ? 'add|' + adding.step + '|' + (adding.plugin ? adding.plugin.name + '/' + adding.kind.key : offersSignature())
         : card ? 'card|' + card.key + '|' + (pluginByName(card.plugin) ? '' : 'no plugin') : '';
     pane.hidden = !signature;
     // Rebuilt only when it shows something else, so what you typed survives the page refreshing.
@@ -619,6 +619,23 @@ function startAdding() {
     if (!state) return;
     ui.adding = { step: 'pick' };
     renderCards();
+    renderDirectory(); // the choices include what the directory has: fetch it if that has not happened yet
+}
+
+/** Install a plugin from the directory and carry on adding a card of it. */
+async function installAndAdd(entry) {
+    if (!(await installEntry(entry))) return;
+    const plugin = pluginByName(entry.name);
+    if (!plugin || plugin.error || !plugin.kinds.length) return; // the plugins page says what is wrong with it
+    // A plugin with several kinds of card: back to the choices, which now include them.
+    ui.adding = plugin.kinds.length === 1 ? { step: 'plugin', plugin, kind: plugin.kinds[0] } : { step: 'pick' };
+    renderCards();
+}
+
+/** A picture for a choice, when the directory has one. */
+function choicePicture(entry) {
+    const shot = entry ? shotAddress(entry) : null;
+    return shot ? el('img', { class: 'shot', src: shot, alt: '', loading: 'lazy', width: '233', height: '135', onerror: event => event.target.remove() }) : null;
 }
 
 /** What the side pane shows while a card is being added. */
@@ -627,22 +644,38 @@ function addPanel() {
     const cancel = el('button', { type: 'button', onclick: closeCardPane }, 'Cancel');
 
     if (adding.step === 'pick') {
+        const entries = directory.entries || [];
         const choices = [];
         for (const plugin of state.plugins) {
             if (plugin.error) continue;
+            // One picture per plugin: it only says what the card looks like when the plugin has one kind of card.
+            const picture = plugin.kinds.length === 1 ? choicePicture(entries.find(entry => entry.name === plugin.name)) : null;
             for (const kind of plugin.kinds) {
                 choices.push(el('button', {
                     type: 'button', class: 'choice',
                     onclick: () => { ui.adding = { step: 'plugin', plugin, kind }; renderCards(); },
-                }, el('b', {}, plugin.multiCard ? kind.name : plugin.title), plugin.multiCard ? el('span', {}, plugin.title) : null));
+                }, picture, el('b', {}, plugin.multiCard ? kind.name : plugin.title), plugin.multiCard ? el('span', {}, plugin.title) : null));
             }
         }
+        // What the directory has and this device does not: choosing one installs it, then carries on.
+        const more = entries.filter(entry => !pluginByName(entry.name)).map(entry => {
+            const choice = el('button', { type: 'button', class: 'choice', disabled: !!directory.busy, onclick: () => installAndAdd(entry) },
+                choicePicture(entry), el('b', {}, entry.title || entry.name),
+                el('span', {}, directory.busy === entry.name ? 'Installing…' : entry.description || ''));
+            choice.dataset.name = entry.name;
+            return choice;
+        });
         return [paneHead('Add a card', closeCardPane),
             el('p', { class: 'hint' }, 'What should the new card show?'),
-            el('div', { class: 'choices' }, choices),
-            choices.length ? null : el('p', { class: 'empty' }, 'No plugins are installed yet.'),
+            choices.length ? el('div', { class: 'choices' }, choices) : null,
+            choices.length || more.length || directory.loading ? null : el('p', { class: 'empty' }, 'No plugins are installed yet.'),
+            more.length ? el('h3', { class: 'sub' }, choices.length ? 'More, from the plugin directory' : 'From the plugin directory') : null,
+            more.length ? el('p', { class: 'hint' }, 'Choosing one installs its plugin first.') : null,
+            more.length ? el('div', { class: 'choices more' }, more) : null,
+            directory.loading ? el('p', { class: 'hint' }, 'Looking in the plugin directory…') : null,
+            directory.error ? el('p', { class: 'hint' }, directory.error) : null,
             el('div', { class: 'row-buttons' },
-                el('button', { type: 'button', class: choices.length ? null : 'primary', onclick: showDirectory }, choices.length ? 'Get more plugins' : 'Get plugins'))];
+                el('button', { type: 'button', onclick: showDirectory }, 'Open the plugin directory'))];
     }
 
     const { plugin, kind } = adding;
@@ -869,8 +902,7 @@ function updateGutter() {
 }
 
 function openPluginEditor(name, source, isNew) {
-    ui.browsing = false;
-    $('directory-pane').hidden = true;
+    $('directory-pane').hidden = true; // the code takes its place
     ui.openPlugin = isNew ? '' : name;
     $('plugin-heading').textContent = isNew ? 'New plugin' : name + '.lua';
     $('plugin-name').value = name;
@@ -893,6 +925,7 @@ function closePluginEditor() {
     clearTimeout(pluginStatusTimer);
     rememberPage();
     if (state) renderPlugins();
+    if (state) renderDirectory();
 }
 
 async function editPlugin(name) {
@@ -1010,6 +1043,13 @@ async function loadDirectory() {
     renderDirectory();
 }
 
+/** Where the picture of a directory entry's card is, if it has one. Only a plain path inside the directory counts. */
+function shotAddress(entry) {
+    const shot = entry.screenshot;
+    if (typeof shot !== 'string' || !/^[A-Za-z0-9_./-]+\.png$/.test(shot) || shot.startsWith('/') || shot.includes('..')) return null;
+    return new URL(shot, directory.base).href;
+}
+
 /** How a directory entry relates to what is on the device. */
 function offerState(entry) {
     const installed = pluginByName(entry.name);
@@ -1059,39 +1099,42 @@ async function installByName(name) {
     await installEntry(entry);
 }
 
-function openDirectory() {
-    ui.browsing = true;
-    if (ui.openPlugin !== null) closePluginEditor();
-    ui.browsing = true;
-    rememberPage();
-    if (state) loadDirectory();
-    else renderDirectory();
-}
-
-/** From another page: go to the plugins page with the directory open. */
+/** From another page: go to where the plugin directory is shown. */
 function showDirectory() {
-    showPage('plugins');
-    openDirectory();
+    if (ui.openPlugin !== null) closePluginEditor();
+    ui.adding = null;
+    showPage('plugins', true);
+    renderCards();
+    // On a phone it is below the list of installed plugins: go there, also once the list has arrived.
+    ui.showingDirectory = !isWide();
+    scrollToDirectory();
 }
 
-function closeDirectory() {
-    ui.browsing = false;
-    rememberPage();
-    renderDirectory();
+function scrollToDirectory() {
+    const pane = $('directory-pane');
+    if (ui.showingDirectory && pane.scrollIntoView) pane.scrollIntoView();
+    if (!directory.loading) ui.showingDirectory = false;
+}
+
+/** Everything the directory's list depends on: it is rebuilt only when this changes. */
+function offersSignature() {
+    return [directory.source, directory.loading, directory.error, directory.changing, directory.busy,
+        (directory.entries || []).map(entry => { const o = offerState(entry); return entry.name + ':' + (o.action || '') + ':' + (o.note || ''); }).join(',')].join('|');
 }
 
 function renderDirectory() {
     const pane = $('directory-pane');
-    pane.hidden = !ui.browsing;
-    if (!ui.browsing) { ui.directorySignature = ''; return; }
+    pane.hidden = ui.openPlugin !== null;
     if (!state) return;
-    // The directory was opened before the device said where it is.
-    if (directory.source === null && !directory.loading) { loadDirectory(); return; }
+    // It is fetched when someone looks: on the plugins page, or when choosing what a new card shows.
+    const choosing = !!ui.adding && ui.adding.step === 'pick';
+    if (ui.page !== 'plugins' && !choosing && directory.source === null) return;
+    // The first look, or the device was pointed at another directory since.
+    if (!directory.loading && directory.source !== state.directory.source) { loadDirectory(); return; }
+    if (choosing) renderCardPane();
 
-    const entries = directory.entries || [];
-    const offers = entries.map(entry => Object.assign({ entry }, offerState(entry)));
-    const signature = [directory.source, directory.loading, directory.error, directory.changing, directory.busy,
-        offers.map(o => o.entry.name + ':' + (o.action || '') + ':' + (o.note || '')).join(',')].join('|');
+    const offers = (directory.entries || []).map(entry => Object.assign({ entry }, offerState(entry)));
+    const signature = offersSignature();
     if (signature === ui.directorySignature) return;
     ui.directorySignature = signature;
 
@@ -1123,7 +1166,10 @@ function renderDirectory() {
         const address = directory.pages ? directory.pages + entry.file : new URL(entry.file, directory.base).href;
         const installed = pluginByName(entry.name);
         const busy = directory.busy === entry.name;
+        const shot = shotAddress(entry);
         const item = el('div', { class: 'item offer' },
+            // The card as the plugin's author showed it. A picture that will not load just goes away.
+            shot ? el('img', { class: 'shot', src: shot, alt: '', loading: 'lazy', width: '233', height: '135', onerror: event => event.target.remove() }) : null,
             el('span', { class: 'item-text' },
                 el('span', { class: 'item-title' }, entry.title || entry.name),
                 el('span', { class: 'item-sub' }, entry.description || ''),
@@ -1137,7 +1183,7 @@ function renderDirectory() {
     });
 
     pane.replaceChildren(...[
-        paneHead('Get plugins', closeDirectory),
+        el('div', { class: 'pane-head' }, el('h2', {}, 'Get plugins')),
         sourceLine, change,
         directory.loading ? el('p', { class: 'empty' }, 'Looking in the directory…') : null,
         directory.error ? el('p', { class: 'result error' }, directory.error) : null,
@@ -1145,6 +1191,7 @@ function renderDirectory() {
         el('div', { class: 'list' }, rows),
         !directory.loading && !directory.error && !rows.length ? el('p', { class: 'empty' }, 'This directory is empty.') : null,
     ].filter(Boolean));
+    scrollToDirectory();
 }
 
 /** Go and add a card of a plugin that was just installed. */
@@ -1261,7 +1308,7 @@ function start() {
     showPage(location.hash.slice(1));
 
     $('add-card-btn').addEventListener('click', startAdding);
-    $('get-plugins-btn').addEventListener('click', openDirectory);
+    $('cards-get-plugins-btn').addEventListener('click', showDirectory);
     $('new-plugin-btn').addEventListener('click', () => openPluginEditor('', NEW_PLUGIN_TEMPLATE, true));
     $('save-plugin-btn').addEventListener('click', savePlugin);
     $('delete-plugin-btn').addEventListener('click', deletePlugin);

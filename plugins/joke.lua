@@ -4,8 +4,8 @@
 plugin = {
   name = "Dad jokes",
   description = "A new dad joke every half hour, or whenever you press the button",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   refresh = 1800,
   fps = 20,
 }

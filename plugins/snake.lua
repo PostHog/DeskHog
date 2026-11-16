@@ -7,8 +7,8 @@
 plugin = {
   name = "Snake",
   description = "Two buttons to steer, one to pause. Eat, grow, don't bite yourself",
-  author = "DeskHog",
-  version = "1.0",
+  author = "Tim Broddin",
+  version = "1.1",
   fps = 30,
 }
 
