@@ -1,7 +1,12 @@
 name: Build Firmware Release
 
-permissions:
-  contents: read
+# Builds the firmware and attaches it to a release:
+#
+#   deskhog-<version>-full.bin    for a board that does not run this firmware yet (write at 0x0)
+#   deskhog-<version>-update.bin  for one that does; keeps WiFi, cards and plugins (write at 0x20000)
+#
+# Runs when a release is created, with the release's tag as the version. Run it
+# by hand to only build: the files are then kept with the run, not with a release.
 
 on:
   release:
@@ -9,87 +14,80 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Firmware version (e.g., 0.1.6)'
+        description: 'Firmware version (e.g., 0.3.0)'
         required: true
         type: string
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write   # to attach the files to the release
+
     steps:
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-    
+
     - name: Set up Python
       uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: '3.11'
-    
-    - name: Install PlatformIO and dependencies
+
+    - name: Install PlatformIO
       run: |
         python -m pip install --upgrade pip
         pip install platformio
-    
+
     - name: Get version
       id: get_version
+      env:
+        EVENT: ${{ github.event_name }}
+        TAG: ${{ github.event.release.tag_name }}
+        GIVEN: ${{ github.event.inputs.version }}
       run: |
-        if [ "${{ github.event_name }}" == "release" ]; then
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-        else
-          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Update firmware version
-      run: |
-        # Get the version without 'v' prefix if present
-        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        if [ "$EVENT" == "release" ]; then VERSION="$TAG"; else VERSION="$GIVEN"; fi
         VERSION="${VERSION#v}"
-        # Update the firmware version in platformio.ini
-        sed -i "s/-DCURRENT_FIRMWARE_VERSION=\"\\\\\"[^\"]*\\\\\"\"/-DCURRENT_FIRMWARE_VERSION=\"\\\\\"${VERSION}\\\\\"\"/g" platformio.ini
-        echo "Updated firmware version to ${VERSION}"
-        grep CURRENT_FIRMWARE_VERSION platformio.ini
-    
-    - name: Build firmware
-      run: |
-        # Initialize PlatformIO to ensure penv exists
-        pio system info
-        # Build firmware
-        pio run -e adafruit_feather_esp32s3_reversetft
-        # Verify the firmware was actually built
-        if [ ! -f ".pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin" ]; then
-          echo "ERROR: firmware.bin was not generated!"
+        if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]; then
+          echo "\"$VERSION\" does not look like a version (for example 0.3.0)"
           exit 1
         fi
-    
-    - name: Prepare release files
+        echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Put the version in the firmware
+      env:
+        VERSION: ${{ steps.get_version.outputs.VERSION }}
+      run: |
+        sed -i "s/-DCURRENT_FIRMWARE_VERSION=\"\\\\\"[^\"]*\\\\\"\"/-DCURRENT_FIRMWARE_VERSION=\"\\\\\"${VERSION}\\\\\"\"/g" platformio.ini
+        grep "CURRENT_FIRMWARE_VERSION=\"\\\\\"${VERSION}\\\\\"\"" platformio.ini
+
+    - name: Build firmware
+      run: |
+        pio run -e adafruit_feather_esp32s3_reversetft
+        ls -l .pio/build/adafruit_feather_esp32s3_reversetft/*.bin
+        test -f .pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin
+        test -f .pio/build/adafruit_feather_esp32s3_reversetft/deskhog-full.bin
+
+    - name: Name the files
+      env:
+        VERSION: ${{ steps.get_version.outputs.VERSION }}
       run: |
         mkdir -p release
-        # Copy the main firmware.bin for OTA updates
-        cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin release/firmware.bin
-        # Copy all build outputs with version in filename
-        cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin release/deskhog-firmware-${{ steps.get_version.outputs.VERSION }}.bin
-        cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.elf release/deskhog-firmware-${{ steps.get_version.outputs.VERSION }}.elf
-        cp .pio/build/adafruit_feather_esp32s3_reversetft/partitions.bin release/deskhog-partitions-${{ steps.get_version.outputs.VERSION }}.bin
-        cp .pio/build/adafruit_feather_esp32s3_reversetft/bootloader.bin release/deskhog-bootloader-${{ steps.get_version.outputs.VERSION }}.bin
-        # Generate flash command
-        echo "esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 1500000 write_flash -z 0x0 deskhog-bootloader-${{ steps.get_version.outputs.VERSION }}.bin 0x8000 deskhog-partitions-${{ steps.get_version.outputs.VERSION }}.bin 0x10000 deskhog-firmware-${{ steps.get_version.outputs.VERSION }}.bin" > release/flash-command.txt
-    
-    - name: Upload all build artifacts
+        cp .pio/build/adafruit_feather_esp32s3_reversetft/deskhog-full.bin "release/deskhog-${VERSION}-full.bin"
+        cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin "release/deskhog-${VERSION}-update.bin"
+        cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.elf "release/deskhog-${VERSION}.elf"
+        (cd release && sha256sum *.bin > sha256.txt && cat sha256.txt)
+
+    - name: Keep the files with this run
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
-        name: firmware-complete-${{ steps.get_version.outputs.VERSION }}
+        name: deskhog-${{ steps.get_version.outputs.VERSION }}
         path: release/
-    
-    - name: Upload Release Assets
+
+    - name: Attach the files to the release
       if: github.event_name == 'release'
-      permissions:
-        contents: write
-      uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
-      with:
-        files: |
-          release/firmware.bin
-          release/deskhog-firmware-${{ steps.get_version.outputs.VERSION }}.bin
-          release/deskhog-firmware-${{ steps.get_version.outputs.VERSION }}.elf
-          release/deskhog-partitions-${{ steps.get_version.outputs.VERSION }}.bin
-          release/deskhog-bootloader-${{ steps.get_version.outputs.VERSION }}.bin
-          release/flash-command.txt
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ github.event.release.tag_name }}
+      run: gh release upload "$TAG" release/*.bin release/sha256.txt --clobber --repo "$GITHUB_REPOSITORY"

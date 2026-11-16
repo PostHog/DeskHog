@@ -133,7 +133,7 @@ function makeDevice() {
         if (method === 'GET' && pathname === '/api/state') return json(device.state());
         if (method === 'GET' && pathname === '/api/status') {
             return json({
-                firmware_version: '0.2.0',
+                firmware_version: '0.3.0',
                 wifi: {
                     is_connected: device.wifiConnected, connected_ssid: 'Home WiFi', ip_address: '192.168.1.50',
                     networks: [{ ssid: 'Home WiFi', rssi: -50, encrypted: true }, { ssid: 'Home WiFi', rssi: -70, encrypted: true },

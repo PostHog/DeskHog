@@ -6,13 +6,31 @@ DeskHog is an open-source, 3D printed, palm-sized desk gadget: a small colour sc
 
 This is a fork of [PostHog/DeskHog](https://github.com/PostHog/DeskHog) in which **every card is a plugin**: a small Lua file that you install over WiFi from the device's own web page, without recompiling or reflashing. There are more than thirty to pick from, and writing your own takes a few lines.
 
+- [What's new in 0.3.0](#whats-new-in-030)
 - [What you need](#what-you-need)
-- [Set it up](#set-it-up)
+- [Install](#install) and [set it up](#set-it-up)
 - [Plugins](#plugins), with [all of them in pictures](#the-plugins)
 - [Using the device](#using-the-device)
 - [Moving from PostHog's firmware](#moving-from-posthogs-firmware)
 - [Working on DeskHog](#working-on-deskhog)
 - [Troubleshooting](#troubleshooting)
+
+## What's new in 0.3.0
+
+Compared with PostHog's firmware, 0.2.0 and earlier:
+
+- **Every card is a plugin.** A plugin is a Lua file that is installed over WiFi and runs in a sandbox: a crash shows on its own card and nothing else stops. Adding a card no longer means compiling firmware.
+- **A plugin directory with 34 plugins**, each with a picture: games, clocks and timers, weather, trains, GitHub, Home Assistant, Homey Pro, PostHog and more. The web page offers updates when a plugin you have changes.
+- **A new web page**, made for a computer as well as a phone: a live picture of every card, the device's buttons on the page, drag to reorder, and an editor for plugin code.
+- **Connections.** One plugin can provide several cards that share settings, and you can connect the same service twice, for example two PostHog projects.
+- **Install from a browser.** Releases come with a firmware file that a web flasher writes to the board; no toolchain needed.
+- **Tools for writing plugins:** a simulator that runs a plugin on your computer and saves a picture, and a command line tool that pushes to the device on every save.
+- **Fixed:** WiFi and card settings were lost after a USB upload; the display was touched from the WiFi task, which could crash; the saved network was not tried again once the device had fallen back to setup mode.
+
+What you give up:
+
+- **Firmware updates over the air.** The space of the second firmware slot now holds the plugins, so the firmware is updated over USB. See [tech-details.md](tech-details.md#flash-layout) for the ways back.
+- **Cards compiled into the firmware.** PostHog insights, Max, the question card, Flappy Hog and Paddle are plugins now. Cards you had are kept; see [Moving from PostHog's firmware](#moving-from-posthogs-firmware).
 
 ## What you need
 
@@ -24,12 +42,35 @@ DeskHog is an Adafruit ESP32-S3 Reverse TFT Feather in a 3D printed case: a 240x
 
 The board works without the case and without the battery, on USB power. For putting a kit together, see [getting started](getting-started/start-here.md).
 
+## Install
+
+### From your browser
+
+You need a computer with Chrome or Edge, and a USB cable that carries data.
+
+1. Download `deskhog-<version>-full.bin` from the [latest release](https://github.com/TimBroddin/DeskHog/releases/latest).
+2. Connect the board and put it in bootloader mode: hold ▼, press the reset tab on the left, release ▼.
+3. Open the [Adafruit WebSerial ESPTool](https://adafruit.github.io/Adafruit_WebSerial_ESPTool/), press **Connect** and choose the board from the list (it is called something like "USB JTAG/serial debug unit").
+4. In the first row, leave the offset at `0x0`, choose the file you downloaded, and press **Program**.
+5. When it says it is done, press the reset tab. The screen shows a QR code: carry on with [Set it up](#set-it-up).
+
+This is a fresh start: the board forgets its WiFi network and its cards. (Plugins that were installed stay; press **Erase** before Program for a completely empty board.) To keep everything on a board that already runs this firmware, see [Updating](#updating). [Espressif's web flasher](https://espressif.github.io/esptool-js/) does the same job, with the same file and "Flash Address" `0x0`.
+
+### From source
+
+Open this folder in [Visual Studio Code](https://code.visualstudio.com/) with the [PlatformIO extension](https://platformio.org/install/ide?install=vscode) and choose **Upload**, or run `pio run -t upload` from a terminal. Installed this way, a board that comes from PostHog's firmware keeps its WiFi and cards; see [below](#moving-from-posthogs-firmware).
+
+### Updating
+
+Plugins update over WiFi: when the directory has a newer version of one you have, the web page offers it.
+
+For new firmware, the device's web page (Device, About) says which version it runs and links to the latest release. Take `deskhog-<version>-update.bin` from it and follow the steps above with one difference: the offset is `0x20000` instead of `0x0`. WiFi, cards and plugins stay as they are. From source, **Upload** does the same.
+
 ## Set it up
 
-1. **Put the firmware on the board, over USB.** Open this folder in [Visual Studio Code](https://code.visualstudio.com/) with the [PlatformIO extension](https://platformio.org/install/ide?install=vscode) and choose **Upload**, or run `pio run -t upload` from a terminal. A board that comes from PostHog's firmware keeps its WiFi and cards; see [below](#moving-from-posthogs-firmware).
-2. **Connect it to WiFi.** The screen shows a QR code. Scan it with your phone, or join the network named under it (`DeskHog_…`) from a computer. The device's web page opens; pick your network and give its password.
-3. **Open the web page again**, now on your own network: `http://deskhog.local`, or the address on the device's status card (the first card in the stack).
-4. **Add cards.** Press **Add card** and choose what it should show. A freshly flashed device has no plugins yet, so the choices come from the plugin directory: choosing one installs its plugin and adds the card. **Get plugins** shows everything there is.
+1. **Connect it to WiFi.** The screen shows a QR code. Scan it with your phone, or join the network named under it (`DeskHog_…`) from a computer. The device's web page opens; pick your network and give its password.
+2. **Open the web page again**, now on your own network: `http://deskhog.local`, or the address on the device's status card (the first card in the stack).
+3. **Add cards.** Press **Add card** and choose what it should show. A freshly installed device has no plugins yet, so the choices come from the plugin directory: choosing one installs its plugin and adds the card. **Get plugins** shows everything there is.
 
 The web page is also where you rearrange and remove cards, change their settings and manage accounts that several cards share (Connections). It shows a live picture of each card, and the device's three buttons work from the page, so you can try a card without reaching for the device.
 
@@ -156,13 +197,13 @@ PostHog, Home Assistant and Homey Pro need an account or a hub of yours: you fil
 
 The first card is the status card. It is part of the firmware and cannot be removed: it shows the QR code until WiFi is set up, and after that the WiFi status, the device's address, the signal strength and the firmware version.
 
-Plugins update over WiFi, from the web page: when the directory has a newer version of one you have, it offers an update. The firmware itself is updated over USB, the way it was installed.
+Plugins update over WiFi and the firmware over USB; see [Updating](#updating).
 
 ## Moving from PostHog's firmware
 
 This firmware uses a different flash layout: one firmware slot plus about 1 MB of storage for plugins, where PostHog's has two firmware slots for over-the-air updates. Because of that:
 
-- **The first install has to go over USB.** In PlatformIO, choose **Upload** as usual. WiFi and card settings carry over. (Older firmware lost the newest settings on every USB upload, because one boot file was written into the settings area. That is fixed here; see `fix_otadata_offset.py`.)
+- **The first install has to go over USB.** To keep your WiFi and card settings, install [from source](#from-source): in PlatformIO, choose **Upload** as usual. Installing [from your browser](#from-your-browser) works too, but starts afresh. (Older firmware lost the newest settings on every USB upload, because one boot file was written into the settings area. That is fixed here; see `fix_otadata_offset.py`.)
 - **Firmware updates are over USB from now on.** Plugins are what updates over WiFi.
 - **Your cards are kept, and ask for their plugin.** The cards that used to be compiled into the firmware (PostHog insights, Max, the question card, Flappy Hog, Paddle, hello world) are plugins now. Cards of those kinds stay in the stack with their settings; until its plugin is installed, a card says so on its screen, and the web page offers to install it with one press.
 - **PostHog settings move to a connection.** The project ID and API key that were device-wide settings become the settings of one PostHog connection, which all your insight cards share. Big numbers, line charts and funnels are supported; other kinds of insight are not yet.
@@ -218,7 +259,11 @@ The board can end up booting from the wrong place, for example after switching b
 
 ### The board does not show up for flashing
 
-Hold ▼, press reset, release ▼. The board restarts in bootloader mode and can be flashed.
+Hold ▼, press reset, release ▼. The board restarts in bootloader mode and can be flashed. If the web flasher lists no board at all, try another USB cable: some only carry power.
+
+### After flashing from the browser the screen stays dark
+
+Press the reset tab. The board stays in bootloader mode until it is restarted.
 
 ### Get plugins says it cannot reach the plugin directory
 

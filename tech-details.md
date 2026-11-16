@@ -108,7 +108,9 @@ The 4 MB flash holds one firmware slot (2.9 MB) and a 1 MB LittleFS partition fo
 Why not both: the usual way to update over the air needs two firmware slots, so that the running firmware can write the new one beside itself. The firmware is about 1.9 MB. Two slots for it take 3.8 MB of the 3.9 MB there is, which leaves nothing for plugins. Ways to get updates without a cable on this board, none of them built:
 
 - A small second firmware that can only join WiFi and receive a file (well under 1 MB). To update, the device restarts into it, takes the new firmware and writes it over the main slot. That would fit as roughly 0.8 MB + 2.2 MB + 0.85 MB for plugins, and a failed update still leaves the small one to try again with.
-- Flashing over USB from a web page (Web Serial, as [ESP Web Tools](https://esphome.github.io/esp-web-tools/) does) with firmware built by the release workflow. Still a cable, but no toolchain: plug in, press a button in Chrome or Edge.
+- Flashing over USB from a web page (Web Serial) is what the README's install steps use today, with a general-purpose flasher and a file from the release. A page of our own built on [ESP Web Tools](https://esphome.github.io/esp-web-tools/) could make that one button, and keep the settings when updating.
+
+Every build leaves two files in `.pio/build/<env>/`: `firmware.bin`, the firmware alone, which goes at 0x20000, and `deskhog-full.bin`, made by `merge_firmware.py`, which also holds the bootloader, the partition table and the boot-selection data and goes at 0x0. The full file blanks the settings area on the way, because that lies between its pieces. `.github/workflows/build-release.yml` builds both when a release is created and attaches them to it.
 
 ### LVGL
 

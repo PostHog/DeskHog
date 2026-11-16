@@ -47,7 +47,7 @@ From here, attach the battery to the board and attempt to lay the board into its
 
 # Dive in
 
-If the board does not have this firmware on it yet, put it there first, over USB: see [Set it up](/README.md#set-it-up).
+If the board does not have this firmware on it yet, put it there first: see [Install](/README.md#install). It takes a USB cable and a web browser.
 
 Once assembled, scan DeskHog's QR code with your phone to open its web page. You can also connect from any computer by choosing the WiFi network shown under the QR code (`DeskHog_…`) from your machine's WiFi menu.
 
