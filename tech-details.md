@@ -28,6 +28,8 @@ We have to keep this stuff carefully isolated or we're going to crash.
 
 <img width="500" alt="diagram" src="https://github.com/user-attachments/assets/14ea2440-90d8-4540-bebb-045c18fbbc99" />
 
+▲ and ▼ move between cards; ● belongs to the card on screen. A plugin may claim all three buttons, so two combinations never reach it: ● held with ▲ always goes to the previous card (`PluginCard::handleButtonPress`), and ● with ▼ held for two seconds powers the device off (deep sleep, in the main loop; reset wakes it).
+
 If the board isn't responding:
 
 - Hold **▼ (Page down/D0)**
@@ -41,13 +43,6 @@ The board will restart in bootloader mode, where it can be re-flashed using Plat
 You don't have to guess the pin definitions. You'll find them documented here:
 
 ~/.platformio/packages/framework-arduinoespressif32/variants/adafruit_feather_esp32s3_reversetft/pins_arduino.h
-
-## UI progress
-
-- Status card: working
-- WiFi provisioning card with QR Code: working
-- Friend card to give you (mild) reassurance: working
-- PostHog insights: now a plugin (`plugins/posthog.lua`) with big numbers, line charts and funnels; other kinds of insight are not supported yet
 
 ## Important components
 
@@ -71,7 +66,7 @@ It is three hand-written files in `html/` with no dependencies, inlined into one
 
 To work on it without flashing, run `node test/portal/serve.js` and open `http://localhost:8080`. It serves `html/` as it is on disk, against a pretend device, or against your real one with `--device <address>`. `test/portal/run.sh` runs its tests.
 
-**Web portal budget:** the page is about 70 KB before it is inlined. We allow up to **100KB**. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
+**Web portal budget:** the page is about 87 KB before it is inlined. We allow up to **100KB**. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
 
 ### Card system
 
@@ -110,13 +105,18 @@ The plugin API is documented in [plugins/README.md](plugins/README.md).
 
 The 4 MB flash holds one firmware slot (2.9 MB) and a 1 MB LittleFS partition for plugins; see `partitions.csv`. There is no second firmware slot, so there are no over-the-air firmware updates: firmware goes over USB, plugins go over WiFi.
 
+Why not both: the usual way to update over the air needs two firmware slots, so that the running firmware can write the new one beside itself. The firmware is about 1.9 MB. Two slots for it take 3.8 MB of the 3.9 MB there is, which leaves nothing for plugins. Ways to get updates without a cable on this board, none of them built:
+
+- A small second firmware that can only join WiFi and receive a file (well under 1 MB). To update, the device restarts into it, takes the new firmware and writes it over the main slot. That would fit as roughly 0.8 MB + 2.2 MB + 0.85 MB for plugins, and a failed update still leaves the small one to try again with.
+- Flashing over USB from a web page (Web Serial, as [ESP Web Tools](https://esphome.github.io/esp-web-tools/) does) with firmware built by the release workflow. Still a cable, but no toolchain: plug in, press a button in Chrome or Edge.
+
 ### LVGL
 
 This project relies on the powerful [LVGL project](https://docs.lvgl.io/9.2/intro/index.html) at [v9.2.2](https://registry.platformio.org/libraries/lvgl/lvgl?version=9.2.2) for drawing, animation and other UI tasks.
 
 ### Config manager and captive portal
 
-`ConfigManager` handles persistent storage and retrieval of WiFi credentials and the list of cards. `CaptivePortal` provides the web server and interacts with `ConfigManager` to read and write to persistent storage.
+`ConfigManager` handles persistent storage and retrieval of WiFi credentials, the list of cards and the address of the plugin directory. `CaptivePortal` provides the web server and interacts with `ConfigManager` to read and write to persistent storage.
 
 ### Images
 

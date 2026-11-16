@@ -1,33 +1,41 @@
-# DeskHog: A developer toy for sparking developer joy
+# DeskHog: a developer toy for sparking developer joy
 
-<img width="992" alt="Screenshot 2025-04-18 at 1 31 29 AM" src="https://github.com/user-attachments/assets/6e5d1fe6-1887-4d66-8497-4b582eb0391a" />
+<img width="992" alt="A DeskHog on a desk" src="https://github.com/user-attachments/assets/6e5d1fe6-1887-4d66-8497-4b582eb0391a" />
 
-## Dive in
+DeskHog is an open-source, 3D printed, palm-sized desk gadget: a small colour screen, three buttons, WiFi, a battery and an LED. It shows a stack of cards that you page through with the buttons.
 
-Ready to put your kit together? [Start here.](/getting-started/start-here.md)
+This is a fork of [PostHog/DeskHog](https://github.com/PostHog/DeskHog) in which **every card is a plugin**: a small Lua file that you install over WiFi from the device's own web page, without recompiling or reflashing. There are more than thirty to pick from, and writing your own takes a few lines.
 
-## What is DeskHog?
-DeskHog is an open-source, 3D printed, palm-sized developer toy. 
+- [What you need](#what-you-need)
+- [Set it up](#set-it-up)
+- [Plugins](#plugins), with [all of them in pictures](#the-plugins)
+- [Using the device](#using-the-device)
+- [Moving from PostHog's firmware](#moving-from-posthogs-firmware)
+- [Working on DeskHog](#working-on-deskhog)
+- [Troubleshooting](#troubleshooting)
 
-It's a toy to tinker with, adapt, and to get curious with. We'll be folding in a library of simple example games and apps, including a pomodoro timer and versions of Pong, Rogue, Flappy Bird. You can see PRs for these in this repo now for inspiration!
+## What you need
 
-We think that sounds like fun and, if you do too, then DeskHog is for you. 
-
-## OK, but what is it?
-
-DeskHog packs an Adafruit ESP32-S3 Reverse TFT Feather in a custom-made 3D printed case. It comes complete with a 240x135 color TFT display, a 10-hour battery life, WiFi, and a cute little LED so you can find it in the dark.
-
-A [plug-and-play DeskHog hardware kit](https://posthog.com/merch) is coming soon (so you can get everything in one box). In the meantime, here’s what you’ll need if you want to make DeskHog yourself right now. 
+DeskHog is an Adafruit ESP32-S3 Reverse TFT Feather in a 3D printed case: a 240x135 colour display, WiFi, three buttons and an LED, with room for a battery.
 
 - ESP32-S3 Reverse TFT Feather – [`Adafruit 5691`](https://learn.adafruit.com/esp32-s3-reverse-tft-feather) – buy: [Adafruit](https://www.adafruit.com/product/5691), [DigiKey](https://www.digikey.com/en/products/detail/adafruit-industries-llc/5691/18627502?s=N4IgjCBcoLQBxVAYygMwIYBsDOBTANCAPZQDa4ArAEwIC6AvvYVWSBQGwCcEDQA), [Mouser](https://www.mouser.com/ProductDetail/Adafruit/5691?qs=mELouGlnn3eeALy2e3r3sw%3D%3D), [Botland (EU)](https://botland.store/arduino-compatible-boards-adafruit/22891-feather-esp32-s3-reverse-with-tft-display-wifi-module-4mb-flash-2mb-psram-compatible-with-arduino-adafruit-5691.html), [The Pi Hut (UK)](https://thepihut.com/products/adafruit-esp32-s3-reverse-tft-feather-4mb-flash-2mb-psram-stemma-qt), [Electromaker](https://www.electromaker.io/shop/product/adafruit-esp32-s3-reverse-tft-feather-4mb-flash-2mb-psram-stemma-qt?srsltid=AfmBOorFfshQCLVi9EDKfmKFKMNC_cE3Ww0NaY0U0evm5ZU2OEM2Yn_B), [BerryBase (EU)](https://www.berrybase.de/en/adafruit-esp32-s3-reverse-tft-feather)
 - Optional: PKCell 552035 350mAh 3.7V LiPoly battery – buy: [Adafruit](https://www.adafruit.com/product/2750), [Tinytronics (EU)](https://www.tinytronics.nl/en/power/batteries/li-po/pkcell-li-po-battery-3.7v-350mah-jst-ph-lp552035), [BerryBase (EU)](https://www.berrybase.de/en/lp-552035-lithium-polymer-lipo-akku-3-7v-350mah-mit-2-pin-jst-stecker)
-- 3D printed enclosure – print: [3mf file](3d-printing)
+- 3D printed enclosure – print: [3mf file and printing notes](3d-printing)
+
+The board works without the case and without the battery, on USB power. For putting a kit together, see [getting started](getting-started/start-here.md).
+
+## Set it up
+
+1. **Put the firmware on the board, over USB.** Open this folder in [Visual Studio Code](https://code.visualstudio.com/) with the [PlatformIO extension](https://platformio.org/install/ide?install=vscode) and choose **Upload**, or run `pio run -t upload` from a terminal. A board that comes from PostHog's firmware keeps its WiFi and cards; see [below](#moving-from-posthogs-firmware).
+2. **Connect it to WiFi.** The screen shows a QR code. Scan it with your phone, or join the network named under it (`DeskHog_…`) from a computer. The device's web page opens; pick your network and give its password.
+3. **Open the web page again**, now on your own network: `http://deskhog.local`, or the address on the device's status card (the first card in the stack).
+4. **Add cards.** Press **Add card** and choose what it should show. A freshly flashed device has no plugins yet, so the choices come from the plugin directory: choosing one installs its plugin and adds the card. **Get plugins** shows everything there is.
+
+The web page is also where you rearrange and remove cards, change their settings and manage accounts that several cards share (Connections). It shows a live picture of each card, and the device's three buttons work from the page, so you can try a card without reaching for the device.
 
 ## Plugins
 
-DeskHog runs plugins: small Lua files that show up as cards. You install them over WiFi from the device's web page or the command line, with no recompiling and no reflashing.
-
-The web page has a plugin directory, with a picture of every card: it is the Plugins page, and what it offers is also among the choices when you add a card. Pick what you want and it is installed. The directory is the [`plugins/`](plugins) folder of this repository on GitHub, so adding a plugin for everyone is a pull request, and you can point a device at a directory of your own. A freshly flashed device starts empty; the firmware carries no plugins unless you list some in `plugins/bundled.txt`.
+A plugin is one Lua file. It can fetch JSON from any API, draw freely, react to the three buttons, set the LED and keep small bits of data. A plugin that crashes shows its error on its own card and leaves the rest of the device alone.
 
 ```lua
 plugin = { name = "Counter" }
@@ -53,15 +61,21 @@ tools/deskhog push counter.lua     # put it on the device
 tools/deskhog watch counter.lua    # push again on every save
 ```
 
-Plugins can fetch JSON from any API, draw freely, react to the three buttons, set the LED and keep small bits of data. A plugin that crashes shows its error on its own card and leaves the rest of the device alone.
+One plugin can provide several cards that share settings, such as one account with a card per chart. On a computer, the web page has an editor for plugin code, so you can also write and change plugins right on the device.
 
-One plugin can provide several cards that share settings, such as one account with a card per chart. The device's web page (open `http://deskhog.local`) is where you add, arrange and set up cards. It shows a live picture of each one, and the device's three buttons work from the page, so you can try a card without reaching for the device. On a computer it has a wide layout with an editor for plugin code.
+[**Read the plugin guide**](plugins/README.md) to write your own. It covers the whole API, the simulator, the command line tool and how to publish a plugin.
 
-[**Read the plugin guide**](plugins/README.md) to write your own.
+### The plugin directory
+
+Plugins come from a plugin directory: a folder of plugins with a list of them, in a git repository. The [`plugins/`](plugins) folder of this repository is one, and it is the one a device uses unless you tell it otherwise. So adding a plugin for everyone is a pull request, and you can point a device at a directory of your own: on the Plugins page, choose Change next to the directory's name.
+
+The device itself never fetches plugins. The web page (or `tools/deskhog install`) downloads the file and hands it to the device. After a change to the directory it can take a few minutes before every device's page sees it, because GitHub serves the files from a cache.
+
+The firmware carries no plugins. If a batch of devices has to show something on first boot without internet, list plugin names in [`plugins/bundled.txt`](plugins/bundled.txt) before building.
 
 ### The plugins
 
-These are in [`plugins/`](plugins), which is also the plugin directory: on the device's web page, Get plugins shows them all, and Add card offers them too. None is built into the firmware.
+These are in the directory now. On the device's web page, Get plugins shows them all, and Add card offers them too.
 
 <!-- plugin-list:start (written by `tools/deskhog index`; do not edit by hand) -->
 <table>
@@ -126,115 +140,102 @@ These are in [`plugins/`](plugins), which is also the plugin directory: on the d
 </table>
 <!-- plugin-list:end -->
 
-Every card is a plugin. The cards that used to be compiled into the firmware (Max, the question card, Flappy Hog, Paddle, hello world) are Lua files now, which you can read and change on the device's web page. Only the WiFi and status screen is still part of the firmware.
+PostHog, Home Assistant and Homey Pro need an account or a hub of yours: you fill in its address and a key when you add the first card. The Homey and Home Assistant plugins were written against those systems' documented APIs and tested with sample answers, not yet against real hubs, so expect to report a bug or two.
 
-### Moving from an older firmware
+## Using the device
 
-This firmware uses a different flash layout: one firmware slot plus about 1 MB of storage for plugins, where older versions had two firmware slots for over-the-air updates. Because of that:
+| | |
+|---|---|
+| **▲ / ▼** | The previous and the next card |
+| **●** | Whatever the card on screen does with it |
+| **● held, then ▲** | The previous card, always. Games and other cards may use all three buttons; this is the way out |
+| **● + ▼ held for two seconds** | Power off (deep sleep). Press the reset tab on the left to wake it |
+| **▼ held while pressing reset** | Bootloader mode, for when the board does not respond and has to be flashed |
+
+<img width="500" alt="The buttons of a DeskHog" src="https://github.com/user-attachments/assets/14ea2440-90d8-4540-bebb-045c18fbbc99" />
+
+The first card is the status card. It is part of the firmware and cannot be removed: it shows the QR code until WiFi is set up, and after that the WiFi status, the device's address, the signal strength and the firmware version.
+
+Plugins update over WiFi, from the web page: when the directory has a newer version of one you have, it offers an update. The firmware itself is updated over USB, the way it was installed.
+
+## Moving from PostHog's firmware
+
+This firmware uses a different flash layout: one firmware slot plus about 1 MB of storage for plugins, where PostHog's has two firmware slots for over-the-air updates. Because of that:
 
 - **The first install has to go over USB.** In PlatformIO, choose **Upload** as usual. WiFi and card settings carry over. (Older firmware lost the newest settings on every USB upload, because one boot file was written into the settings area. That is fixed here; see `fix_otadata_offset.py`.)
 - **Firmware updates are over USB from now on.** Plugins are what updates over WiFi.
+- **Your cards are kept, and ask for their plugin.** The cards that used to be compiled into the firmware (PostHog insights, Max, the question card, Flappy Hog, Paddle, hello world) are plugins now. Cards of those kinds stay in the stack with their settings; until its plugin is installed, a card says so on its screen, and the web page offers to install it with one press.
+- **PostHog settings move to a connection.** The project ID and API key that were device-wide settings become the settings of one PostHog connection, which all your insight cards share. Big numbers, line charts and funnels are supported; other kinds of insight are not yet.
 - The first boot takes a few seconds longer while the plugin storage is set up.
 
-## What can DeskHog do?
+Going back to PostHog's firmware works the same way, over USB. Use **Erase Flash and Upload** for that, since the layouts differ.
 
-DeskHog can do a couple of things by default, but the real joy lies in expanding the capabilities by adding them yourself. 
+## Working on DeskHog
 
-### Out of the box functionality
+**On plugins:** the [plugin guide](plugins/README.md) is all you need. Nothing has to be compiled: there is a simulator for your computer and a command line tool that pushes to the device on every save.
 
-A couple of basic [cards](#card-stack) (screens) are included on the firmware and were built by [Danilo Campos](https://posthog.com/community/profiles/31731).
+**On the firmware:** [tech-details.md](tech-details.md) describes the architecture: the two cores and which task may do what, the card stack, the plugin runtime, the web page and the flash layout. It is a [PlatformIO](https://platformio.org/) project for the Arduino framework, with [LVGL](https://lvgl.io/) for drawing.
 
-- **ProvisioningCard**: Displays a QR code to connect to the device and shows connection stats.
-- **PostHog insights**: big numbers, line charts and funnels from your PostHog project. This is a plugin now ([`plugins/posthog.lua`](plugins/posthog.lua)): add a card on the device's web page and fill in your project ID and a personal API key. Insight cards set up with older firmware are kept on the first boot, with their settings; install the PostHog plugin from the web page and they work again.
-- **Max**: Max the hedgehog visits and provides encouragement. A plugin too ([`plugins/friend.lua`](plugins/friend.lua)); you can give him your own lines.
-- **Questions**, **Flappy Hog**, **Paddle**: icebreaker questions and two games, also plugins. Cards of these kinds set up with older firmware are kept on the first boot; the web page offers to install the plugin each one needs.
+Three sets of checks run without a device, and on every push:
 
-### Available games and apps
+```sh
+test/native/run.sh          # the plugin runtime, and every plugin in plugins/
+test/portal/run.sh          # the web page, against a pretend device
+tools/deskhog index --check # the directory's list and the plugin list in this README
+```
 
-We're working on adding some of the following games to an `/examples` folder which will include a selection of games and apps for you to play with. If you can't see them in the `/examples` folder it's probably because they exist as [unapproved PRs](https://github.com/PostHog/DeskHog/pulls) while we work on them. No problem, just checkout the branch!
+To work on the web page without flashing, `node test/portal/serve.js` serves it from `html/` against the same pretend device, or against your real one with `--device <address>`.
 
-Example games include:
+To flash many boards in one go, see [MULTI_FLASH_GUIDE.md](MULTI_FLASH_GUIDE.md).
 
-- **Pog**: A Pong clone by [Leon Daly](https://posthog.com/community/profiles/30833)
-- **IdleHog**: An idle clicker by [Chris McNeill](https://posthog.com/community/profiles/33534)
-- **One Button Dungeon**: An idle Roguelike by [Joe Martin](https://posthog.com/community/profiles/29070)
-- **Dictator or Techbro: DeskHog Edition**: A quiz game by [Chris McNeill](https://posthog.com/community/profiles/33534)
-- **Notchagotchi**: A virtual pet by [Sophie Payne](https://posthog.com/community/profiles/33385)
-- **Flappy Hog**: A Flappy Bird clone by [Joe Martin](https://posthog.com/community/profiles/29070)
-- **Hog Speed**: A reaction game by [Chris McNeill](https://posthog.com/community/profiles/33534)
-- **Pineapple Reflex**: A pizza-based game by [Sophie Payne](https://posthog.com/community/profiles/33385)
-- **Three Button Dungeon**: An Ultima-like by [Joe Martin](https://posthog.com/community/profiles/29070)
+### Coding with AI agents
 
-Example apps include:
+Agents do well on plugins: the API is small, the guide is one file, and `tools/sim/run.sh` gives them a picture of the result to look at. Point your agent at [plugins/README.md](plugins/README.md) and an existing plugin that resembles what you want.
 
-- **Awkwardness Avoider**: A smalltalk prompter by [Annika Schmid](https://posthog.com/community/profiles/28619)
-- **Pomodoro**: A productivity timer by [Annika Schmid](https://posthog.com/community/profiles/28619)
+The firmware is harder ground. Models often struggle with multi-threaded embedded code, and DeskHog has strict rules about which task may touch what:
 
-All of the example apps were built in 24 hours at [a PostHog hackathon](https://posthog.com/handbook/company/offsites) by people who hadn't coded before at all. These example cards are a testament to [what's possible when vibe coding on DeskHog](#-vibe-coding-with-ai-agents), but some lack polish - so make sure you know [how to reset DeskHog](#buttons-and-reset-sequences). Just in case.
+- Give the agent [tech-details.md](tech-details.md) first.
+- Cross-core messages go through `EventQueue`; the UI, and with it every plugin, is only touched from the UI task. Flag any suggestion that draws from another task.
+- Changes to how cards are created and removed have to be tried on a real device: add and remove a card a few times and watch the serial log. Desktop tests do not catch a dangling LVGL object.
 
-## Developing for DeskHog
+Think of the agent as a speedy junior developer: you are the one keeping it on track.
 
-Review [tech-details.md](tech-details.md) for info on architecture, libraries and key components used in this project.
+### What would be welcome
+
+- New plugins, and fixes to the ones that have not met the real service yet (Home Assistant, Homey Pro)
+- More kinds of insight in the PostHog plugin ([`plugins/posthog.lua`](plugins/posthog.lua))
+- Things plugins cannot do yet: being written to from outside (a push API), QR codes, time zones, sensors on the board's I2C connector, the buttons as USB keys
+- Firmware updates without a cable (see the flash layout in [tech-details.md](tech-details.md) for what stands in the way)
+- Support for other boards and displays
+
+Open an issue or a pull request on this repository.
 
 ## Troubleshooting
 
-### No matter what I do, flashing the board doesn't change anything! wtf??
+### Flashing the board does not seem to change anything
 
-The board can end up booting from the wrong place, for example after switching between this firmware and an older one with a different flash layout.
+The board can end up booting from the wrong place, for example after switching between this firmware and one with a different flash layout. Choose **Erase Flash and Upload** from the PlatformIO Project Tasks menu. This also erases your WiFi settings, cards and plugins.
 
-To fix this, choose **Erase Flash and Upload** from the PlatformIO Project Tasks menu. This also erases your WiFi settings, cards and plugins.
+### The board does not show up for flashing
 
-## 🤖 Coding with AI Agents
+Hold ▼, press reset, release ▼. The board restarts in bootloader mode and can be flashed.
 
-> DeskHog is optimized for agent development. If you've never tried coding with AI before, here's [a guide to get you started](https://posthog.com/tutorials/deskhog-claude-tutorial)!
+### Get plugins says it cannot reach the plugin directory
 
-We couldn't have built DeskHog without the help of agent development workflows, and we encourage agent-driven development with a few caveats.
+The directory is fetched by the computer or phone you are looking at the page with, not by the DeskHog. That device needs internet.
 
-LLMs often struggle with multi-threaded embedded systems. DeskHog’s firmware has strict rules for core/task roles; AI might overlook them unless you guide it.
+### A card says its plugin is not installed
 
-If you're looking to [get started](https://posthog.com/tutorials/deskhog-claude-tutorial), we recommend using [Claude Code](https://www.anthropic.com/claude-code) with [Visual Studio Code](https://code.visualstudio.com/) and the [PlatformIO extension](https://platformio.org/install/ide?install=vscode). They work well together and you can build all sorts of things with natural language.
+Open the card on the web page and press Install. This happens after moving from older firmware, and when a plugin was deleted while cards of it remained.
 
-Use `tech-details.md` to give your agent broad context on the device. Still, even with that you should bear in mind the following advice:
+### A card shows an error and a line number
 
-- You should encourage AI to follow existing patterns: use`EventQueue` for cross-core messaging and update the UI only on the UI task.
-- Flag any AI suggestions that touch the UI from the wrong core.
-- Review and test thoroughly—watch for “LLM slop” (unused vars, odd delays) and clean it up.
+The plugin crashed. Its card says where; the other cards carry on. `tools/deskhog logs <plugin>` and the Plugins page show what it printed before that.
 
-Think of your AI as a speedy junior dev: brilliant but prone to mistakes. You’re the senior dev keeping it on track. With that balance, AI can boost productivity while keeping DeskHog reliable.
+## Credits
 
-## Power off
+DeskHog was created at [PostHog](https://posthog.com) by [Danilo Campos](https://posthog.com/community/profiles/31731), who designed the hardware, the case and the original firmware. Max the hedgehog, the question card and Paddle come from that firmware, and Flappy Hog was built by [Joe Martin](https://posthog.com/community/profiles/29070) at a PostHog hackathon; here they are rewritten as plugins. [The original repository](https://github.com/PostHog/DeskHog) has more games and apps from that hackathon as pull requests, written in C++ for the original firmware.
 
-If you want to turn the device off, hold ● + ▼ for two seconds. The device will enter deep sleep mode. 
+The Lua plugin system, the plugin directory and the plugins are by [Tim Broddin](https://github.com/TimBroddin).
 
-To wake the device, press the reset tab on the left. 
-
-## UI progress
-- Status card: working
-- WiFi provisioning card with QR Code: working
-- Friend card to give you (mild) reassurance: working
-- PostHog big numbers, line charts and funnels: working, as a plugin
-- Other kinds of PostHog insight: not yet supported
-
-## Request for PRs
-
-The following PRs would be interesting, and may earn you a free DeskHog kit or other merch:
-
-- More kinds of insight in the PostHog plugin (`plugins/posthog.lua`)
-- More games and apps! We think limiting things to one available button prompts creativity
-- Support for other boards and displays
-- LLM slop mitigation: if you see anything obviously stupid in this code that hasn't yet been caught and cleaned up
-- DX improvements around task isolation: if your experience with embedded code says there's a better way to architect this, happy to follow your lead
-- Improved C++: not my preferred language, feel free to suggest idiomatic and architectural improvements
-- Desk utilities, like a pomodoro timer; also constrained: center button only. Be creative!
-- PlatformIO config improvements: flashing builds causes a reboot that seems unnecessary, maybe you know a better configuration
-
-## Forks
-
-This firmware has a simple goal: make it easy to set up a stack of screens that you can page through easily, managed by a web UI. But this is just one way to use the power of the board we chose. Feel free to steal this code, keep what helps, throw out what you don't like, and try something totally different. If you get somewhere interesting with your fork, let us know with a pull request to edit this section!
-
-### Community Forks
-- **[joshlevitre/DeskHog](https://github.com/joshlevitre/DeskHog)** - Adds a Pokedex card that fetches and displays random Pokemon from the PokeAPI
-
-## Feedback
-
-PRs over issues, but if you've got any trouble, feel free to open an issue. You can also contact the maintainer, danilo@posthog.com.
+The code is under the [MIT licence](LICENSE).

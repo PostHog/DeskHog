@@ -2,6 +2,8 @@
 
 This utility automatically detects and flashes DeskHog firmware to multiple ESP32-S3 boards as they are connected.
 
+A freshly flashed board has no cards: every card is a plugin, and plugins are installed over WiFi from the device's web page. If the boards have to show something on first boot, list plugin names in `plugins/bundled.txt` before building, and they are carried inside the firmware. This utility only writes the firmware; it does not set up WiFi.
+
 ## Features
 
 - Automatically detects new ESP32-S3 Feather boards when plugged in

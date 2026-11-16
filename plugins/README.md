@@ -431,9 +431,10 @@ device uses unless told otherwise. To add yours to it:
 4. Open a pull request with these files. The checks run the plugin through the
    runtime's tests (it has to load) and make sure the index and the list match.
 
-Once it is merged, it shows up on every device's web page under Plugins, Get
-plugins, with an Install button, and with Update when the published file differs
-from the one on the device. Nothing is fetched by the device itself: the web page
+Once it is merged, it shows up on every device's web page, on the Plugins page and
+among the choices of Add card, with an Install button, and with Update when the
+published file differs from the one on the device. (GitHub serves the files from a
+cache, so that can take a few minutes.) Nothing is fetched by the device itself: the web page
 (or `tools/deskhog install`) downloads the file and hands it to the device.
 
 Your own directory works the same way. Any GitHub repository with a `plugins`
@@ -473,6 +474,27 @@ to the plugin. Like the plugin files, it is fetched by the browser, not by the d
 A firmware build can also carry plugins inside it, for devices that have to work
 without any of this: list their names in `plugins/bundled.txt`. By default it
 carries none.
+
+## Porting a card from the original firmware
+
+Cards for PostHog's firmware are C++ classes built on LVGL, compiled into the
+firmware; the games and apps in that repository's pull requests are of that kind.
+This firmware has no place to register such a card. As a plugin, the same card is
+usually shorter. What goes where:
+
+| In the C++ card | In a plugin |
+|---|---|
+| `handleButtonPress(button_index)`, returning `true` when used | `button(name)`, returning `true` when used |
+| `update()`, called at the screen's rate | `update(dt)`, with the seconds since the last call. Move things by `speed * dt` |
+| LVGL objects made once and changed later | `draw()` paints the whole card each time, with `ui` or `gfx` |
+| Sprites as C arrays (`png2c.py`) | `gfx.image`, written by `tools/deskhog image *.png` |
+| `Preferences`, or a config value from the web page | `store` for what the card saves, `config` for what the person sets |
+| `HTTPClient` and ArduinoJson, on the network task | `http.get` with a callback; `res.json` is already decoded |
+| Events through `EventQueue` to reach the UI task | Nothing: a plugin only ever runs on the UI task |
+
+[flappy.lua](flappy.lua), [paddle.lua](paddle.lua), [friend.lua](friend.lua) and
+[question.lua](question.lua) were ported this way, and
+[posthog.lua](posthog.lua) replaces the insight cards with their client and parser.
 
 ## Testing without a device
 

@@ -4,14 +4,14 @@ Let’s get you going.
 
 # What's going on?
 
-DeskHog is a palm-sized computer that connects to WiFi. What happens after that is something you can decide by writing new code for it. We've done our best to take care of the boring stuff for you:
+DeskHog is a palm-sized computer that connects to WiFi. What it shows is a stack of cards, and every card is a plugin: a small Lua file that you install from the device's own web page, or write yourself. The boring stuff is taken care of:
 
 - WiFi setup
 - Drawing to the screen
-- Building an interface so you can navigate between different cards
-- A web portal to change settings
+- Moving between cards with the buttons
+- A web page to add cards, install plugins and change settings
 
-From here you can make simple games, connect to web services, or come up with your own adventure.
+From here you can pick from the plugins there are, make simple games, connect to web services, or come up with your own adventure.
 
 # Assembly
 
@@ -47,10 +47,14 @@ From here, attach the battery to the board and attempt to lay the board into its
 
 # Dive in
 
-Once assembled, you can scan DeskHog’s QR code to access its configuration portal. You can also connect directly from any computer by choosing the WiFi SSID shown under the QR code from your machine’s WiFi menu.
+If the board does not have this firmware on it yet, put it there first, over USB: see [Set it up](/README.md#set-it-up).
 
-After you give DeskHog WiFi credentials, you can access the portal again anytime by visiting its IP in your web browser. DeskHog’s status card, always shown at the top of the stack, will show its IP. You should also update to the latest firmware via the portal.
+Once assembled, scan DeskHog's QR code with your phone to open its web page. You can also connect from any computer by choosing the WiFi network shown under the QR code (`DeskHog_…`) from your machine's WiFi menu.
 
-The project includes a `Hello, world!` card in `src/ui/examples`. You can start noodling with it immediately. To add or remove the card, visit DeskHog’s configuration portal.
+Pick your WiFi network on that page and give its password. From then on the page is at `http://deskhog.local`, or at the address on DeskHog's status card, which is always the first card in the stack.
 
-Ready to go deeper? Check out [this tutorial](https://posthog.com/tutorials/deskhog-claude-tutorial) on how you can use agent coding products like Claude to build more interesting things on DeskHog's software. Whether you're a robot or a human, the [tech-details.md](/tech-details.md) file will help you get your bearings.
+Now give it something to show: press **Add card** and choose. A new DeskHog has no plugins yet, so the choices come from the plugin directory; choosing one installs its plugin and adds the card. **Get plugins** shows everything there is, with a picture of each.
+
+▲ and ▼ move between cards, and ● belongs to the card on screen. A game may use all three; holding ● and pressing ▲ always takes you to the previous card. Holding ● and ▼ for two seconds turns DeskHog off, and the reset tab on the left wakes it.
+
+Ready to go deeper? A plugin is a few lines of Lua, and you can try it on your computer before it goes on the device: read the [plugin guide](/plugins/README.md). For the firmware itself, whether you're a robot or a human, [tech-details.md](/tech-details.md) will help you get your bearings.
