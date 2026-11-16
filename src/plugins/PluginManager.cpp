@@ -216,10 +216,10 @@ void PluginManager::begin() {
                       (unsigned)LittleFS.totalBytes(), (unsigned)records_.size());
     }
 
-    // TLS handshakes need a deep stack; a request has been measured at 4.3 KB
-    // with verbose logging on. The stack has to be internal RAM: lwIP asserts
+    // TLS handshakes need a deep stack: with 8 KB, a handshake left only 3 KB
+    // unused, so it has 12 KB. The stack has to be internal RAM: lwIP asserts
     // that a task opening a TCP connection does not run on a PSRAM stack.
-    xTaskCreatePinnedToCore(httpTaskEntry, "pluginHttp", 8192, this, 1, &httpTask_, 0);
+    xTaskCreatePinnedToCore(httpTaskEntry, "pluginHttp", 12288, this, 1, &httpTask_, 0);
 }
 
 void PluginManager::loadConnections() {
