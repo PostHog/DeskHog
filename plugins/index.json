@@ -294,11 +294,11 @@
       "title": "Now playing",
       "description": "What you are listening to, with the album cover, from Last.fm",
       "author": "DeskHog",
-      "version": "1.0",
+      "version": "1.1",
       "file": "nowplaying.lua",
-      "size": 7757,
-      "hash": "d2f75c6e",
-      "sha256": "bd8acdb5240a0a87006648f1c6bcc9cf8ee28964fb7b9527238e2fa0c7c333a0",
+      "size": 8753,
+      "hash": "0b3610c0",
+      "sha256": "2d37946e3a125916e1ab0ae54d2950451ae3d97b5b423b77a396e2cddcb3f81c",
       "screenshot": "screenshots/nowplaying.png"
     },
     {

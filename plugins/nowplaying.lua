@@ -14,7 +14,7 @@ plugin = {
   name = "Now playing",
   description = "What you are listening to, with the album cover, from Last.fm",
   author = "DeskHog",
-  version = "1.0",
+  version = "1.1",
   refresh = 20,
   fps = 8,   -- only for the three dancing bars
 }
@@ -48,23 +48,49 @@ local function urlencode(text)
   end))
 end
 
--- Fetch the cover, unless it is the one we have. Two tracks of an album share one.
-local function showCover(url)
-  if url == coverUrl then return end
-  coverUrl = url
-  if cover then
-    gfx.release(cover)               -- give its memory back before asking for the next
-    cover = nil
-  end
-  if not url then return end
-  gfx.fetchImage(url, { width = ART, height = ART }, function(image, err)
+local coverPending = false           -- a fetch is on its way
+local coverTries = 0                 -- fetches of coverUrl that failed or are under way
+
+-- Last.fm's image server converts a cover to PNG when you ask for .png. Some
+-- of its JPEGs are progressive, a kind the device cannot read; the PNG works.
+local function asPng(url)
+  return (url:gsub("%.jpe?g$", ".png"))
+end
+
+local function fetchCover(url, from)
+  gfx.fetchImage(from, { width = ART, height = ART }, function(image, err)
     if url ~= coverUrl then          -- the track changed again while this one was on its way
       if image then gfx.release(image) end
       return
     end
+    if not image and tostring(err):find("progressive", 1, true) and from ~= asPng(url) then
+      fetchCover(url, asPng(url))    -- the same cover, as a PNG
+      return
+    end
+    coverPending = false
     cover = image                    -- nil if it failed: the card draws a record instead
-    if not image then print("No cover: " .. tostring(err)) end
+    if not image then print("No cover (try " .. coverTries .. "): " .. tostring(err)) end
   end)
+end
+
+-- Fetch the cover, unless it is the one we have. Two tracks of an album share
+-- one. A fetch that failed (often for lack of memory while other cards were
+-- busy) is tried again on the next refresh, three times in all.
+local function showCover(url)
+  if url == coverUrl and (cover or coverPending or coverTries >= 3) then return end
+  if url ~= coverUrl then
+    coverUrl = url
+    coverTries = 0
+    coverPending = false
+    if cover then
+      gfx.release(cover)             -- give its memory back before asking for the next
+      cover = nil
+    end
+  end
+  if not url then return end
+  coverTries = coverTries + 1
+  coverPending = true
+  fetchCover(url, url)
 end
 
 -- The largest of Last.fm's sizes that is still a small download: 174 pixels.
