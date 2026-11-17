@@ -100,6 +100,14 @@ public:
     /** Where to look for plugins to install, if the user chose somewhere else than the default. */
     String getPluginDirectory();
     void setPluginDirectory(const String& source);
+    /**
+     * The device's time zone: a POSIX TZ string such as "CET-1CEST,M3.5.0,M10.5.0/3",
+     * and the name it was picked by on the web page ("Europe/Brussels"). Both are ""
+     * until someone picks one, which means UTC.
+     */
+    String getTimeZone();
+    String getTimeZoneName();
+    void setTimeZone(const String& posix, const String& name);
     std::vector<CardConfig> getCardConfigs();
 
     /**

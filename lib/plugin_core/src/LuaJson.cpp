@@ -254,6 +254,13 @@ bool parseObject(Parser& s, int depth, int filter) {
             // Is this key wanted? Its entry in the filter is the filter for its value.
             lua_pushvalue(s.L, -1);
             if (lua_rawget(s.L, filter) == LUA_TNIL) {
+                // Not named. A "*" in the filter stands for every key that is not:
+                // for objects whose keys are ids rather than names.
+                lua_pop(s.L, 1);
+                lua_pushliteral(s.L, "*");
+                lua_rawget(s.L, filter);
+            }
+            if (lua_isnil(s.L, -1)) {
                 lua_pop(s.L, 2);  // the nil and the key
                 if (!skipValue(s, depth + 1)) {
                     lua_settop(s.L, table - 1);

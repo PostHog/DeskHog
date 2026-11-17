@@ -12,9 +12,12 @@
     tools/deskhog screenshot weather:2       save what a card shows right now as a PNG
     tools/deskhog press flappy:1 center      press a button for a card (up, center or down)
     tools/deskhog show weather:2             bring a card to the front on the device
+    tools/deskhog send doorbell "Pizza!"     push a message to a card's plugin: text, JSON, or @file
+    tools/deskhog config timers:1 front=no   stop a card from coming to the front by itself (front=yes: let it)
     tools/deskhog pull weather               print the source that is on the device
     tools/deskhog rm weather                 remove a plugin with its connections and cards
     tools/deskhog system                     memory and stack headroom on the device
+    tools/deskhog timezone Europe/Brussels   set the time zone plugins tell local time by (no name: show it)
     tools/deskhog sim weather.lua            run a plugin on this computer and save a screenshot
     tools/deskhog image walk1.png walk2.png  turn PNG files into gfx.image() source for a plugin
 
@@ -56,7 +59,7 @@ NAME_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
 class DeviceError(Exception):
-    pass
+    status = 0  # the HTTP status, when the device answered with an error
 
 
 class Device:
@@ -80,7 +83,9 @@ class Device:
                 message = json.loads(text).get("error") or text
             except ValueError:
                 message = text or str(error)
-            raise DeviceError(message)
+            failure = DeviceError(message)
+            failure.status = error.code
+            raise failure
         except (urllib.error.URLError, OSError) as error:
             reason = getattr(error, "reason", error)
             raise DeviceError(
@@ -257,18 +262,32 @@ def parse_settings(pairs):
 def command_config(device, args):
     target = args.target
     settings = parse_settings(args.settings)
+    front = None
     if ":" in target:
-        # One card's own settings.
-        if settings:
-            device.json("POST", "/api/cards/update?key=" + urllib.parse.quote(target), json.dumps({"settings": settings}), "application/json")
-            time.sleep(1.5)  # its connection restarts with the new values
+        # One card's own settings. Every card also has one of the device's own:
+        # "front", whether it may come to the front when its plugin calls notify().
         state = device.state()
         card = next((c for c in state["cards"] if c["config"] == target), None)
         if not card:
             raise DeviceError('no card "%s". See `deskhog list`.' % target)
         plugin = next((p for p in state["plugins"] if p["name"] == card.get("plugin")), None)
         kind = next((k for k in (plugin or {}).get("kinds", []) if k["key"] == card.get("kind")), None)
-        fields, values, secrets = (kind or {}).get("config", []), card.get("settings", {}), []
+        fields = (kind or {}).get("config", [])
+        update = {}
+        if "front" in settings and not any(field["key"] == "front" for field in fields):
+            answer = settings.pop("front").lower()
+            if answer not in ("yes", "no", "true", "false", "on", "off", "1", "0"):
+                raise DeviceError("front is yes or no")
+            update["front"] = answer in ("yes", "true", "on", "1")
+        if settings:
+            update["settings"] = settings
+        if update:
+            device.json("POST", "/api/cards/update?key=" + urllib.parse.quote(target), json.dumps(update), "application/json")
+            if settings:
+                time.sleep(1.5)  # its connection restarts with the new values
+            card = next((c for c in device.state()["cards"] if c["config"] == target), card)
+        values, secrets = card.get("settings", {}), []
+        front = card.get("front", True)
     else:
         if settings:
             device.json("POST", "/api/connections/update?id=" + urllib.parse.quote(target), json.dumps({"settings": settings}), "application/json")
@@ -280,7 +299,7 @@ def command_config(device, args):
         plugin = next((p for p in state["plugins"] if p["name"] == connection["plugin"]), None)
         fields, values, secrets = (plugin or {}).get("config", []), connection["settings"], connection.get("secretsSet", [])
 
-    if not fields:
+    if not fields and front is None:
         print("%s has no settings." % target)
     for field in fields:
         if field.get("secret"):
@@ -289,6 +308,8 @@ def command_config(device, args):
             shown = values.get(field["key"], field["default"])
         note = "" if field.get("secret") or shown == field["default"] else "  (default: %s)" % field["default"]
         print("%-12s = %s%s    # %s" % (field["key"], shown, note, field["label"]))
+    if front is not None:
+        print("%-12s = %s    # %s" % ("front", "yes" if front else "no", "May come to the front (when its plugin calls notify)"))
     return 0
 
 
@@ -434,6 +455,34 @@ def command_show(device, args):
     return 0
 
 
+def command_send(device, args):
+    """Push a message to a plugin: its message(msg) function gets it."""
+    body = args.message
+    if body.startswith("@"):
+        with open(body[1:], "rb") as handle:
+            body = handle.read().decode("utf-8")
+    if len(body.encode("utf-8")) > 4096:
+        raise DeviceError("that message is larger than 4 KB, the most a plugin takes")
+    try:
+        is_json = isinstance(json.loads(body), (dict, list))
+    except ValueError:
+        is_json = False
+    content_type = "application/json" if is_json else "text/plain; charset=utf-8"
+    key = device.card_key(args.card)
+    try:
+        device.json("POST", "/api/cards/message?key=" + urllib.parse.quote(key), body, content_type)
+    except DeviceError as error:
+        if error.status != 404:
+            raise
+        # This kind of card takes no messages. The plugin itself may: its global message().
+        try:
+            device.json("POST", "/api/connections/message?id=" + urllib.parse.quote(key.split(":")[0]), body, content_type)
+        except DeviceError as second:
+            raise second if second.status != 404 else error
+    print("Sent to %s." % key)
+    return 0
+
+
 def command_pull(device, args):
     sys.stdout.write(device.request("GET", device.plugin_path(plugin_name(args.name))))
     return 0
@@ -469,6 +518,36 @@ def command_system(device, args):
             continue
         value = system[key]
         print("%-32s %s" % (label, "%.1f KB" % (value / 1024) if unit else value))
+    return 0
+
+
+def posix_zone(name):
+    """The POSIX TZ string for a place such as Europe/Brussels, from this computer's time zone database."""
+    if not re.match(r"^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$", name):
+        return None
+    try:
+        with open(os.path.join(os.environ.get("ZONEINFO", "/usr/share/zoneinfo"), name), "rb") as file:
+            data = file.read()
+    except OSError:
+        return None
+    if data[:4] != b"TZif" or data[4:5] == b"\0":
+        return None
+    # Every compiled zone file ends with its rules as a POSIX string, on a line of its own.
+    return data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii") or None
+
+
+def command_timezone(device, args):
+    if args.zone is None:
+        zone = device.state().get("timezone") or {}
+        print("%s  %s" % (zone.get("posix", "UTC0"), zone.get("name", "")))
+        return 0
+    # A place ("Europe/Brussels") if this computer knows it, else a POSIX string as it is. "UTC" clears it.
+    posix = "" if args.zone.upper() == "UTC" else posix_zone(args.zone)
+    name = args.zone if posix else ""
+    if posix is None:
+        posix = args.zone
+    answer = device.json("POST", "/api/timezone", json.dumps({"posix": posix, "name": name}).encode(), "application/json")
+    print("Time zone set to %s%s." % (answer.get("posix", posix), " (%s)" % name if name else ""))
     return 0
 
 
@@ -753,6 +832,11 @@ def main():
     sub.add_argument("card")
     sub.set_defaults(run=command_show)
 
+    sub = commands.add_parser("send", help="push a message to a card's plugin (its message() function)")
+    sub.add_argument("card")
+    sub.add_argument("message", help="text, JSON, or @file to send a file's contents")
+    sub.set_defaults(run=command_send)
+
     sub = commands.add_parser("pull", help="print the source that is on the device")
     sub.add_argument("name")
     sub.set_defaults(run=command_pull)
@@ -763,6 +847,10 @@ def main():
     sub.set_defaults(run=command_press)
 
     commands.add_parser("system", help="memory and stack headroom on the device").set_defaults(run=command_system)
+
+    sub = commands.add_parser("timezone", help="show or set the time zone plugins tell local time by")
+    sub.add_argument("zone", nargs="?", help="a place such as Europe/Brussels, a POSIX string such as CET-1CEST,M3.5.0,M10.5.0/3, or UTC")
+    sub.set_defaults(run=command_timezone)
 
     sub = commands.add_parser("rm", help="remove a plugin and its cards")
     sub.add_argument("name")

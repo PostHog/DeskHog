@@ -1,5 +1,6 @@
 #include "plugins/PluginManager.h"
 #include "SourceHash.h"
+#include "TimeZone.h"
 
 #include <ArduinoJson.h>
 #include <algorithm>
@@ -12,11 +13,14 @@
 
 #include "ConfigManager.h"
 #include "EventQueue.h"
+#include "HttpRedirect.h"
 #include "bundled_plugins.h"
 #include "esp_heap_caps.h"
 #include "config/CardConfig.h"
 #include "hardware/DisplayInterface.h"
+#include "hardware/Input.h"
 #include "hardware/NeoPixelController.h"
+#include "plugins/ImageDecode.h"
 #include "plugins/PluginCard.h"
 #include "plugins/PluginConnection.h"
 
@@ -56,6 +60,163 @@ private:
     std::string& out_;
     size_t cap_;
     bool overflow_ = false;
+};
+
+// The certificates of the authorities the internet runs on, which come with
+// the ESP-IDF libraries. https requests are checked against them.
+extern const uint8_t caBundleStart[] asm("_binary_x509_crt_bundle_start");
+extern const uint8_t caBundleEnd[] asm("_binary_x509_crt_bundle_end");
+
+// How much of an answer's headers is kept for the plugin.
+const size_t kMaxHeaderBytes = 4096;
+
+/**
+ * A network client that also remembers the headers of the answer. HTTPClient
+ * only keeps headers it was told about in advance; plugins get them all
+ * (res.headers). It reads the header lines one byte at a time through read()
+ * and the body in blocks, so read() sees exactly the headers.
+ */
+template <class Base>
+class HeaderTap : public Base {
+public:
+    using Base::connect;
+
+    /**
+     * HTTPClient connects through this one, also for each redirect. It reports
+     * every failure to connect as "connection refused"; the real reason is kept
+     * here (see failure()).
+     */
+    int connect(const char* host, uint16_t port, int32_t timeout) override {
+        failure_.clear();
+        IPAddress address;
+        // hostByName() answers 1 when it found the address and an error number,
+        // not 0, when it did not. NetworkClientSecure tests it for 0 and would
+        // go on to connect to 0.0.0.0 until the timeout.
+        if (Network.hostByName(host, address) != 1) {
+            failure_ = "could not resolve host";
+            return 0;
+        }
+        const uint32_t startedMs = millis();
+        const int connected = Base::connect(host, port, timeout);
+        if (!connected && timeout > 0 && millis() - startedMs >= static_cast<uint32_t>(timeout)) {
+            failure_ = "connection timed out";
+        }
+        return connected;
+    }
+
+    /** Why the last connect() failed, or empty if this client cannot tell. */
+    const std::string& failure() const { return failure_; }
+
+    size_t write(const uint8_t* buffer, size_t size) override {
+        // A request goes out: what comes back next is a new set of headers.
+        // (After a redirect that is the answer that counts.)
+        headers_.clear();
+        open_ = true;
+        return Base::write(buffer, size);
+    }
+
+    int read() override {
+        const int c = Base::read();
+        if (open_ && c >= 0) {
+            headers_ += static_cast<char>(c);
+            const size_t size = headers_.size();
+            const bool blankLine = size >= 4 && headers_.compare(size - 4, 4, "\r\n\r\n") == 0;
+            if (blankLine || size >= kMaxHeaderBytes) open_ = false;
+        }
+        return c;
+    }
+
+    /** Split what was read into name and value pairs. The status line is skipped. */
+    void headersInto(std::vector<std::pair<std::string, std::string>>& out) const {
+        size_t at = headers_.find('\n');
+        while (at != std::string::npos && at + 1 < headers_.size()) {
+            const size_t start = at + 1;
+            at = headers_.find('\n', start);
+            if (at == std::string::npos) break;  // a line that was cut off
+            std::string line = headers_.substr(start, at - start);
+            while (!line.empty() && line.back() == '\r') line.pop_back();
+            const size_t colon = line.find(':');
+            if (colon == std::string::npos || colon == 0) continue;
+            size_t value = colon + 1;
+            while (value < line.size() && line[value] == ' ') value++;
+            out.emplace_back(line.substr(0, colon), line.substr(value));
+        }
+    }
+
+protected:
+    std::string failure_;
+
+private:
+    std::string headers_;
+    bool open_ = false;
+};
+
+/**
+ * The https client. It checks the server's certificate against the bundle on
+ * every connection, and knows why a connection failed.
+ *
+ * Two things in NetworkClientSecure (arduino-esp32 3.2.0) make this necessary:
+ *  - stop() wipes the whole TLS context, including the bundle that
+ *    setCACertBundle() attached. A client is stopped before it connects to
+ *    where a redirect points, so that second connection had no authorities to
+ *    check against and failed with MBEDTLS_ERR_SSL_CA_CHAIN_REQUIRED: every
+ *    https address that redirects was "refused". The bundle is attached again
+ *    before each connect.
+ *  - A failed connect() calls stop() before it returns, which throws away what
+ *    the certificate check found. stop() is where it can still be read.
+ */
+class SecureClient : public HeaderTap<NetworkClientSecure> {
+public:
+    using HeaderTap<NetworkClientSecure>::connect;
+
+    /** insecure: accept any certificate (the plugin asked for it). */
+    void checkCertificates(bool check) {
+        check_ = check;
+        if (!check) setInsecure();
+    }
+
+    int connect(const char* host, uint16_t port, int32_t timeout) override {
+        if (check_) setCACertBundle(caBundleStart, static_cast<size_t>(caBundleEnd - caBundleStart));
+        connecting_ = true;
+        verifyFlags_ = kNoVerifyResult;
+        const int connected = HeaderTap<NetworkClientSecure>::connect(host, port, timeout);
+        connecting_ = false;
+        if (!connected && failure_.empty()) failure_ = tlsFailure();
+        return connected;
+    }
+
+    void stop() override {
+        if (connecting_) verifyFlags_ = mbedtls_ssl_get_verify_result(&sslclient->ssl_ctx);
+        HeaderTap<NetworkClientSecure>::stop();
+    }
+
+private:
+    static const uint32_t kNoVerifyResult = 0xFFFFFFFF;  // what mbedTLS answers before it has checked
+
+    /** The reason behind the mbedTLS error the failed handshake left. */
+    std::string tlsFailure() {
+        const int error = sslclient->last_error;
+        if (error >= -1) return "";  // no TCP connection: HTTPClient's "connection refused" is right
+        // The certificate check itself said no (the X.509 errors, -0x2080 to
+        // -0x3000), or the handshake stopped over the certificate.
+        const int code = -error;
+        const bool certificate = (code >= 0x2080 && code <= 0x3000) || error == MBEDTLS_ERR_SSL_BAD_CERTIFICATE ||
+                                 error == MBEDTLS_ERR_SSL_CA_CHAIN_REQUIRED;
+        if (certificate) {
+            if (verifyFlags_ != kNoVerifyResult) {
+                if (verifyFlags_ & MBEDTLS_X509_BADCERT_CN_MISMATCH) return "certificate is for another host";
+                if (verifyFlags_ & MBEDTLS_X509_BADCERT_EXPIRED) return "certificate has expired";
+            }
+            return "certificate not trusted";
+        }
+        char text[48];
+        snprintf(text, sizeof(text), "secure connection failed (TLS error -0x%04X)", code);
+        return text;
+    }
+
+    bool check_ = true;
+    bool connecting_ = false;
+    uint32_t verifyFlags_ = kNoVerifyResult;
 };
 
 bool validName(const String& name) { return deskhog::isValidPluginName(std::string(name.c_str())); }
@@ -127,6 +288,7 @@ void appendJsonString(std::string& out, const std::string& value) {
 // A connection is saved as one small JSON file:
 //   {"plugin":"weather","name":"Weather","next":3,"settings":{"unit":"C"},
 //    "cards":[{"id":"1","kind":"city","settings":{"city":"Antwerp"}}]}
+// A card that may not come to the front by itself also has "front":false.
 
 void settingsToJson(JsonObject target, const PluginSettings& settings) {
     for (const auto& pair : settings) target[pair.first.c_str()] = pair.second.c_str();
@@ -153,6 +315,7 @@ String recordToJson(const PluginConnectionRecord& record) {
         item["id"] = card.id.c_str();
         item["kind"] = card.kind.c_str();
         settingsToJson(item.createNestedObject("settings"), card.settings);
+        if (!card.mayInterrupt) item["front"] = false;
     }
     String text;
     serializeJson(doc, text);
@@ -172,6 +335,7 @@ bool recordFromJson(const String& text, PluginConnectionRecord& record) {
         card.id = item["id"] | "";
         card.kind = item["kind"] | "";
         card.settings = settingsFromJson(item["settings"]);
+        card.mayInterrupt = item["front"] | true;
         if (!card.id.empty()) record.cards.push_back(card);
     }
     return deskhog::isValidPluginName(record.plugin);
@@ -198,6 +362,14 @@ PluginManager::PluginManager(ConfigManager& configManager, NeoPixelController& l
 
 void PluginManager::begin() {
     lock_ = xSemaphoreCreateMutex();
+    {
+        const String zone = configManager_.getTimeZone();
+        deskhog::TimeZone parsed;
+        if (zone.length() && parsed.parse(zone.c_str())) {
+            timeZone_ = zone.c_str();
+            timeZoneName_ = configManager_.getTimeZoneName().c_str();
+        }
+    }
     jobs_ = xQueueCreate(16, sizeof(HttpJob*));
     results_ = xQueueCreate(16, sizeof(HttpResult*));
 
@@ -217,9 +389,11 @@ void PluginManager::begin() {
     }
 
     // TLS handshakes need a deep stack: with 8 KB, a handshake left only 3 KB
-    // unused, so it has 12 KB. The stack has to be internal RAM: lwIP asserts
-    // that a task opening a TCP connection does not run on a PSRAM stack.
-    xTaskCreatePinnedToCore(httpTaskEntry, "pluginHttp", 12288, this, 1, &httpTask_, 0);
+    // unused, so it had 12 KB. Checking the server's certificate chain and
+    // decoding pictures (gfx.fetchImage) happen on this stack too, so it has
+    // 16 KB now. The stack has to be internal RAM: lwIP asserts that a task
+    // opening a TCP connection does not run on a PSRAM stack.
+    xTaskCreatePinnedToCore(httpTaskEntry, "pluginHttp", 16384, this, 1, &httpTask_, 0);
 }
 
 void PluginManager::loadConnections() {
@@ -412,7 +586,8 @@ void PluginManager::startNetworkServices() {
     networkServicesStarted_ = true;
     // So tools can find the device as http://deskhog.local
     if (MDNS.begin("deskhog")) MDNS.addService("http", "tcp", 80);
-    // Plugins get the time from time.now(); UTC, no timezone handling yet.
+    // The device's own clock stays on UTC. Plugins get local time from
+    // time.date() and time.format(), which apply the time zone themselves.
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
 
@@ -440,6 +615,11 @@ void PluginManager::inspectPlugin(const std::string& name) {
         bool storeGet(const std::string&, std::string&) override { return false; }
         bool storeSet(const std::string&, const std::string&) override { return true; }
         void log(const std::string&) override {}
+        std::string timeZone() override { return "UTC0"; }
+        deskhog::NetStatus netStatus() override { return deskhog::NetStatus(); }
+        uint32_t entropy() override { return 0; }
+        void notify(const std::string&, const deskhog::Notice&) override {}
+        void choicesDone(int, const std::vector<deskhog::Choice>&, const std::string&) override {}
     } services;
     LvglMetrics metrics(cardWidth_, cardHeight_);
     {
@@ -454,6 +634,7 @@ void PluginManager::inspectPlugin(const std::string& name) {
             meta.author = probe.author();
             meta.config = probe.configSchema();
             meta.kinds = probe.kinds();
+            meta.message = probe.takesMessages();
             meta.multiCard = !(meta.kinds.size() == 1 && meta.kinds[0].key == deskhog::LuaPlugin::kMainKind);
         } else {
             meta.error = probe.error();
@@ -558,12 +739,14 @@ void PluginManager::tick() {
     while (xQueueReceive(results_, &result, 0) == pdTRUE) {
         for (auto& running : running_) {
             if (running->runtimeId() == result->runtimeId) {
-                running->lua().httpResponse(result->requestId, result->response);
+                running->lua().httpResponse(result->requestId, std::move(result->response));
                 break;
             }
         }
         delete result;  // the connection may be gone by now; then the answer is simply dropped
     }
+
+    runAttention(now);
 
     for (auto it = running_.begin(); it != running_.end();) {
         PluginConnection& running = **it;
@@ -573,6 +756,7 @@ void PluginManager::tick() {
             if (card->onScreen() || card->framesWanted()) card->paintIfNeeded();
         }
         if (running.cleanUp(now)) {
+            attention_.forget(running.id() + ":");
             it = running_.erase(it);
         } else {
             ++it;
@@ -599,7 +783,75 @@ void PluginManager::tick() {
     display_->giveMutex();
 }
 
-void PluginManager::publishStates(uint32_t) {
+// ---------------------------------------------------------------- attention
+
+// What becomes of the notify() calls of plugins: which card comes to the
+// front and when, which card shows a banner, and the LED. The rules are in
+// Attention.h. Runs on the UI task with the LVGL mutex held.
+void PluginManager::runAttention(uint32_t now) {
+    std::string onScreen;
+    for (PluginCard* card : cards_) {
+        if (card->onScreen()) onScreen = card->key();
+    }
+    // A held button means someone is busy with the card on screen, however
+    // long ago the press was. Nothing takes the screen away mid-hold.
+    if (!onScreen.empty()) {
+        for (int i = 0; i <= Input::BUTTON_UP; i++) {
+            if (buttons[i].isPressed()) {
+                attention_.busy(now);
+                break;
+            }
+        }
+    }
+
+    const deskhog::Attention::Actions actions =
+        attention_.tick(onScreen, now, [this](const std::string& key) { return mayInterrupt(key); });
+    for (const std::string& key : actions.repaint) {
+        PluginCard* card = runningCard(key);
+        if (card && card->connection()) card->connection()->lua().repaint(card->cardId());
+    }
+    if (!actions.show.empty()) {
+        PluginCard* card = runningCard(actions.show);
+        if (card && showCard_) showCard_(card->getCard());
+    }
+    if (actions.led) {
+        led_.setOverride(static_cast<uint8_t>(actions.ledRgb >> 16), static_cast<uint8_t>(actions.ledRgb >> 8),
+                         static_cast<uint8_t>(actions.ledRgb), actions.ledMs);
+    }
+}
+
+bool PluginManager::mayInterrupt(const std::string& key) {
+    std::string connectionId, cardId;
+    if (!splitKey(key, connectionId, cardId)) return false;
+    Locked locked(lock_);
+    const auto found = records_.find(connectionId);
+    if (found == records_.end()) return false;
+    const PluginCardRecord* card = found->second.card(cardId);
+    return card && card->mayInterrupt;
+}
+
+void PluginManager::requestAttention(const std::string& key, const deskhog::Notice& notice) {
+    attention_.request(key, notice, mayInterrupt(key), millis());
+}
+
+void PluginManager::pressUsed() { attention_.busy(millis()); }
+
+std::vector<PluginNotification> PluginManager::notifications() {
+    Locked locked(lock_);
+    return notifications_;
+}
+
+void PluginManager::publishStates(uint32_t now) {
+    std::vector<PluginNotification> waiting;
+    for (const deskhog::Attention::Pending& pending : attention_.pending()) {
+        PluginNotification notification;
+        notification.key = pending.key;
+        notification.text = pending.text;
+        notification.count = pending.count;
+        notification.ageMs = now - pending.sinceMs;
+        waiting.push_back(notification);
+    }
+
     std::map<std::string, PluginConnectionState> fresh;
     for (auto& running : running_) {
         PluginConnectionState& state = fresh[running->id()];
@@ -616,6 +868,11 @@ void PluginManager::publishStates(uint32_t) {
     }
     Locked locked(lock_);
     states_.swap(fresh);
+    notifications_.swap(waiting);
+    // Lists of choices nobody came back for.
+    for (auto it = choiceJobs_.begin(); it != choiceJobs_.end();) {
+        it = now - it->second.atMs > 60000 ? choiceJobs_.erase(it) : std::next(it);
+    }
 }
 
 void PluginManager::restart(PluginConnection& running) {
@@ -675,8 +932,175 @@ void PluginManager::runCommand(const Command& command) {
             if (card && showCard_) showCard_(card->getCard());
             break;
         }
+        case CommandKind::Repaint:
+            for (auto& running : running_) running->lua().repaintAll();
+            break;
+        case CommandKind::Message: {
+            // A connection that stopped since the message was accepted simply misses it.
+            PluginConnection* running = runningConnection(command.target);
+            if (running) running->lua().message(command.card, command.body);
+            break;
+        }
+        case CommandKind::Choices:
+            startChoices(command);
+            break;
     }
     display_->giveMutex();
+}
+
+// ------------------------------------------------------- messages, choices
+
+int PluginManager::sendMessage(const std::string& connectionId, const std::string& cardId, const std::string& body,
+                               String& error) {
+    if (body.size() > MAX_MESSAGE_BYTES) {
+        error = "the message is larger than 4 KB";
+        return 413;
+    }
+    Locked locked(lock_);
+    const auto found = records_.find(connectionId);
+    if (found == records_.end()) {
+        error = cardId.empty() ? "no such connection" : "no such card";
+        return 404;
+    }
+    const PluginConnectionRecord& record = found->second;
+    const auto meta = metas_.find(record.plugin);
+    bool takes = false;
+    if (meta != metas_.end() && cardId.empty()) {
+        takes = meta->second.message;
+    } else if (meta != metas_.end()) {
+        const PluginCardRecord* card = record.card(cardId);
+        if (!card) {
+            error = "no such card";
+            return 404;
+        }
+        // No kind on record means the plugin's first one, as when the card is created.
+        for (size_t i = 0; i < meta->second.kinds.size(); i++) {
+            const auto& kind = meta->second.kinds[i];
+            if (kind.key == card->kind || (card->kind.empty() && i == 0)) takes = kind.message;
+        }
+    }
+    if (!takes) {
+        error = cardId.empty() ? "this plugin has no message() function" : "this card's plugin has no message() function for it";
+        return 404;
+    }
+    const auto state = states_.find(connectionId);
+    if (state == states_.end() || state->second.failed) {
+        error = state == states_.end() ? "the connection is not running: none of its cards is on the device"
+                                       : "the plugin crashed, so it cannot take messages";
+        return 409;
+    }
+    size_t waiting = 0;
+    size_t waitingBytes = 0;
+    for (const Command& command : commands_) {
+        if (command.kind != CommandKind::Message) continue;
+        waitingBytes += command.body.size();
+        if (command.target == connectionId) waiting++;
+    }
+    if (waiting >= MAX_QUEUED_MESSAGES || waitingBytes + body.size() > MAX_QUEUED_MESSAGE_BYTES) {
+        error = "too many messages are waiting for this plugin. Try again in a moment";
+        return 429;
+    }
+    Command command{CommandKind::Message, connectionId};
+    command.card = cardId;
+    command.body = body;
+    commands_.push_back(std::move(command));
+    return 200;
+}
+
+int PluginManager::choices(const std::string& connectionId, const std::string& kind, const std::string& field,
+                           const PluginSettings& form, std::vector<deskhog::Choice>& out, String& error) {
+    Locked locked(lock_);
+    const auto found = records_.find(connectionId);
+    if (found == records_.end()) {
+        error = "no such connection";
+        return 404;
+    }
+    const auto meta = metas_.find(found->second.plugin);
+    // Only a function that a setting names can be run this way, never any other.
+    std::string function;
+    if (meta != metas_.end()) {
+        const std::vector<deskhog::LuaPlugin::ConfigField>* fields = kind.empty() ? &meta->second.config : nullptr;
+        for (const auto& candidate : meta->second.kinds) {
+            if (!kind.empty() && candidate.key == kind) fields = &candidate.config;
+        }
+        if (fields) {
+            for (const auto& candidate : *fields) {
+                if (candidate.key == field) function = candidate.choices;
+            }
+        }
+    }
+    if (function.empty()) {
+        error = "that setting has no list of choices";
+        return 404;
+    }
+
+    // A list belongs to the form it was made for: the same question with other
+    // values in the form is another list.
+    std::string jobKey = connectionId + "/" + function + "/" + kind;
+    for (const auto& pair : form) jobKey += "/" + pair.first + "=" + pair.second;
+    const auto job = choiceJobs_.find(jobKey);
+    if (job != choiceJobs_.end()) {
+        if (!job->second.done) return 202;
+        // Handed over once: asking again fetches a fresh list.
+        const bool good = job->second.error.empty();
+        if (good) {
+            out.swap(job->second.choices);
+        } else {
+            error = job->second.error.c_str();
+        }
+        choiceJobs_.erase(job);
+        return good ? 200 : 502;
+    }
+    if (choiceJobs_.size() >= MAX_CHOICE_JOBS) {
+        error = "too many lists are being fetched. Try again in a moment";
+        return 429;
+    }
+    choiceJobs_[jobKey].atMs = millis();
+    Command command{CommandKind::Choices, connectionId};
+    command.body = function;
+    command.job = jobKey;
+    command.context.kind = kind;
+    command.context.settings = form;
+    commands_.push_back(std::move(command));
+    return 202;
+}
+
+// UI task, with the LVGL mutex held.
+void PluginManager::startChoices(const Command& command) {
+    const std::string& connectionId = command.target;
+    PluginConnection* running = runningConnection(connectionId);
+    if (!running) {
+        // None of the connection's cards is on the device, so its program is
+        // not running. That is the usual case for the very thing choices are
+        // for: picking what the first card should show. Start the program
+        // without a card. It stays for a moment, and the card that is added
+        // next finds it already loaded.
+        PluginConnectionRecord record;
+        const size_t freePsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        if (!connection(connectionId, record)) {
+            finishChoices(command.job, std::vector<deskhog::Choice>(), "no such connection");
+            return;
+        }
+        if (running_.size() >= MAX_CONNECTIONS || freePsram < 400 * 1024) {
+            finishChoices(command.job, std::vector<deskhog::Choice>(), "the device is out of memory for this");
+            return;
+        }
+        running_.emplace_back(new PluginConnection(*this, connectionId, nextRuntimeId_++, cardWidth_, cardHeight_));
+        running = running_.back().get();
+        running->start(&record);
+    }
+    running->askChoices(command.body, command.job, command.context);
+}
+
+void PluginManager::finishChoices(const std::string& jobKey, const std::vector<deskhog::Choice>& choices,
+                                  const std::string& error) {
+    Locked locked(lock_);
+    const auto job = choiceJobs_.find(jobKey);
+    if (job == choiceJobs_.end() || job->second.done) return;
+    job->second.done = true;
+    job->second.choices = choices;
+    job->second.error = error;
+    job->second.atMs = millis();
 }
 
 void PluginManager::queue(CommandKind kind, const std::string& target, uint8_t button) {
@@ -719,47 +1143,85 @@ void PluginManager::perform(const deskhog::HttpRequest& request, deskhog::HttpRe
         return;
     }
 
-    const bool secure = request.url.compare(0, 8, "https://") == 0;
-    NetworkClient plainClient;
-    NetworkClientSecure secureClient;
-    // Certificates are not verified yet (the same holds for the PostHog client).
-    // Traffic is encrypted, but the device cannot prove who it is talking to.
-    secureClient.setInsecure();
+    HeaderTap<NetworkClient> plainClient;
+    SecureClient secureClient;
+    // Unless the plugin asked otherwise (`insecure = true`, for a box on the
+    // local network with a certificate it made itself), the server has to show
+    // a certificate that one of the well-known authorities vouches for, and
+    // that is made out to this host name. Without the check traffic is still
+    // encrypted, but the device cannot tell who it is talking to.
+    secureClient.checkCertificates(!request.insecure);
     // Without this a host that stalls mid-handshake would hold up every
     // plugin's requests for two minutes.
     secureClient.setHandshakeTimeout(request.timeoutMs / 1000 + 1);
 
-    HTTPClient http;
-    http.setReuse(false);
-    http.setConnectTimeout((int32_t)request.timeoutMs);
-    http.setTimeout((uint16_t)(request.timeoutMs > 60000 ? 60000 : request.timeoutMs));
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.setUserAgent("DeskHog");
+    // Redirects are followed here, by the rules in HttpRedirect.h, with a new
+    // HTTPClient for each address. HTTPClient's own following gives up on a
+    // `Location` that is only a path, and cannot go from http to https.
+    std::string url = request.url;
+    std::string method = request.method;
+    const std::string firstOrigin = deskhog::urlOrigin(url);
+    std::unique_ptr<HTTPClient> client;
+    bool secure = false;
+    int code = 0;
+    for (int redirects = 0;; redirects++) {
+        secure = url.compare(0, 8, "https://") == 0;
+        client.reset(new HTTPClient);
+        client->setReuse(false);
+        client->setConnectTimeout((int32_t)request.timeoutMs);
+        client->setTimeout((uint16_t)(request.timeoutMs > 60000 ? 60000 : request.timeoutMs));
+        client->setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+        client->setUserAgent("DeskHog");
 
-    const String url(request.url.c_str());
-    const bool began = secure ? http.begin(secureClient, url) : http.begin(plainClient, url);
-    if (!began) {
-        response.error = "bad url";
-        return;
+        const String address(url.c_str());
+        const bool began = secure ? client->begin(secureClient, address) : client->begin(plainClient, address);
+        if (!began) {
+            response.error = "bad url";
+            return;
+        }
+        // A token or a cookie is for the host the plugin named, not for
+        // wherever that host sends the request on to.
+        const bool sameHost = deskhog::urlOrigin(url) == firstOrigin;
+        for (const auto& header : request.headers) {
+            if (sameHost || !deskhog::isCredentialHeader(header.first)) {
+                client->addHeader(header.first.c_str(), header.second.c_str());
+            }
+        }
+
+        const bool carriesBody = method != "GET" && method != "HEAD" && !request.body.empty();
+        code = carriesBody ? client->sendRequest(method.c_str(),
+                                                 reinterpret_cast<uint8_t*>(const_cast<char*>(request.body.data())),
+                                                 request.body.size())
+                           : client->sendRequest(method.c_str());
+        if (code <= 0) {
+            response.error = HTTPClient::errorToString(code).c_str();
+            // HTTPClient calls every failure to connect "connection refused". The
+            // client knows whether it was the name, the certificate or a timeout.
+            if (code == HTTPC_ERROR_CONNECTION_REFUSED) {
+                const std::string& reason = secure ? secureClient.failure() : plainClient.failure();
+                if (!reason.empty()) response.error = reason;
+            }
+            client->end();
+            return;
+        }
+        if (redirects >= deskhog::kMaxRedirects ||
+            !deskhog::followRedirect(code, method, url, client->getLocation().c_str())) {
+            break;
+        }
+        client->end();
     }
-    for (const auto& header : request.headers) http.addHeader(header.first.c_str(), header.second.c_str());
-
-    int code;
-    if (request.method == "POST") {
-        code = http.POST(reinterpret_cast<uint8_t*>(const_cast<char*>(request.body.data())), request.body.size());
+    HTTPClient& http = *client;
+    const bool headRequest = method == "HEAD";
+    if (secure) {
+        secureClient.headersInto(response.headers);
     } else {
-        code = http.GET();
-    }
-    if (code <= 0) {
-        response.error = HTTPClient::errorToString(code).c_str();
-        http.end();
-        return;
+        plainClient.headersInto(response.headers);
     }
 
-    // An answer with no body (204, or Content-Length: 0) is complete already.
-    // Reading it would report "not connected" once the server has hung up.
+    // An answer with no body (HEAD, 204, or Content-Length: 0) is complete
+    // already. Reading it would report "not connected" once the server has hung up.
     const int expected = http.getSize();  // -1 when the server did not say
-    if (expected == 0 || code == 204 || code == 304) {
+    if (expected == 0 || code == 204 || code == 304 || headRequest) {
         http.end();
         response.status = code;
         return;
@@ -797,6 +1259,15 @@ void PluginManager::perform(const deskhog::HttpRequest& request, deskhog::HttpRe
         return;
     }
     response.status = code;
+
+    // gfx.fetchImage: the plugin gets pixels, not the file. Decoding happens
+    // here, on the network task, so a large picture does not stall the screen.
+    if (request.imageMaxWidth > 0 && code >= 200 && code < 300) {
+        std::string file;
+        file.swap(response.body);
+        decodeImage(reinterpret_cast<uint8_t*>(&file[0]), file.size(), request.imageMaxWidth, request.imageMaxHeight,
+                    response.image, response.imageWidth, response.imageHeight, response.error);
+    }
 }
 
 // -------------------------------------------------------- state for the API
@@ -888,6 +1359,38 @@ bool PluginManager::setDirectorySource(const String& source, String& error) {
         }
     }
     configManager_.setPluginDirectory(source);
+    return true;
+}
+
+// ---------------------------------------------------------------- time zone
+
+std::string PluginManager::timeZone() {
+    Locked locked(lock_);
+    return timeZone_;
+}
+
+std::string PluginManager::timeZoneName() {
+    Locked locked(lock_);
+    return timeZoneName_;
+}
+
+bool PluginManager::setTimeZone(const String& posix, const String& name, String& error) {
+    deskhog::TimeZone parsed;
+    if (posix.length() > 64 || name.length() > 64) {
+        error = "that time zone is too long (64 characters at most)";
+        return false;
+    }
+    if (posix.length() && !parsed.parse(posix.c_str())) {
+        error = "that is not a POSIX time zone (they look like CET-1CEST,M3.5.0,M10.5.0/3)";
+        return false;
+    }
+    configManager_.setTimeZone(posix, name);
+    {
+        Locked locked(lock_);
+        timeZone_ = posix.length() ? posix.c_str() : "UTC0";
+        timeZoneName_ = posix.length() ? name.c_str() : "";
+    }
+    queue(CommandKind::Repaint, "");  // every clock is wrong now
     return true;
 }
 
@@ -992,7 +1495,7 @@ bool PluginManager::removeConnection(const std::string& id) {
 std::string PluginManager::addCard(const std::string& plugin, const std::string& connectionId,
                                    const std::string& connectionName, const PluginSettings& connectionSettings,
                                    const std::string& kind, const std::string& cardName,
-                                   const PluginSettings& cardSettings, String& error) {
+                                   const PluginSettings& cardSettings, String& error, bool mayInterrupt) {
     if (!storageReady_) {
         error = "plugin storage is not available";
         return std::string();
@@ -1064,6 +1567,7 @@ std::string PluginManager::addCard(const std::string& plugin, const std::string&
         card.id = std::to_string(record->nextCard++);
         card.kind = cardKind;
         card.settings = cardSettings;
+        card.mayInterrupt = mayInterrupt;
         record->cards.push_back(card);
         if (!saveRecord(*record)) {
             error = "could not save (storage full?)";
@@ -1084,7 +1588,8 @@ std::string PluginManager::addCard(const std::string& plugin, const std::string&
     return key;
 }
 
-bool PluginManager::updateCard(const std::string& key, const std::string* cardName, const PluginSettings& cardSettings) {
+bool PluginManager::updateCard(const std::string& key, const std::string* cardName, const PluginSettings& cardSettings,
+                               const bool* mayInterrupt) {
     std::string connectionId, cardId;
     if (!splitKey(key, connectionId, cardId)) return false;
     {
@@ -1096,7 +1601,10 @@ bool PluginManager::updateCard(const std::string& key, const std::string* cardNa
             if (candidate.id == cardId) card = &candidate;
         }
         if (!card) return false;
-        if (!cardSettings.empty()) {
+        // The host's own setting takes effect at once: no need to restart the plugin for it.
+        const bool frontChanged = mayInterrupt && card->mayInterrupt != *mayInterrupt;
+        if (frontChanged) card->mayInterrupt = *mayInterrupt;
+        if (!cardSettings.empty() || frontChanged) {
             for (const auto& pair : cardSettings) card->settings[pair.first] = pair.second;
             if (!saveRecord(found->second)) return false;
         }

@@ -15,7 +15,7 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const { makeDevice } = require('./pretend-device.js');
+const { makeDevice, addHomey } = require('./pretend-device.js');
 
 const args = process.argv.slice(2);
 const option = name => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
@@ -25,7 +25,8 @@ const htmlDir = path.join(__dirname, '../../html');
 const pluginDir = path.join(__dirname, '../../plugins');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript' };
 
-const device = makeDevice();
+// With a plugin whose settings are lists to pick from and that takes messages (`deskhog send homey hello`).
+const device = addHomey(makeDevice());
 if (args.includes('--offline')) device.wifiConnected = false;
 device.directory.source = device.directory.default = 'http://localhost:' + port + '/directory/';
 

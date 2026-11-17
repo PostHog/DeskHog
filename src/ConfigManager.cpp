@@ -144,6 +144,27 @@ void ConfigManager::setPluginDirectory(const String& source) {
     commit();
 }
 
+String ConfigManager::getTimeZone() {
+    if (!_preferences.isKey("tz")) return "";
+    return _preferences.getString("tz", "");
+}
+
+String ConfigManager::getTimeZoneName() {
+    if (!_preferences.isKey("tz_name")) return "";
+    return _preferences.getString("tz_name", "");
+}
+
+void ConfigManager::setTimeZone(const String& posix, const String& name) {
+    if (posix.length()) {
+        _preferences.putString("tz", posix);
+        _preferences.putString("tz_name", name);
+    } else {
+        _preferences.remove("tz");
+        _preferences.remove("tz_name");
+    }
+    commit();
+}
+
 std::vector<CardConfig> ConfigManager::getCardConfigs() {
     std::vector<CardConfig> configs;
     

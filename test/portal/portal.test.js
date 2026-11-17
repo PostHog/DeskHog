@@ -10,7 +10,7 @@ const { JSDOM, VirtualConsole } = require('jsdom');
 const root = process.argv[2];
 const html = fs.readFileSync(path.join(root, 'html/portal.html'), 'utf8').replace('<script src="portal.js"></script>', '');
 const script = fs.readFileSync(path.join(root, 'html/portal.js'), 'utf8');
-const { makeDevice, sourceHash } = require('./pretend-device.js');
+const { makeDevice, addHomey, sourceHash } = require('./pretend-device.js');
 
 // --------------------------------------------------------------- harness
 
@@ -284,7 +284,7 @@ test('edits a card of a multi-card plugin', async () => {
     fieldNamed(pane, 'Name').value = 'Holiday';
     await click(window, buttonNamed(pane, 'Save'));
     equal(lastRequest(device, '/api/cards/update').url, '/api/cards/update?key=weather%3A1', 'url');
-    equal(lastRequest(device, '/api/cards/update').body, { name: 'Holiday', settings: { city: 'Porto' } }, 'body');
+    equal(lastRequest(device, '/api/cards/update').body, { name: 'Holiday', settings: { city: 'Porto' }, front: true }, 'body');
     check(!device.requests.some(r => r.url.startsWith('/api/connections/update')), 'the connection is left alone');
     equal(titles(document)[0], 'Holiday', 'new name shown');
     check(pane.hidden, 'on a phone saving goes back to the list');
@@ -314,7 +314,7 @@ test('edits a single-card plugin: secrets stay unless retyped', async () => {
     fieldNamed(pane, 'Button label').value = 'Ship';
     await click(window, buttonNamed(pane, 'Save'));
     equal(lastRequest(device, '/api/connections/update').body, { settings: { url: 'http://example.com/hook', label: 'Ship' } }, 'the untouched secret is not sent');
-    equal(lastRequest(device, '/api/cards/update').body, { name: 'Webhook', settings: {} }, 'card request');
+    equal(lastRequest(device, '/api/cards/update').body, { name: 'Webhook', settings: {}, front: true }, 'card request');
 });
 
 test('keeps what you typed while the page refreshes', async () => {
@@ -629,6 +629,265 @@ test('offline: wifi setup comes first and connects', async () => {
     await click(window, buttonNamed(document.getElementById('wifi-form'), 'Connect'));
     equal(lastRequest(device, '/api/actions/save-wifi').body, { ssid: 'Home WiFi', password: 'hunter2' }, 'credentials sent');
     check(document.getElementById('notice').textContent.includes('is joining "Home WiFi"'), 'says what happens next');
+});
+
+test('the device page sets the time zone', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const select = document.getElementById('timezone-select');
+    check(select !== null, 'there is a dropdown');
+    equal(select.value, 'UTC', 'a new device is on UTC');
+    check(select.querySelectorAll('option').length > 300, 'with the places of the world in it');
+    equal([...select.querySelectorAll('optgroup')].map(group => group.label).slice(0, 3), ['Universal', 'Africa', 'America'], 'by continent');
+    equal(text(select.querySelector('option[value="America/Argentina/Buenos_Aires"]')), 'Argentina, Buenos Aires', 'names read like places');
+
+    select.value = 'Europe/Brussels';
+    select.dispatchEvent(new window.Event('change'));
+    await settle(window);
+    equal(lastRequest(device, '/api/timezone').body, { posix: 'CET-1CEST,M3.5.0,M10.5.0/3', name: 'Europe/Brussels' }, 'the device gets the POSIX string and the name');
+    equal(document.getElementById('timezone-select').value, 'Europe/Brussels', 'and the page shows what was picked');
+    check(document.getElementById('notice').textContent.includes('Time zone saved'), 'and says so');
+
+    // Amsterdam has the same rules as Brussels: the name that was picked is the one shown.
+    device.timezone = { posix: 'CET-1CEST,M3.5.0,M10.5.0/3', name: 'Europe/Amsterdam' };
+    await window.refresh();
+    equal(document.getElementById('timezone-select').value, 'Europe/Amsterdam', 'the picked name wins over other places with the same rules');
+
+    // A zone set through the API, which the list has no place for.
+    device.timezone = { posix: '<+0123>-1:23', name: '' };
+    await window.refresh();
+    const custom = document.getElementById('timezone-select');
+    equal(custom.value, '=<+0123>-1:23', 'an unknown zone is shown as it is');
+    equal(window.zoneValue(custom), { posix: '<+0123>-1:23', name: '' }, 'and kept as it is');
+
+    // The page offers the zone of the computer it is shown on.
+    const here = window.browserZone();
+    if (here) {
+        await click(window, buttonNamed(document.getElementById('timezone-form'), 'Use '));
+        equal(lastRequest(device, '/api/timezone').body.name, here, 'one click sets it');
+    }
+});
+
+test('a time zone setting of a card is a dropdown that saves a POSIX string', async () => {
+    const device = makeDevice();
+    // What the firmware reports for a plugin setting written as { label = "Time zone", type = "timezone" }.
+    device.plugins.find(p => p.name === 'weather').kinds[0].config.push({ key: 'zone', label: 'Time zone', type: 'timezone', default: '' });
+    const { window, document } = await openPage(device);
+    await click(window, tile(document, 'PLUGIN|weather:1'));
+    const pane = document.getElementById('card-pane');
+    const zone = fieldNamed(pane, 'Time zone');
+    equal(zone.tagName, 'SELECT', 'a dropdown, not a text field');
+    equal(zone.value, '', 'nothing saved: the device\'s own zone');
+    equal(text(zone.querySelector('option')), 'Same as the DeskHog', 'which is the first choice');
+    zone.value = 'Asia/Tokyo';
+    await click(window, buttonNamed(pane, 'Save'));
+    equal(lastRequest(device, '/api/cards/update').body.settings.zone, 'JST-9', 'the plugin gets the POSIX string');
+
+    await click(window, tile(document, 'PLUGIN|weather:1'));
+    const again = fieldNamed(document.getElementById('card-pane'), 'Time zone');
+    equal(window.zoneValue(again).posix, 'JST-9', 'reopened, it shows a place with those rules');
+    again.value = '';
+    await click(window, buttonNamed(document.getElementById('card-pane'), 'Save'));
+    equal(lastRequest(device, '/api/cards/update').body.settings.zone, '', 'back to the device\'s zone');
+});
+
+test('every plugin card can be told not to come to the front', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device);
+    await click(window, tile(document, 'PLUGIN|hello:1'));
+    const pane = document.getElementById('card-pane');
+    const front = [...pane.querySelectorAll('label.field.check')].find(l => l.textContent.startsWith('May come to the front'));
+    check(!!front, 'a card of a plugin without any settings still has the setting');
+    const box = front.querySelector('input[type="checkbox"]');
+    check(box.checked, 'on unless someone switched it off');
+    box.checked = false;
+    await click(window, buttonNamed(pane, 'Save'));
+    equal(lastRequest(device, '/api/cards/update?key=hello%3A1').body.front, false, 'saved with the card');
+    equal(device.cards.find(c => c.config === 'hello:1').front, false, 'the device has it');
+
+    // It is the device's own setting, so it shows what the device says.
+    const again = await openPage(device);
+    await click(again.window, tile(again.document, 'PLUGIN|hello:1'));
+    const shown = [...again.document.querySelectorAll('#card-pane label.field.check')].find(l => l.textContent.startsWith('May come to the front'));
+    check(!shown.querySelector('input').checked, 'and it is shown as saved');
+    await click(again.window, tile(again.document, 'PLUGIN|weather:2'));
+    const other = [...again.document.querySelectorAll('#card-pane label.field.check')].find(l => l.textContent.startsWith('May come to the front'));
+    check(other.querySelector('input').checked, 'other cards keep theirs');
+    await click(again.window, buttonNamed(again.document.getElementById('card-pane'), 'Save'));
+    equal(lastRequest(device, '/api/cards/update?key=weather%3A2').body.front, true, 'a card that may is saved as such');
+});
+
+test('a card with something to tell says so in the list', async () => {
+    const device = makeDevice();
+    device.notifications = [{ card: 'weather:2', text: 'Rain in 10 minutes', count: 2, age: 40 }, { card: 'hello:1', text: '', count: 1, age: 3 }];
+    const { document } = await openPage(device);
+    const subs = [...document.querySelectorAll('#cards-list .item-sub')].map(text);
+    equal(subs[1], 'Weather, has news: Rain in 10 minutes', 'the waiting text is in the subtitle');
+    equal(subs[2], 'has news', 'a notify() without text still counts');
+    equal(subs[0], 'Weather, on screen now', 'cards with nothing waiting are as before');
+});
+
+/** The parts of a field whose choices the plugin lists. */
+const pickOf = (scope, label) => {
+    const wrap = [...scope.querySelectorAll('label.field')].find(l => l.querySelector('span').textContent === label);
+    return wrap && {
+        wrap, text: wrap.querySelector('input[type="text"]'), select: wrap.querySelector('select'),
+        refresh: buttonNamed(wrap, 'Refresh'), note: wrap.querySelector('small').textContent,
+    };
+};
+
+test('a setting the plugin lists the choices for is a dropdown with a refresh button', async () => {
+    const device = addHomey(makeDevice());
+    const { window, document, errors } = await openPage(device);
+    window.choicePollDelay = () => 0;
+    await click(window, tile(document, 'PLUGIN|homey:1'));
+    await settle(window);
+    const pane = document.getElementById('card-pane');
+    let pick = pickOf(pane, 'Device');
+    check(!pick.select.hidden && pick.text.hidden, 'the list arrived: a dropdown, not a text box');
+    equal([...pick.select.options].map(o => o.value + '=' + o.textContent), ['=—', 'lamp=Kitchen lamp', 'plug=Coffee machine'],
+        'what the plugin offers, by label, and a way to empty a setting that may be empty');
+    equal(pick.select.value, 'lamp', 'the saved value is selected');
+    equal(pick.note, '', 'nothing to explain');
+    const asked = device.requests.filter(r => r.url.startsWith('/api/connections/choices'));
+    const address = '/api/connections/choices?id=homey&field=device&kind=device&settings=' + encodeURIComponent('{"device":"lamp","label":""}');
+    equal(asked.map(r => r.url), [address, address], 'asks the device, with what the form holds, and again while the plugin is still working on it');
+
+    // Picking one saves its value, not its label.
+    pick.select.value = 'plug';
+    await click(window, buttonNamed(pane, 'Save'));
+    equal(lastRequest(device, '/api/cards/update?key=homey%3A1').body.settings, { device: 'plug', label: '' }, 'the value is what is saved');
+
+    // Refresh asks the plugin again.
+    await click(window, tile(document, 'PLUGIN|homey:1'));
+    await settle(window);
+    pick = pickOf(document.getElementById('card-pane'), 'Device');
+    device.choices['homey/device/device'] = [{ value: 'lamp', label: 'Kitchen lamp' }, { value: 'tv', label: 'Television' }];
+    await click(window, pick.refresh);
+    await settle(window);
+    equal([...pick.select.options].map(o => o.textContent), ['—', 'plug (not in the list)', 'Kitchen lamp', 'Television'], 'a fresh list; what is saved stays even if the plugin dropped it');
+    equal(pick.select.value, 'plug', 'and stays selected');
+    equal(errors, [], 'no script errors');
+});
+
+test('without a list a setting with choices is plain text', async () => {
+    const device = addHomey(makeDevice());
+    device.cards.push({ type: 'PLUGIN', config: 'homey:2', name: 'Flow', plugin: 'homey', connection: 'homey', card: '2', kind: 'flow', settings: { flow: 'f-17' }, frames: 1, onScreen: false });
+    const { window, document } = await openPage(device);
+    window.choicePollDelay = () => 0;
+    await click(window, tile(document, 'PLUGIN|homey:2'));
+    await settle(window);
+    const pane = document.getElementById('card-pane');
+    const pick = pickOf(pane, 'Flow');
+    check(pick.select.hidden && !pick.text.hidden, 'the plugin could not say: a text box');
+    equal(pick.text.value, 'f-17', 'with the saved value in it');
+    check(pick.note.includes('log in to Homey first') && pick.note.includes('type the value'), 'and why, in the plugin\'s words');
+    pick.text.value = 'f-18';
+    await click(window, buttonNamed(pane, 'Save'));
+    equal(lastRequest(device, '/api/cards/update?key=homey%3A2').body.settings, { flow: 'f-18' }, 'what was typed is saved');
+
+    // Once the plugin can say, Refresh turns it into a dropdown.
+    await click(window, tile(document, 'PLUGIN|homey:2'));
+    await settle(window);
+    const later = pickOf(document.getElementById('card-pane'), 'Flow');
+    device.choices['homey/flow/flow'] = [{ value: 'f-18', label: 'Good morning' }];
+    await click(window, later.refresh);
+    await settle(window);
+    check(!later.select.hidden && later.text.hidden, 'a dropdown after all');
+    equal(later.select.value, 'f-18', 'with what was typed selected');
+});
+
+test('choices when adding a card: from the connection it joins, typed for a new one', async () => {
+    const device = addHomey(makeDevice());
+    const { window, document } = await openPage(device);
+    window.choicePollDelay = () => 0;
+    await click(window, document.getElementById('add-card-btn'));
+    const pane = document.getElementById('card-pane');
+    await click(window, [...pane.querySelectorAll('.choice')].find(c => c.textContent.startsWith('Device')));
+    await settle(window);
+    let pick = pickOf(pane, 'Device');
+    check(!pick.select.hidden, 'a card for an existing connection gets that connection\'s list');
+    equal([...pick.select.options].map(o => o.textContent), ['—', 'Kitchen lamp', 'Coffee machine'], 'with nothing picked yet');
+    pick.select.value = 'plug';
+    await click(window, buttonNamed(pane, 'Add card'));
+    const added = lastRequest(device, '/api/cards/add').body;
+    equal([added.connection, added.kind, added.settings.device], ['homey', 'device', 'plug'], 'the card is added with the value that was picked');
+
+    // A new connection does not exist on the device yet, so there is nobody to ask.
+    await click(window, document.getElementById('add-card-btn'));
+    await click(window, [...pane.querySelectorAll('.choice')].find(c => c.textContent.startsWith('Device')));
+    await settle(window);
+    const connection = fieldNamed(pane, 'Connection');
+    connection.value = '';
+    connection.dispatchEvent(new window.Event('change'));
+    await settle(window);
+    pick = pickOf(pane, 'Device');
+    check(pick.select.hidden && !pick.text.hidden && pick.refresh.hidden, 'a text box, and nothing to refresh');
+    check(pick.note.startsWith('Type it for now'), 'that says the list comes later');
+    const home = pickOf(pane, 'Home');
+    check(home.select.hidden && home.note.startsWith('Type it for now'), 'the same for the new connection\'s own settings');
+
+    // On the connections page the connection exists, so its own setting has a list.
+    await click(window, document.querySelector('.tabs a[data-page="connections"]'));
+    await click(window, [...document.querySelectorAll('#connections-list .item-open')].find(b => b.textContent.startsWith('Homey')));
+    await settle(window);
+    const own = pickOf(document.getElementById('connection-pane'), 'Home');
+    check(!own.select.hidden, 'a connection\'s own setting gets its list');
+    check(device.requests.some(r => r.url.startsWith('/api/connections/choices?id=homey&field=home&settings=')), 'asked for without a card kind');
+});
+
+test('a list of choices is asked for with what the form holds, saved or not', async () => {
+    const device = addHomey(makeDevice());
+    const flowKind = device.plugins.find(p => p.name === 'homey').kinds.find(k => k.key === 'flow');
+    const field = (key, label, extra) => Object.assign({ key, label, type: 'string', default: '' }, extra);
+    flowKind.config.push(field('advanced', 'Advanced flows', { type: 'boolean', default: 'false' }), field('token', 'Token', { secret: true }),
+        field('room', 'Room', { choices: true, default: 'hall' }));
+    device.cards.push({ type: 'PLUGIN', config: 'homey:2', name: 'Flow', plugin: 'homey', connection: 'homey', card: '2', kind: 'flow', settings: { flow: 'a-1' }, frames: 1, onScreen: false });
+    // A plugin that lists one kind of flow or the other, going by the checkbox next to the list.
+    device.choices['homey/flow/flow'] = form => form.advanced === 'true' ? [{ value: 'a-1', label: 'Party mode' }] : [{ value: 'f-1', label: 'Good morning' }];
+    device.choices['homey/flow/room'] = [{ value: 'hall', label: 'Hall' }];
+    const { window, document, errors } = await openPage(device);
+    window.choicePollDelay = () => 0;
+    await click(window, tile(document, 'PLUGIN|homey:2'));
+    await settle(window);
+    const pane = document.getElementById('card-pane');
+    const pick = pickOf(pane, 'Flow');
+    equal(device.choiceForms.find(asked => asked.key === 'homey/flow/flow').form, { flow: 'a-1', advanced: 'false', room: 'hall' },
+        'the first list is asked for with the saved values and the defaults');
+    equal([...pick.select.options].map(o => o.textContent), ['—', 'a-1 (not in the list)', 'Good morning'], 'and is the one that goes with them');
+    equal([...pickOf(pane, 'Room').select.options].map(o => o.textContent), ['Hall'], 'a setting with a default has no empty entry');
+
+    // Tick the box, type a secret, Refresh: the plugin hears about the box, not about the secret.
+    fieldNamed(pane, 'Advanced flows').checked = true;
+    fieldNamed(pane, 'Token').value = 'hunter2';
+    await click(window, pick.refresh);
+    await settle(window);
+    equal(device.choiceForms[device.choiceForms.length - 1].form, { flow: 'a-1', advanced: 'true', room: 'hall' }, 'what is in the form now, unsaved, without secrets');
+    equal([...pick.select.options].map(o => o.textContent), ['—', 'Party mode'], 'so the list follows the other setting');
+    equal(pick.select.value, 'a-1', 'and the saved flow is found in it');
+    check(!device.requests.some(r => r.url.includes('hunter2')), 'a secret is never put in an address');
+
+    // Picking the empty entry saves an empty setting.
+    pick.select.value = '';
+    await click(window, buttonNamed(pane, 'Save'));
+    equal(lastRequest(device, '/api/cards/update?key=homey%3A2').body.settings.flow, '', 'the setting can be emptied');
+    equal(device.handle('GET', '/api/connections/choices?id=homey&field=home&settings=nope').status, 400, 'settings has to be JSON');
+    equal(errors, [], 'no script errors');
+});
+
+test('the pretend device takes pushed messages like the firmware', async () => {
+    const device = addHomey(makeDevice());
+    equal(device.handle('POST', '/api/cards/message?key=homey:1', 'Pizza is here').status, 200, 'a card whose kind has message() takes one');
+    equal(device.handle('POST', '/api/connections/message?id=homey', { door: 'open' }).status, 200, 'and so does the plugin itself');
+    equal(device.messages, [{ card: 'homey:1', body: 'Pizza is here' }, { connection: 'homey', body: '{"door":"open"}' }], 'text and JSON arrive as sent');
+    equal(device.handle('POST', '/api/cards/message?key=hello:1', 'x').status, 404, 'a plugin without message() answers 404');
+    equal(device.handle('POST', '/api/cards/message?key=nope:1', 'x').status, 404, 'so does a card that is not there');
+    equal(device.handle('POST', '/api/cards/message?key=homey:1', 'x'.repeat(5000)).status, 413, 'more than 4 KB is refused');
+    equal(device.handle('GET', '/api/cards/message?key=homey:1').status, 405, 'only POST');
+    for (let i = 0; i < 6; i++) device.handle('POST', '/api/connections/message?id=homey', 'again');
+    equal(device.handle('POST', '/api/connections/message?id=homey', 'one too many').status, 429, 'at most 8 wait at a time');
+    equal(device.handle('GET', '/api/connections/choices?id=homey&field=url').status, 404, 'a setting without choices has no list');
+    equal(device.handle('GET', '/api/connections/choices?id=nope&field=home').status, 404, 'nor does a connection that is not there');
 });
 
 test('errors from the device are shown', async () => {

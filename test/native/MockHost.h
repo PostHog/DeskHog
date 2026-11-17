@@ -19,6 +19,7 @@ inline const char* fontName(Font font) {
         case Font::Medium: return "medium";
         case Font::Large: return "large";
         case Font::Loud: return "loud";
+        case Font::Tiny: return "tiny";
     }
     return "?";
 }
@@ -56,6 +57,16 @@ public:
             add("clip %d,%d %dx%d", x, y, w, h);
         }
     }
+    void arc(int x, int y, int radius, int startDeg, int endDeg, uint32_t rgb, int lineWidth) override {
+        add("arc %d,%d r%d %d-%d #%06x w%d", x, y, radius, startDeg, endDeg, (unsigned)rgb, lineWidth);
+    }
+    void polygon(const int* xy, int count, uint32_t rgb) override {
+        std::string points;
+        for (int i = 0; i < count; i++) {
+            points += (i ? " " : "") + std::to_string(xy[2 * i]) + "," + std::to_string(xy[2 * i + 1]);
+        }
+        add("poly %s #%06x", points.c_str(), (unsigned)rgb);
+    }
     // Fixed-width stand-ins for the real fonts.
     int textWidth(const char* text, Font font) override {
         int longest = 0, current = 0;
@@ -75,6 +86,7 @@ public:
             case Font::Medium: return 20;
             case Font::Large: return 44;
             case Font::Loud: return 24;
+            case Font::Tiny: return 12;
         }
         return 18;
     }
@@ -100,6 +112,7 @@ private:
             case Font::Medium: return 9;
             case Font::Large: return 20;
             case Font::Loud: return 12;
+            case Font::Tiny: return 5;
         }
         return 8;
     }
@@ -130,6 +143,13 @@ public:
     std::map<std::string, std::string> stored;
     std::vector<std::string> logs;
     std::string led = "default";
+    std::string zone = "UTC0";
+    NetStatus net;
+    uint32_t entropyCalls = 0;
+
+    std::string timeZone() override { return zone; }
+    NetStatus netStatus() override { return net; }
+    uint32_t entropy() override { return 0x9E3779B9u * ++entropyCalls; }
 
     uint32_t millis() override {
         now += advancePerCall;
@@ -163,6 +183,23 @@ public:
         return true;
     }
     void log(const std::string& line) override { logs.push_back(line); }
+
+    struct Notified {
+        std::string card;
+        Notice notice;
+    };
+    struct ChoicesAnswer {
+        int id;
+        std::vector<Choice> choices;
+        std::string error;
+    };
+    std::vector<Notified> notices;
+    std::vector<ChoicesAnswer> choiceAnswers;
+
+    void notify(const std::string& cardId, const Notice& notice) override { notices.push_back({cardId, notice}); }
+    void choicesDone(int requestId, const std::vector<Choice>& choices, const std::string& error) override {
+        choiceAnswers.push_back({requestId, choices, error});
+    }
 
     bool logged(const std::string& needle) const {
         for (const std::string& line : logs) {

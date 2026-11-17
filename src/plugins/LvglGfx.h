@@ -24,6 +24,8 @@ public:
     void text(int, int, const char*, uint32_t, deskhog::Font, deskhog::Align) override {}
     void image(int, int, const uint32_t*, int, int, int) override {}
     void clip(int, int, int, int) override {}
+    void arc(int, int, int, int, int, uint32_t, int) override {}
+    void polygon(const int*, int, uint32_t) override {}
     int textWidth(const char* text, deskhog::Font font) override;
     int textHeight(deskhog::Font font) override;
 
@@ -64,6 +66,8 @@ public:
     void text(int x, int y, const char* text, uint32_t rgb, deskhog::Font font, deskhog::Align align) override;
     void image(int x, int y, const uint32_t* argb, int width, int height, int scale) override;
     void clip(int x, int y, int w, int h) override;
+    void arc(int x, int y, int radius, int startDeg, int endDeg, uint32_t rgb, int lineWidth) override;
+    void polygon(const int* xy, int count, uint32_t rgb) override;
 
 private:
     /** Start (or restart) the layer, with the current clip rectangle. */

@@ -252,6 +252,11 @@ main { padding: 16px 16px 96px; }
 .field small { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
 .field.check { display: flex; align-items: center; gap: 8px; }
 .field.check > span { margin: 0; }
+.field.check small { margin: 2px 0 0; font-weight: 400; }
+/* A setting the plugin lists the choices for: a dropdown (or a text box) with a Refresh button beside it. */
+.field .pick { display: flex; gap: 8px; align-items: stretch; }
+.field .pick > input, .field .pick > select { flex: 1; min-width: 0; }
+.field .pick > button { flex: none; }
 
 input[type="text"], input[type="password"], select, textarea {
     width: 100%;

@@ -38,15 +38,39 @@
       "screenshot": "screenshots/breakout.png"
     },
     {
+      "name": "charge",
+      "title": "Charge",
+      "description": "Hold to charge, let go to fire: five acorns, a flag that moves and a wall in the way",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "charge.lua",
+      "size": 9199,
+      "hash": "ee48210d",
+      "sha256": "072352d35e2162e799b989bd7c388e57b9157baf87cdaec0709ea3e5bf1e9268",
+      "screenshot": "screenshots/charge.png"
+    },
+    {
+      "name": "ciwatch",
+      "title": "CI watch",
+      "description": "The latest GitHub Actions runs of a repository, with a nudge when one goes red",
+      "author": "DeskHog",
+      "version": "1.1",
+      "file": "ciwatch.lua",
+      "size": 9384,
+      "hash": "f986c105",
+      "sha256": "e19ddec63ed98b92986bcca32c3c2e7c7446b1f1c49f231e1db6a07d268ecb51",
+      "screenshot": "screenshots/ciwatch.png"
+    },
+    {
       "name": "clock",
       "title": "Clock",
       "description": "The time in large digits, with the date under it",
       "author": "DeskHog",
-      "version": "1.2",
+      "version": "2.0",
       "file": "clock.lua",
-      "size": 2743,
-      "hash": "905853fa",
-      "sha256": "85aa531b03e4432fb49c35a708097c5930203778cc52f7bce34eb45b859ea306",
+      "size": 1405,
+      "hash": "0186db76",
+      "sha256": "1c4ff3cd1d77a110278df63551d8811202c695cc3f5680e475fcb904f04a8da8",
       "screenshot": "screenshots/clock.png"
     },
     {
@@ -54,11 +78,11 @@
       "title": "Countdown",
       "description": "How long until the launch, the holiday, the birthday. A card per date",
       "author": "DeskHog",
-      "version": "1.2",
+      "version": "2.0",
       "file": "countdown.lua",
-      "size": 3357,
-      "hash": "996692be",
-      "sha256": "93bfd510fbbab701939d062956e47bde6016d5a9987f6c6045694eeedde4c971",
+      "size": 3248,
+      "hash": "03d10e05",
+      "sha256": "b20b430c1bfcfb997418749e685bb7bd56f4cb7fde10480ec026680934a5014c",
       "screenshot": "screenshots/countdown.png"
     },
     {
@@ -110,6 +134,18 @@
       "screenshot": "screenshots/deploy.png"
     },
     {
+      "name": "doorbell",
+      "title": "Doorbell",
+      "description": "Shows what your scripts send it, at once: the text, the time, a flash of the LED",
+      "author": "DeskHog",
+      "version": "1.1",
+      "file": "doorbell.lua",
+      "size": 5729,
+      "hash": "299f6741",
+      "sha256": "1898ffd8bd54ede88a7c1785a7f922c9366f6eef1fea5047b424ae9426cb4a70",
+      "screenshot": "screenshots/doorbell.png"
+    },
+    {
       "name": "expiry",
       "title": "Expiry",
       "description": "Days until the certificates and domain names of your sites expire. Orange LED a month ahead",
@@ -132,6 +168,18 @@
       "hash": "a3bf0635",
       "sha256": "833de5dbfbd8e55acd5e65ccf03321681d7e9781be136b26ca06c7c26e99a7e4",
       "screenshot": "screenshots/flappy.png"
+    },
+    {
+      "name": "gauge",
+      "title": "Gauge",
+      "description": "A round dial for any number from a JSON address, such as a temperature or a sensor",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "gauge.lua",
+      "size": 9084,
+      "hash": "057674ba",
+      "sha256": "fb7f470587108cec745dd972827d8aceb15c80c444a3e6bc8224cdd50f25d518",
+      "screenshot": "screenshots/gauge.png"
     },
     {
       "name": "github",
@@ -208,13 +256,13 @@
     {
       "name": "homey",
       "title": "Homey",
-      "description": "A card per Homey Pro device: one of its values, and a button that starts a flow",
+      "description": "A card per Homey Pro device: one of its values, and a button that switches it or starts a flow",
       "author": "DeskHog",
-      "version": "0.9.2",
+      "version": "0.11",
       "file": "homey.lua",
-      "size": 4596,
-      "hash": "dde83580",
-      "sha256": "5a753e00a4ec90e140e0de04d0c2a8713588f951577a7dbcb682d8126ff98024",
+      "size": 8279,
+      "hash": "257287bf",
+      "sha256": "15ad6293a9a4b3da904fb615076f1f4582555db7be3d3dc3f362d8e78956c80b",
       "screenshot": "screenshots/homey.png"
     },
     {
@@ -240,6 +288,18 @@
       "hash": "c6c58797",
       "sha256": "c1a5e26ba137184dfc47983ec18e27d69da8493f1e6576b7e9d42e026e92c1e6",
       "screenshot": "screenshots/friend.png"
+    },
+    {
+      "name": "nowplaying",
+      "title": "Now playing",
+      "description": "What you are listening to, with the album cover, from Last.fm",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "nowplaying.lua",
+      "size": 7757,
+      "hash": "d2f75c6e",
+      "sha256": "bd8acdb5240a0a87006648f1c6bcc9cf8ee28964fb7b9527238e2fa0c7c333a0",
+      "screenshot": "screenshots/nowplaying.png"
     },
     {
       "name": "onthisday",
@@ -360,6 +420,18 @@
       "hash": "23e0bad2",
       "sha256": "7209326618ee7914cefa002a9757d6d88202124e3e83a333e52921e110c4bc1b",
       "screenshot": "screenshots/releases.png"
+    },
+    {
+      "name": "reminders",
+      "title": "Reminders",
+      "description": "Daily reminders that come to the front when it is time, with a countdown to the next",
+      "author": "DeskHog",
+      "version": "1.1",
+      "file": "reminders.lua",
+      "size": 6777,
+      "hash": "3d7a007c",
+      "sha256": "2915873574b41ac37b1bcc7d83041ed40e7dcddf929e8c4e7ca62fb52d046d20",
+      "screenshot": "screenshots/reminders.png"
     },
     {
       "name": "rps",
@@ -554,6 +626,18 @@
       "screenshot": "screenshots/whack.png"
     },
     {
+      "name": "wifi",
+      "title": "WiFi",
+      "description": "A signal meter to carry around: strength as a dial, with the last half minute as a chart",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "wifi.lua",
+      "size": 5304,
+      "hash": "dfd6055f",
+      "sha256": "ed8a4b90beb4504d0cce91a4d0015fd4a6ee63cb813211f6e88f1392366df2b0",
+      "screenshot": "screenshots/wifi.png"
+    },
+    {
       "name": "word",
       "title": "Word of the day",
       "description": "A new word every day, with what it means, from Wiktionary",
@@ -564,6 +648,18 @@
       "hash": "89c84948",
       "sha256": "23144b755af8ae3730afd852071d68ac53b0f53432fb7654c92b989d5146a3f3",
       "screenshot": "screenshots/word.png"
+    },
+    {
+      "name": "worldclock",
+      "title": "World clock",
+      "description": "The time in other cities, a card each, with a sky that shows day or night there",
+      "author": "DeskHog",
+      "version": "1.0",
+      "file": "worldclock.lua",
+      "size": 4017,
+      "hash": "71a13245",
+      "sha256": "36e8f66735c9d246ce8c5c86b198969c02d26bc6481443a05fd1e226eae256fd",
+      "screenshot": "screenshots/worldclock.png"
     }
   ]
 }

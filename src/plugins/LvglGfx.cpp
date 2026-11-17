@@ -1,5 +1,6 @@
 #include "plugins/LvglGfx.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -175,6 +176,78 @@ void LvglGfx::line(int x1, int y1, int x2, int y2, uint32_t rgb, int lineWidth) 
     queued();
 }
 
+void LvglGfx::arc(int x, int y, int radius, int startDeg, int endDeg, uint32_t rgb, int lineWidth) {
+    if (!inFrame_ || radius <= 0 || lineWidth <= 0 || endDeg <= startDeg) return;
+    if (radius > kMaxRadius) radius = kMaxRadius;
+    lv_draw_arc_dsc_t dsc;
+    lv_draw_arc_dsc_init(&dsc);
+    dsc.color = lv_color_hex(rgb);
+    dsc.opa = LV_OPA_COVER;
+    dsc.width = lineWidth >= radius ? radius + 1 : lineWidth;  // all the way to the middle for a slice
+    dsc.center.x = x;
+    dsc.center.y = y;
+    // LVGL's circle around x, y reaches one pixel less far than a filled
+    // gfx.circle of the same radius; one more makes rings and discs line up.
+    dsc.radius = static_cast<uint16_t>(radius + 1);
+    dsc.rounded = 0;
+    if (endDeg - startDeg >= 360) {
+        dsc.start_angle = 0;
+        dsc.end_angle = 360;
+    } else {
+        // Plugins count from straight up; LVGL counts from the right. Both go clockwise.
+        dsc.start_angle = (startDeg + 270) % 360;
+        dsc.end_angle = (endDeg + 270) % 360;
+    }
+    lv_draw_arc(&layer_, &dsc);
+    queued();
+}
+
+void LvglGfx::polygon(const int* xy, int count, uint32_t rgb) {
+    if (!inFrame_ || !xy || count < 3) return;
+    const int kMaxPoints = 64;
+    if (count > kMaxPoints) count = kMaxPoints;
+
+    int top = xy[1], bottom = xy[1];
+    for (int i = 1; i < count; i++) {
+        top = LV_MIN(top, xy[2 * i + 1]);
+        bottom = LV_MAX(bottom, xy[2 * i + 1]);
+    }
+    top = LV_MAX(top, 0);
+    bottom = LV_MIN(bottom, height_ - 1);
+
+    // Fill row by row: where the middle of a row crosses the outline, the
+    // inside starts or ends (the even-odd rule).
+    for (int y = top; y <= bottom; y++) {
+        const float middle = static_cast<float>(y) + 0.5f;
+        float crossings[kMaxPoints];
+        int found = 0;
+        for (int i = 0; i < count; i++) {
+            const int j = (i + 1) % count;
+            const float y1 = static_cast<float>(xy[2 * i + 1]), y2 = static_cast<float>(xy[2 * j + 1]);
+            if ((y1 <= middle) == (y2 <= middle)) continue;
+            const float x1 = static_cast<float>(xy[2 * i]), x2 = static_cast<float>(xy[2 * j]);
+            crossings[found++] = x1 + (middle - y1) * (x2 - x1) / (y2 - y1);
+        }
+        for (int i = 1; i < found; i++) {  // a handful of values: insertion sort
+            const float value = crossings[i];
+            int k = i;
+            for (; k > 0 && crossings[k - 1] > value; k--) crossings[k] = crossings[k - 1];
+            crossings[k] = value;
+        }
+        for (int i = 0; i + 1 < found; i += 2) {
+            const int left = LV_MAX(static_cast<int>(ceilf(crossings[i] - 0.5f)), 0);
+            const int right = LV_MIN(static_cast<int>(floorf(crossings[i + 1] - 0.5f)), width_ - 1);
+            if (right >= left) fillRect(left, y, right - left + 1, 1, rgb, 0);
+        }
+    }
+    // The rows leave stair steps along slanted edges. A thin line over each
+    // edge smooths them, and closes shapes too thin for any row to catch.
+    for (int i = 0; i < count; i++) {
+        const int j = (i + 1) % count;
+        line(xy[2 * i], xy[2 * i + 1], xy[2 * j], xy[2 * j + 1], rgb, 1);
+    }
+}
+
 void LvglGfx::text(int x, int y, const char* text, uint32_t rgb, Font font, Align align) {
     if (!inFrame_ || !text || !*text) return;
 
@@ -229,6 +302,7 @@ const lv_font_t* LvglMetrics::lvFont(Font font) {
         case Font::Medium: return Style::valueFont();
         case Font::Large: return Style::largeValueFont();
         case Font::Loud: return Style::loudNoisesFont();
+        case Font::Tiny: return Style::tinyFont();
     }
     return Style::labelFont();
 }

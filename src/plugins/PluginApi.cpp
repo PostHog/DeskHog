@@ -98,6 +98,8 @@ void fieldsToJson(JsonArray target, const std::vector<deskhog::LuaPlugin::Config
             JsonArray options = item.createNestedArray("options");
             for (const std::string& option : field.options) options.add(option.c_str());
         }
+        // The plugin lists what to pick from: see /api/connections/choices.
+        if (!field.choices.empty()) item["choices"] = true;
     }
 }
 
@@ -162,12 +164,14 @@ void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
         item["hash"] = String(hash);
         item["multiCard"] = meta.multiCard;
         if (!meta.error.empty()) item["error"] = meta.error.c_str();
+        if (meta.message) item["message"] = true;  // it takes messages pushed to a connection
         fieldsToJson(item.createNestedArray("config"), meta.config);
         JsonArray kinds = item.createNestedArray("kinds");
         for (const auto& kind : meta.kinds) {
             JsonObject kindItem = kinds.createNestedObject();
             kindItem["key"] = kind.key.c_str();
             kindItem["name"] = kind.name.c_str();
+            if (kind.message) kindItem["message"] = true;  // and this kind of card takes them too
             fieldsToJson(kindItem.createNestedArray("config"), kind.config);
         }
     }
@@ -212,6 +216,7 @@ void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
             const PluginCardRecord* card = record.card(cardId);
             if (card) {
                 item["kind"] = card->kind.c_str();
+                item["front"] = card->mayInterrupt;  // "May come to the front"
                 JsonObject values = item.createNestedObject("settings");
                 for (const auto& pair : card->settings) values[pair.first.c_str()] = pair.second.c_str();
             }
@@ -226,6 +231,22 @@ void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
             }
         }
     }
+
+    // What plugins said with notify() that nobody has seen yet: it shows when
+    // someone arrives at the card.
+    JsonArray notifications = doc.createNestedArray("notifications");
+    for (const PluginNotification& waiting : manager.notifications()) {
+        JsonObject item = notifications.createNestedObject();
+        item["card"] = String(waiting.key.c_str());
+        item["text"] = String(waiting.text.c_str());
+        item["count"] = waiting.count;
+        item["age"] = waiting.ageMs / 1000;
+    }
+
+    // String, not c_str(): the two are temporaries.
+    JsonObject timezone = doc.createNestedObject("timezone");
+    timezone["posix"] = String(manager.timeZone().c_str());
+    timezone["name"] = String(manager.timeZoneName().c_str());
 
     JsonObject directory = doc.createNestedObject("directory");
     directory["source"] = manager.directorySource();
@@ -248,6 +269,17 @@ void handleDirectory(AsyncWebServerRequest* request, PluginManager& manager) {
     sendOk(request, "source", manager.directorySource());
 }
 
+// The time zone plugins tell local time by. The web page looks up the POSIX
+// string for the place someone picks; the device has no list of its own.
+void handleTimeZone(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DynamicJsonDocument doc(1024);
+    if (!readJson(request, doc)) return;
+    String error;
+    if (!manager.setTimeZone(doc["posix"] | "", doc["name"] | "", error)) return sendError(request, 400, error);
+    sendOk(request, "posix", manager.timeZone().c_str());
+}
+
 // ------------------------------------------------------------------- cards
 
 void handleAddCard(AsyncWebServerRequest* request, PluginManager& manager) {
@@ -257,7 +289,7 @@ void handleAddCard(AsyncWebServerRequest* request, PluginManager& manager) {
     String error;
     const std::string key = manager.addCard(doc["plugin"] | "", doc["connection"] | "", doc["connectionName"] | "",
                                             settingsFrom(doc["connectionSettings"]), doc["kind"] | "", doc["name"] | "",
-                                            settingsFrom(doc["settings"]), error);
+                                            settingsFrom(doc["settings"]), error, doc["front"] | true);
     if (key.empty()) return sendError(request, 400, error);
     sendOk(request, "key", key.c_str());
 }
@@ -270,7 +302,10 @@ void handleUpdateCard(AsyncWebServerRequest* request, PluginManager& manager) {
     std::string name;
     const bool hasName = doc["name"].is<const char*>();
     if (hasName) name = doc["name"].as<const char*>();
-    if (!manager.updateCard(key, hasName ? &name : nullptr, settingsFrom(doc["settings"]))) {
+    // "front": may the card come to the front by itself when its plugin calls notify()?
+    const bool hasFront = doc["front"].is<bool>();
+    const bool front = doc["front"] | true;
+    if (!manager.updateCard(key, hasName ? &name : nullptr, settingsFrom(doc["settings"]), hasFront ? &front : nullptr)) {
         return sendError(request, 404, "no such card");
     }
     sendOk(request);
@@ -344,6 +379,127 @@ void handleShow(AsyncWebServerRequest* request, PluginManager& manager) {
     if (answerPreflight(request)) return;
     manager.show(param(request, "key").c_str());
     sendOk(request);
+}
+
+// ---------------------------------------------------------------- messages
+
+// The body of a pushed message, as it came: text or JSON. The web server only
+// hands over a body it did not take for a form, so say what it is:
+// Content-Type: text/plain or application/json.
+std::string messageBody(AsyncWebServerRequest* request) {
+    if (request->_tempObject) {
+        return std::string(static_cast<const char*>(request->_tempObject), request->contentLength());
+    }
+    // Sent as a form after all (curl -d does that): the server split it at
+    // every & and =. Put it back together as well as that goes.
+    std::string body;
+    for (size_t i = 0; i < request->params(); i++) {
+        const AsyncWebParameter* part = request->getParam(i);
+        if (!part->isPost() || part->isFile()) continue;
+        if (!body.empty()) body += '&';
+        body += part->name().c_str();
+        if (part->value().length()) body += std::string("=") + part->value().c_str();
+    }
+    return body;
+}
+
+// POST /api/cards/message?key=<c>:<n> and POST /api/connections/message?id=<c>.
+// This runs on the web server's task. The plugin runs on the UI task, so the
+// message is only queued here; the plugin gets it a moment later.
+void handleMessage(AsyncWebServerRequest* request, PluginManager& manager, bool toCard) {
+    if (answerPreflight(request)) return;
+    if (request->method() != HTTP_POST) return sendError(request, 405, "POST the message as the request body");
+    if (request->contentLength() > PluginManager::MAX_MESSAGE_BYTES) {
+        return sendError(request, 413, "the message is larger than 4 KB");
+    }
+    std::string connectionId, cardId;
+    if (toCard) {
+        if (!PluginManager::splitKey(param(request, "key").c_str(), connectionId, cardId)) {
+            return sendError(request, 404, "no such card");
+        }
+    } else {
+        connectionId = param(request, "id").c_str();
+    }
+    String error;
+    const int status = manager.sendMessage(connectionId, cardId, messageBody(request), error);
+    if (status != 200) return sendError(request, status, error);
+    sendOk(request);
+}
+
+void handleCardMessage(AsyncWebServerRequest* request, PluginManager& manager) { handleMessage(request, manager, true); }
+
+void handleConnectionMessage(AsyncWebServerRequest* request, PluginManager& manager) {
+    handleMessage(request, manager, false);
+}
+
+// ------------------------------------------------------------------ choices
+
+void appendJsonText(String& out, const std::string& value) {
+    out += '"';
+    for (const char c : value) {
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (static_cast<unsigned char>(c) < 0x20) {
+            char escaped[8];
+            snprintf(escaped, sizeof(escaped), "\\u%04x", c);
+            out += escaped;
+        } else {
+            out += c;
+        }
+    }
+    out += '"';
+}
+
+// GET /api/connections/choices?id=<c>&field=<key>[&kind=<kind>][&settings=<JSON object>]
+//
+// `settings` is what the form that asks holds right now, saved or not; the
+// plugin's function gets it as ctx.settings. It rides in the address so that
+// asking again is the very same request.
+//
+// The list comes from the plugin, which may have to ask the network first, and
+// plugins only run on the UI task. Neither this task nor the UI task may sit
+// and wait for that. So the first request starts the work and is answered 202
+// {"pending":true} at once; the same request, repeated, gets the list when it
+// is there. The page asks a few times a second.
+void handleChoices(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    std::vector<deskhog::Choice> choices;
+    String error;
+    PluginSettings form;
+    const String formText = param(request, "settings");
+    if (formText.length() > 0) {
+        DynamicJsonDocument doc(4096);
+        if (formText.length() > 1024 || deserializeJson(doc, formText) || !doc.is<JsonObject>()) {
+            return sendError(request, 400, "settings is a JSON object of at most 1 KB");
+        }
+        form = settingsFrom(doc.as<JsonVariantConst>());
+    }
+    const int status = manager.choices(param(request, "id").c_str(), param(request, "kind").c_str(),
+                                       param(request, "field").c_str(), form, choices, error);
+    if (status == 202) {
+        DynamicJsonDocument doc(128);
+        doc["ok"] = true;
+        doc["pending"] = true;
+        return sendJson(request, 202, doc);
+    }
+    if (status != 200) return sendError(request, status, error);
+
+    // Written by hand: a long list would not fit a JSON document of a size that is safe to reserve.
+    String body = "{\"ok\":true,\"choices\":[";
+    for (size_t i = 0; i < choices.size(); i++) {
+        if (i) body += ',';
+        body += "{\"value\":";
+        appendJsonText(body, choices[i].value);
+        body += ",\"label\":";
+        appendJsonText(body, choices[i].label);
+        body += '}';
+    }
+    body += "]}";
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", body);
+    addCors(response);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
 }
 
 // ------------------------------------------------------------- connections
@@ -506,14 +662,18 @@ void registerPluginRoutes(AsyncWebServer& server, PluginManager& manager) {
     };
     route("/api/state", handleState);
     route("/api/directory", handleDirectory);
+    route("/api/timezone", handleTimeZone);
     route("/api/cards/add", handleAddCard);
     route("/api/cards/update", handleUpdateCard);
     route("/api/cards/layout", handleLayout);
     route("/api/cards/screen", handleScreen);
     route("/api/cards/press", handlePress);
     route("/api/cards/show", handleShow);
+    route("/api/cards/message", handleCardMessage);
     route("/api/connections/add", handleAddConnection);
     route("/api/connections/update", handleUpdateConnection);
     route("/api/connections/remove", handleRemoveConnection);
+    route("/api/connections/message", handleConnectionMessage);
+    route("/api/connections/choices", handleChoices);
     route("/api/plugins*", handlePlugins);
 }

@@ -2,7 +2,10 @@
 
 #include <time.h>
 
+#include <WiFi.h>
+
 #include "esp_heap_caps.h"
+#include "esp_random.h"
 #include "hardware/Input.h"
 #include "hardware/NeoPixelController.h"
 #include "plugins/PluginCard.h"
@@ -40,7 +43,16 @@ PluginConnection::PluginConnection(PluginManager& manager, const std::string& id
       metrics_(cardWidth, cardHeight),
       lua_(metrics_, *this, deskhog::LuaPlugin::Limits(), luaMemory()) {}
 
-PluginConnection::~PluginConnection() { releaseLed(); }
+// How long a connection that was started only to list choices stays around.
+static const uint32_t kKeepForChoicesMs = 30000;
+
+PluginConnection::~PluginConnection() {
+    releaseLed();
+    // The program is about to go, and it tells nobody (see ~LuaPlugin).
+    for (const auto& pair : choiceRequests_) {
+        manager_.finishChoices(pair.second, std::vector<deskhog::Choice>(), "the connection was closed");
+    }
+}
 
 void PluginConnection::start(const PluginConnectionRecord* record) {
     releaseLed();  // a restart begins with the LED back to normal
@@ -110,7 +122,19 @@ bool PluginConnection::cleanUp(uint32_t nowMs) {
             ++it;
         }
     }
-    return cards_.empty() && nowMs - emptySinceMs_ > kGraceMs;
+    if (!cards_.empty()) return false;
+    if (!choiceRequests_.empty()) return false;
+    if (kept_ && static_cast<int32_t>(nowMs - keepUntilMs_) < 0) return false;
+    return nowMs - emptySinceMs_ > kGraceMs;
+}
+
+void PluginConnection::askChoices(const std::string& function, const std::string& job,
+                                  const deskhog::LuaPlugin::ChoiceContext& context) {
+    kept_ = true;
+    keepUntilMs_ = ::millis() + kKeepForChoicesMs;
+    const int requestId = nextChoiceRequest_++;
+    choiceRequests_[requestId] = job;
+    lua_.choices(function, requestId, context);  // may answer before it returns
 }
 
 void PluginConnection::releaseLed() {
@@ -171,3 +195,44 @@ bool PluginConnection::storeSet(const std::string& key, const std::string& json)
 }
 
 void PluginConnection::log(const std::string& line) { manager_.appendLog(plugin_, line); }
+
+std::string PluginConnection::timeZone() { return manager_.timeZone(); }
+
+deskhog::NetStatus PluginConnection::netStatus() {
+    deskhog::NetStatus status;
+    status.online = WiFi.status() == WL_CONNECTED;
+    if (status.online) {
+        status.rssi = WiFi.RSSI();
+        status.ssid = WiFi.SSID().c_str();
+        status.ip = WiFi.localIP().toString().c_str();
+    }
+    return status;
+}
+
+// The radio's noise makes these numbers; before WiFi is up they are weaker,
+// but still differ from boot to boot.
+uint32_t PluginConnection::entropy() { return esp_random(); }
+
+void PluginConnection::notify(const std::string& cardId, const deskhog::Notice& notice) {
+    std::string card = cardId;
+    if (card.empty()) {
+        // A single-card plugin: its only card. The plugin may ask while it
+        // starts, before the card is attached; then the saved record knows.
+        if (!cards_.empty()) {
+            card = cards_[0]->cardId();
+        } else {
+            PluginConnectionRecord record;
+            if (manager_.connection(id_, record) && !record.cards.empty()) card = record.cards[0].id;
+        }
+    }
+    if (card.empty()) return;
+    manager_.requestAttention(id_ + ":" + card, notice);
+}
+
+void PluginConnection::choicesDone(int requestId, const std::vector<deskhog::Choice>& choices, const std::string& error) {
+    const auto found = choiceRequests_.find(requestId);
+    if (found == choiceRequests_.end()) return;
+    const std::string job = found->second;
+    choiceRequests_.erase(found);
+    manager_.finishChoices(job, choices, error);
+}

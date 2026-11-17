@@ -1,17 +1,13 @@
 -- Days, hours and minutes until something: a launch, a holiday, a birthday.
--- Add a card per date; they share the time zone.
+-- Add a card per date. Dates are in the device's time zone, which you pick on
+-- its web page.
 
 plugin = {
   name = "Countdown",
   description = "How long until the launch, the holiday, the birthday. A card per date",
   author = "DeskHog",
-  version = "1.2",
+  version = "2.0",
   fps = 1,
-}
-
--- Shared by all of this plugin's cards.
-config = {
-  offset = { label = "Hours ahead of UTC (for example 1, -5 or 5.5)", default = "0" },
 }
 
 local MONTHS = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
@@ -40,7 +36,7 @@ local function describe(card)
 
   local utc = time.now()
   if utc == 0 then return "...", "Waiting for the time", "gray" end
-  local now = utc + math.floor((tonumber(config.offset) or 0) * 3600 + 0.5)
+  local now = utc + time.offset(utc) -- local time, as seconds
   -- Days and seconds apart, so dates far ahead do not overflow.
   local days = daysFromDate(year, month, day) - now // 86400
   local seconds = (hour or 0) * 3600 + (minute or 0) * 60 - now % 86400

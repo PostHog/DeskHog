@@ -9,17 +9,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+
+#include <sys/wait.h>
 
 #include <fstream>
 #include <map>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include <lvgl.h>
 
+#include "Attention.h"
 #include "LuaPlugin.h"
 #include "PluginHost.h"
+#include "TimeZone.h"
+#include "plugins/ImageDecode.h"
 #include "plugins/LvglGfx.h"
 
 using namespace deskhog;
@@ -125,14 +132,24 @@ public:
 
     uint32_t now = 0;
     bool liveHttp = true;
+    bool offline = false;  ///< --offline: no WiFi
     std::vector<std::pair<std::string, std::string>> replies;  ///< part of a URL -> file to answer with
+    std::vector<std::pair<std::string, int>> replyStatuses;    ///< part of a URL -> the status to answer with
+    std::vector<std::pair<std::string, std::string>> replyHeaders;  ///< part of a URL -> "Name: value" to add
+    int64_t startEpoch = (int64_t)time(nullptr);  ///< What the clock says when the run starts (--time)
+    std::vector<int> rssi = {-58};                ///< Signal strength, a value per second, over and over (--rssi)
+    bool seeded = false;                          ///< --seed: math.random gives the same numbers every run
+    std::mt19937 seededNumbers;
     bool held[3] = {false, false, false};
     std::string led = "normal";
+    std::string zone = "UTC0";  ///< The device's time zone, as a POSIX TZ string (--tz)
     std::vector<Pending> answers;
     std::map<std::string, std::string> stored;
 
     uint32_t millis() override { return now; }
-    int64_t epochSeconds() override { return (int64_t)time(nullptr); }
+    // The clock runs on the simulator's time, not the computer's: ten seconds
+    // of card take a moment to run, and the card should see ten seconds pass.
+    int64_t epochSeconds() override { return startEpoch + now / 1000; }
     bool buttonHeld(Button button) override { return held[(int)button]; }
     void ledSet(uint8_t r, uint8_t g, uint8_t b, uint32_t durationMs) override {
         char buf[48];
@@ -156,33 +173,159 @@ public:
         return true;
     }
     void log(const std::string& line) override { printf("[plugin] %s\n", line.c_str()); }
+    std::string timeZone() override { return zone; }
+    // A made-up network, the same on every run so screenshots do not change.
+    NetStatus netStatus() override {
+        NetStatus status;
+        status.online = liveHttp && !offline;
+        status.rssi = rssi[(now / 1000) % rssi.size()];
+        status.ssid = "Simulator";
+        status.ip = "192.168.1.50";
+        return status;
+    }
+    uint32_t entropy() override { return seeded ? (uint32_t)seededNumbers() : std::random_device()(); }
+
+    // notify(): the same rules as on the device decide what comes of it.
+    Attention attention;
+    bool mayFront = true;  ///< The card's "May come to the front" setting (--no-front turns it off)
+    void notify(const std::string&, const Notice& notice) override {
+        char led[24] = "";
+        if (notice.hasLed) snprintf(led, sizeof(led), " (led #%06x)", (unsigned)notice.ledRgb);
+        printf("[notify] at %.2fs: %s%s\n", now / 1000.0, notice.text.empty() ? "(no text)" : notice.text.c_str(), led);
+        attention.request("1", notice, mayFront, now);
+    }
+    // Why curl gave up, in the words the device would use where it has them.
+    static std::string curlTrouble(int exitCode) {
+        switch (exitCode) {
+            case 3: return "bad url";
+            case 6: return "could not resolve host";
+            case 7: return "connection refused";
+            case 28: return "connection timed out";
+            case 51: case 60: case 77: case 83: case 90: case 91: return "certificate not trusted";
+            case 35: case 53: case 58: case 59: return "secure connection failed";
+            case 47: return "too many redirects";  // the device hands over the 3xx answer instead
+            case 52: case 56: return "connection lost";
+            default: return "request failed (curl gave up with code " + std::to_string(exitCode) + ")";
+        }
+    }
+
+    void choicesDone(int, const std::vector<Choice>& choices, const std::string& error) override {
+        if (!error.empty()) {
+            printf("[choices] failed: %s\n", error.c_str());
+            return;
+        }
+        printf("[choices] %zu to pick from\n", choices.size());
+        for (const Choice& choice : choices) printf("[choices]   %-24s %s\n", choice.value.c_str(), choice.label.c_str());
+    }
+
+    // gfx.fetchImage: the body is a picture file. Decode it the way the device does.
+    static void finish(const HttpRequest& request, HttpResponse& response) {
+        if (request.imageMaxWidth <= 0 || response.status < 200 || response.status >= 300) return;
+        std::string file;
+        file.swap(response.body);
+        if (!decodeImage(reinterpret_cast<uint8_t*>(&file[0]), file.size(), request.imageMaxWidth,
+                         request.imageMaxHeight, response.image, response.imageWidth, response.imageHeight,
+                         response.error)) {
+            printf("[http] the picture could not be read: %s\n", response.error.c_str());
+        }
+    }
+
+    // The headers of the last answer in a curl header dump (a redirect leaves several).
+    static void readHeaders(const std::string& path, HttpResponse& response) {
+        std::ifstream file(path);
+        std::string line;
+        while (std::getline(file, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+            if (line.compare(0, 5, "HTTP/") == 0) {
+                response.headers.clear();
+                continue;
+            }
+            const size_t colon = line.find(':');
+            if (colon == std::string::npos || colon == 0) continue;
+            size_t value = colon + 1;
+            while (value < line.size() && line[value] == ' ') value++;
+            response.headers.emplace_back(line.substr(0, colon), line.substr(value));
+        }
+    }
 
     // Requests go out through curl, so plugins show real data in the simulator.
     bool httpStart(int requestId, const HttpRequest& request) override {
         HttpResponse response;
         printf("[http] %s %s\n", request.method.c_str(), request.url.c_str());
+        const bool carriesBody = request.method != "GET" && request.method != "HEAD";
+        if (carriesBody && !request.body.empty()) {
+            const bool cut = request.body.size() > 400;
+            printf("[http]   body: %s%s\n", request.body.substr(0, 400).c_str(), cut ? "..." : "");
+        }
         const size_t limit = request.maxBytes ? request.maxBytes : 48 * 1024;
-        for (const auto& reply : replies) {
-            if (request.url.find(reply.first) == std::string::npos) continue;
-            std::ifstream file(reply.second, std::ios::binary);
-            std::stringstream content;
-            content << file.rdbuf();
-            printf("[http] answered from %s\n", reply.second.c_str());
-            response.status = 200;
-            response.body = content.str();
+        if (offline) {
+            response.error = "no WiFi";
             answers.push_back({requestId, response});
             return true;
         }
+        // --reply, --reply-status and --reply-header: any of them that names a
+        // part of this URL answers it, and the network is left alone.
+        const auto matches = [&request](const std::string& part) { return request.url.find(part) != std::string::npos; };
+        bool answered = false;
+        std::string from = "--reply-status";
+        for (const auto& reply : replies) {
+            if (!matches(reply.first)) continue;
+            std::ifstream file(reply.second, std::ios::binary);
+            std::stringstream content;
+            content << file.rdbuf();
+            if (!file) printf("[http] could not read %s\n", reply.second.c_str());
+            response.body = content.str();
+            from = reply.second;
+            answered = true;
+            break;
+        }
+        response.status = 200;
+        for (const auto& status : replyStatuses) {
+            if (!matches(status.first)) continue;
+            response.status = status.second;
+            answered = true;
+            break;
+        }
+        for (const auto& header : replyHeaders) {
+            if (!matches(header.first)) continue;
+            const size_t colon = header.second.find(':');
+            size_t value = colon + 1;
+            while (value < header.second.size() && header.second[value] == ' ') value++;
+            response.headers.emplace_back(header.second.substr(0, colon), header.second.substr(value));
+            if (!answered) from = "--reply-header";
+            answered = true;
+        }
+        if (answered) {
+            printf("[http] answered %d from %s\n", response.status, from.c_str());
+            if (request.method == "HEAD") response.body.clear();
+            if (response.body.size() > limit) {
+                response = HttpResponse();
+                response.error = "response too large";
+            }
+            finish(request, response);
+            answers.push_back({requestId, std::move(response)});
+            return true;
+        }
+        response = HttpResponse();
         if (!liveHttp) {
             response.error = "network is off (--no-http)";
             answers.push_back({requestId, response});
             return true;
         }
-        std::string command = "curl -sS -L --max-time " + std::to_string(request.timeoutMs / 1000 + 1) +
-                              " -A DeskHog -w '\\n%{http_code}' -X " + request.method;
+        char headerPath[] = "/tmp/deskhog-sim-headers-XXXXXX";
+        const int headerFile = mkstemp(headerPath);
+        if (headerFile >= 0) close(headerFile);
+        std::string command = "curl -sS -L --max-redirs 5 --max-time " + std::to_string(request.timeoutMs / 1000 + 1) +
+                              " -A DeskHog -w '\\n%{http_code}'";
+        // The device checks certificates too, unless the plugin asks it not to.
+        if (request.insecure) command += " -k";
+        command += request.method == "HEAD" ? std::string(" --head") : " -X " + request.method;
+        if (headerFile >= 0) command += " -D " + shellQuote(headerPath);
         for (const auto& header : request.headers) command += " -H " + shellQuote(header.first + ": " + header.second);
-        if (request.method == "POST") command += " --data-binary " + shellQuote(request.body);
-        command += " " + shellQuote(request.url) + " 2>&1";
+        if (carriesBody && !request.body.empty()) command += " --data-binary " + shellQuote(request.body);
+        // What curl has to say about a failure stays out of it: the plugin gets
+        // a short reason, as on the device.
+        command += " " + shellQuote(request.url) + " 2>/dev/null";
 
         std::string output;
         FILE* pipe = popen(command.c_str(), "r");
@@ -190,22 +333,30 @@ public:
             char buffer[4096];
             size_t got;
             while ((got = fread(buffer, 1, sizeof(buffer), pipe)) > 0) output.append(buffer, got);
-            const int exitCode = pclose(pipe);
+            const int waited = pclose(pipe);
+            const int exitCode = WIFEXITED(waited) ? WEXITSTATUS(waited) : -1;
             const size_t lastLine = output.rfind('\n');
             if (exitCode == 0 && lastLine != std::string::npos) {
                 response.status = atoi(output.c_str() + lastLine + 1);
-                response.body = output.substr(0, lastLine);
+                // With --head curl prints the headers where the body would be.
+                if (request.method != "HEAD") response.body = output.substr(0, lastLine);
             } else {
-                response.error = output.empty() ? "request failed" : output.substr(0, 120);
+                response.error = curlTrouble(exitCode);
+                printf("[http] failed: %s\n", response.error.c_str());
             }
         } else {
             response.error = "could not run curl";
+        }
+        if (headerFile >= 0) {
+            if (response.status) readHeaders(headerPath, response);
+            unlink(headerPath);
         }
         if (response.body.size() > limit) {
             response = HttpResponse();
             response.error = "response too large";
         }
-        answers.push_back({requestId, response});
+        finish(request, response);
+        answers.push_back({requestId, std::move(response)});
         return true;
     }
 };
@@ -232,6 +383,11 @@ struct Hold {
     uint32_t toMs;
 };
 
+struct Message {
+    uint32_t atMs;
+    std::string body;
+};
+
 bool parseButton(const std::string& name, Button& out) {
     if (name == "down") out = Button::Down;
     else if (name == "center") out = Button::Center;
@@ -246,12 +402,29 @@ void usage() {
            "  --seconds N       how long to run before the screenshot (default: 2)\n"
            "  --press LIST      button presses, e.g. center@0.5,center@1.2,up@3\n"
            "  --hold LIST       buttons held down for a while, e.g. center@1-2.5,up@3-4\n"
+           "                    (for a long press give both: --press center@1 --hold center@1-2.5)\n"
+           "  --tz ZONE         the device's time zone as a POSIX string, e.g. CET-1CEST,M3.5.0,M10.5.0/3 (default: UTC0)\n"
+           "  --time WHEN       what the clock says when the run starts: 2026-11-17T14:05 or 2026-11-17T14:05:30 in\n"
+           "                    the --tz zone, the same with a Z at the end for UTC, or Unix seconds (default: now).\n"
+           "                    The clock then runs with the simulation: --seconds 70 crosses a minute\n"
+           "  --seed N          math.random gives the same numbers on every run (default: different ones)\n"
+           "  --rssi LIST       WiFi signal strength in dBm, e.g. -58 or -52,-55,-61,-70: one value per second,\n"
+           "                    over and over (default: -58)\n"
+           "  --offline         no WiFi: net.online() is false and every request fails with \"no WiFi\"\n"
            "  --store KEY=JSON  a value the plugin saved earlier, e.g. best=42; repeat for more\n"
            "  --card KIND       which kind of card to show, for plugins with several (default: the first)\n"
            "  --set KEY=VALUE   a setting, of the plugin or of the card; repeat for more\n"
            "  --scale N         enlarge the PNG N times (default: 3)\n"
            "  --reply PART=FILE answer requests whose URL contains PART with the file, instead of the network\n"
-           "  --no-http         answer every request with a network error\n");
+           "  --reply-status PART=CODE   answer them with this status instead of 200, e.g. /runs=304 (no --reply\n"
+           "                    needed: the body is then empty)\n"
+           "  --reply-header PART='Name: value'   and with this header; repeat for more\n"
+           "  --no-http         answer every request with a network error\n"
+           "  --message AT=TEXT push a message to the plugin AT seconds in, e.g. 1=\"Pizza's here\" or 1=@order.json\n"
+           "                    (@FILE sends the file's contents); repeat for more\n"
+           "  --choices NAME    run the function a setting names with choices = \"NAME\", and print its list\n"
+           "  --arrive N        the card is off screen until N seconds in, as if you were on another card\n"
+           "  --no-front        switch the card's \"May come to the front\" setting off\n");
 }
 
 }  // namespace
@@ -269,6 +442,10 @@ int main(int argc, char** argv) {
     std::vector<Hold> holds;
     std::string kind;
     std::map<std::string, std::string> settings;
+    std::vector<Message> messages;
+    std::vector<std::string> choiceFunctions;
+    uint32_t arriveMs = 0;
+    std::string startTime;
     SimServices services;
 
     for (int i = 2; i < argc; i++) {
@@ -291,8 +468,68 @@ int main(int argc, char** argv) {
                 return 2;
             }
             services.replies.emplace_back(pair.substr(0, equals), pair.substr(equals + 1));
+        } else if ((arg == "--reply-status" || arg == "--reply-header") && hasValue) {
+            const std::string pair = argv[++i];
+            const size_t equals = pair.find('=');
+            const std::string value = equals == std::string::npos ? "" : pair.substr(equals + 1);
+            if (arg == "--reply-status" && atoi(value.c_str()) >= 100 && atoi(value.c_str()) <= 599) {
+                services.replyStatuses.emplace_back(pair.substr(0, equals), atoi(value.c_str()));
+            } else if (arg == "--reply-header" && value.find(':') != std::string::npos && value[0] != ':') {
+                services.replyHeaders.emplace_back(pair.substr(0, equals), value);
+            } else {
+                usage();
+                return 2;
+            }
+        } else if (arg == "--time" && hasValue) {
+            startTime = argv[++i];
+        } else if (arg == "--seed" && hasValue) {
+            services.seeded = true;
+            services.seededNumbers.seed((uint32_t)strtoul(argv[++i], nullptr, 10));
+        } else if (arg == "--rssi" && hasValue) {
+            services.rssi.clear();
+            std::stringstream list(argv[++i]);
+            std::string item;
+            while (std::getline(list, item, ',')) services.rssi.push_back(atoi(item.c_str()));
+            if (services.rssi.empty()) {
+                usage();
+                return 2;
+            }
+        } else if (arg == "--offline") {
+            services.offline = true;
+        } else if (arg == "--tz" && hasValue) {
+            services.zone = argv[++i];
         } else if (arg == "--no-http") {
             services.liveHttp = false;
+        } else if (arg == "--no-front") {
+            services.mayFront = false;
+        } else if (arg == "--arrive" && hasValue) {
+            arriveMs = (uint32_t)(atof(argv[++i]) * 1000);
+        } else if (arg == "--choices" && hasValue) {
+            choiceFunctions.push_back(argv[++i]);
+        } else if (arg == "--message" && hasValue) {
+            const std::string pair = argv[++i];
+            const size_t equals = pair.find('=');
+            if (equals == std::string::npos) {
+                usage();
+                return 2;
+            }
+            Message message{(uint32_t)(atof(pair.c_str()) * 1000), pair.substr(equals + 1)};
+            if (!message.body.empty() && message.body[0] == '@') {
+                const std::string path = message.body.substr(1);
+                std::ifstream file(path, std::ios::binary);
+                if (!file) {
+                    fprintf(stderr, "could not read %s\n", path.c_str());
+                    return 1;
+                }
+                std::stringstream content;
+                content << file.rdbuf();
+                message.body = content.str();
+            }
+            if (message.body.size() > 4096) {
+                fprintf(stderr, "that message is larger than 4 KB, the most the device takes\n");
+                return 1;
+            }
+            messages.push_back(message);
         } else if (arg == "--set" && hasValue) {
             const std::string pair = argv[++i];
             const size_t equals = pair.find('=');
@@ -343,6 +580,26 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --time, now that --tz is known whichever came first.
+    if (!startTime.empty()) {
+        int year, month, day, hour, minute, second = 0, used = 0;
+        const bool allDigits = startTime.find_first_not_of("0123456789") == std::string::npos;
+        if (allDigits) {
+            services.startEpoch = (int64_t)strtoll(startTime.c_str(), nullptr, 10);
+        } else if (sscanf(startTime.c_str(), "%d-%d-%d%*1[T ]%d:%d%n:%d%n", &year, &month, &day, &hour, &minute, &used, &second, &used) >= 5 &&
+                   (startTime.substr(used).empty() || startTime.substr(used) == "Z")) {
+            TimeZone zone;  // UTC
+            if (startTime.back() != 'Z' && !zone.parse(services.zone.c_str())) {
+                fprintf(stderr, "--tz is not a POSIX time zone (they look like CET-1CEST,M3.5.0,M10.5.0/3)\n");
+                return 2;
+            }
+            services.startEpoch = zone.fromCivil(year, month, day, hour, minute, second);
+        } else {
+            fprintf(stderr, "--time takes 2026-11-17T14:05, 2026-11-17T14:05:30, either with a Z for UTC, or Unix seconds\n");
+            return 2;
+        }
+    }
+
     const std::string source = readFile(pluginPath);
     if (source.empty()) {
         fprintf(stderr, "could not read %s\n", pluginPath.c_str());
@@ -385,21 +642,51 @@ int main(int argc, char** argv) {
             fprintf(stderr, "\n");
             return 1;
         }
-        plugin.setVisible(card, true);
+        // The web page asks for these when someone opens a setting that has `choices`.
+        int choiceRequest = 1;
+        for (const std::string& function : choiceFunctions) {
+            printf("[choices] asking %s()\n", function.c_str());
+            // With the form as --set filled it in, as the web page sends what it holds.
+            LuaPlugin::ChoiceContext context;
+            if (!plugin.kinds().empty()) context.kind = kind;
+            context.settings = settings;
+            plugin.choices(function, choiceRequest++, context);
+        }
 
         const uint32_t endMs = (uint32_t)(seconds * 1000);
         size_t nextPress = 0;
         int frames = 0;
+        bool onScreen = false;
         for (;;) {
+            // The card is the one on screen, unless --arrive keeps it away for a while.
+            if (!onScreen && services.now >= arriveMs) {
+                onScreen = true;
+                if (arriveMs) printf("[screen] at %.2fs: you arrive at the card\n", services.now / 1000.0);
+            }
+            plugin.setVisible(card, onScreen);
+
+            for (Message& message : messages) {
+                if (message.atMs > services.now || message.atMs == UINT32_MAX) continue;
+                message.atMs = UINT32_MAX;  // sent
+                // To the card, as POST /api/cards/message does it. A plugin with card
+                // kinds may only take messages for the connection: then that way.
+                bool taken = plugin.message(card, message.body);
+                if (!taken && !plugin.failed()) taken = plugin.message("", message.body);
+                printf("[message] at %.2fs: %s\n", services.now / 1000.0,
+                       taken ? "delivered" : plugin.failed() ? "the plugin crashed on it"
+                                                             : "not delivered: the plugin has no message() function");
+            }
+
             // Network answers arrive on the frame after the request, as on the device.
             std::vector<SimServices::Pending> answers;
             answers.swap(services.answers);
-            for (const SimServices::Pending& answer : answers) plugin.httpResponse(answer.id, answer.response);
+            for (SimServices::Pending& answer : answers) plugin.httpResponse(answer.id, std::move(answer.response));
 
             while (nextPress < presses.size() && presses[nextPress].atMs <= services.now) {
                 const Press& press = presses[nextPress++];
                 static const char* const names[] = {"down", "center", "up"};
                 const bool used = plugin.button(card, press.button);
+                if (used && onScreen) services.attention.busy(services.now);  // the card is being played
                 printf("[button] %s at %.2fs%s\n", names[(int)press.button], services.now / 1000.0,
                        used ? "" : " (not used by the plugin: the card stack would move)");
             }
@@ -409,10 +696,26 @@ int main(int argc, char** argv) {
                 if (services.now >= hold.fromMs && services.now < hold.toMs) services.held[(int)hold.button] = true;
             }
 
+            bool anyHeld = false;
+            for (const bool held : services.held) anyHeld = anyHeld || held;
+            if (anyHeld && onScreen) services.attention.busy(services.now);
+
+            // What the device makes of notify(): see Attention.h.
+            const Attention::Actions actions = services.attention.tick(
+                onScreen ? card : std::string(), services.now, [&services](const std::string&) { return services.mayFront; });
+            if (!actions.show.empty() && !onScreen) {
+                onScreen = true;
+                plugin.setVisible(card, true);
+                printf("[screen] at %.2fs: the card comes to the front\n", services.now / 1000.0);
+            }
+            if (!actions.repaint.empty()) plugin.repaint(card);
+            if (actions.led) printf("[led] flash #%06x\n", (unsigned)actions.ledRgb);
+
             plugin.tick(services.now);
             if (plugin.needsDraw(card)) {
                 gfx.beginFrame();
                 plugin.draw(card);
+                if (const std::string* banner = services.attention.banner(card)) drawBanner(gfx, *banner);
                 gfx.endFrame();
                 frames++;
             }

@@ -9,9 +9,12 @@
 #include <string>
 #include <vector>
 
+#include "Attention.h"
+#include "HttpRedirect.h"
 #include "LuaPlugin.h"
 #include "PixelRuns.h"
 #include "SourceHash.h"
+#include "TimeZone.h"
 #include "MockHost.h"
 
 using namespace deskhog;
@@ -135,6 +138,51 @@ struct Fixture {
 };
 
 // ------------------------------------------------------------------ drawing
+
+// What a redirect leads to: the method and address of the next request, or "" if it is not followed.
+static std::string redirected(int status, std::string method, std::string url, const std::string& location) {
+    if (!deskhog::followRedirect(status, method, url, location)) return "";
+    return method + " " + url;
+}
+
+TEST(redirects_are_followed_to_where_they_point) {
+    // A whole address, also to another host, and from http up to https.
+    CHECK_EQ(redirected(307, "GET", "https://example.com", "https://www.example.com/"), "GET https://www.example.com/");
+    CHECK_EQ(redirected(301, "GET", "http://example.com/a", "https://example.com/a"), "GET https://example.com/a");
+    CHECK_EQ(redirected(308, "HEAD", "https://example.com/a", "HTTPS://Example.com/b"), "HEAD https://Example.com/b");
+    // Only a path, or a path next to the one that answered.
+    CHECK_EQ(redirected(302, "GET", "https://example.com/a/b?c=1", "/d?e=2"), "GET https://example.com/d?e=2");
+    CHECK_EQ(redirected(302, "GET", "https://example.com:8443/a/b?c=/x", "d"), "GET https://example.com:8443/a/d");
+    CHECK_EQ(redirected(302, "GET", "https://example.com", "d"), "GET https://example.com/d");
+    CHECK_EQ(redirected(302, "GET", "https://example.com?q=1", "/d"), "GET https://example.com/d");
+    CHECK_EQ(redirected(302, "GET", "http://example.com/a", "//other.example/b#top"), "GET http://other.example/b");
+    // After a POST the browser way: 302 and 303 become a GET, the others are the plugin's answer.
+    CHECK_EQ(redirected(303, "POST", "https://example.com/a", "/done"), "GET https://example.com/done");
+    CHECK_EQ(redirected(302, "PUT", "https://example.com/a", "/done"), "GET https://example.com/done");
+    CHECK_EQ(redirected(307, "POST", "https://example.com/a", "/b"), "");
+    CHECK_EQ(redirected(301, "DELETE", "https://example.com/a", "/b"), "");
+    CHECK_EQ(redirected(303, "HEAD", "https://example.com/a", "/b"), "HEAD https://example.com/b");
+}
+
+TEST(redirects_that_are_not_followed) {
+    CHECK_EQ(redirected(200, "GET", "https://example.com/a", "/b"), "");
+    CHECK_EQ(redirected(304, "GET", "https://example.com/a", "/b"), "");
+    CHECK_EQ(redirected(302, "GET", "https://example.com/a", ""), "");
+    // Not from https back to http, and not to something that is no web address.
+    CHECK_EQ(redirected(302, "GET", "https://example.com/a", "http://example.com/a"), "");
+    CHECK_EQ(redirected(302, "GET", "https://example.com/a", "ftp://example.com/a"), "");
+    CHECK_EQ(redirected(302, "GET", "http://example.com/a", "/b?next=ftp://x"), "GET http://example.com/b?next=ftp://x");
+}
+
+TEST(credentials_stay_with_the_host_they_were_meant_for) {
+    CHECK_EQ(deskhog::urlOrigin("https://Example.com:8443/a?b"), "https://example.com:8443");
+    CHECK_EQ(deskhog::urlOrigin("http://example.com"), "http://example.com");
+    CHECK_EQ(deskhog::urlOrigin("example.com"), "");
+    CHECK(deskhog::urlOrigin("https://example.com/a") != deskhog::urlOrigin("https://www.example.com/a"));
+    CHECK(deskhog::isCredentialHeader("Authorization"));
+    CHECK(deskhog::isCredentialHeader("cookie"));
+    CHECK(!deskhog::isCredentialHeader("Accept"));
+}
 
 TEST(draws_with_gfx) {
     Fixture f;
@@ -356,6 +404,22 @@ TEST(bad_color_is_reported) {
     f.draw();
     CHECK(f.plugin.failed());
     CHECK(contains(f.plugin.error(), "not a color"));
+}
+
+TEST(gfx_color_says_whether_something_is_a_colour) {
+    Fixture f;
+    CHECK(f.start(R"(
+        print(gfx.color("red"), gfx.color("#fff"), gfx.color("#FF8800"), gfx.color(0x102030), gfx.color(0x1FFFFFF))
+        print(gfx.color("nope"), gfx.color("#ff"), gfx.color("#ggg"), gfx.color("Red"), gfx.color(""))
+        print(gfx.color(nil), gfx.color(), gfx.color({}), gfx.color(true), gfx.color(1.5), gfx.color(print))
+        function draw() gfx.rect(0, 0, 1, 1, gfx.color("orange")) end   -- what comes back is a colour itself
+    )"));
+    CHECK(f.services.logged("15158332 16777215 16746496 1056816 16777215"));
+    CHECK(f.services.logged("nil nil nil nil nil"));
+    CHECK(f.services.logged("nil nil nil nil nil nil"));
+    f.draw();
+    CHECK(f.gfx.drew("#e67e22"));
+    CHECK(!f.plugin.failed());
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -985,6 +1049,14 @@ TEST(http_only_shapes) {
         {"{ list = { { id = true } } }", R"({"list": [{"id": 1, "n": "a"}, {"id": 2}], "x": 0})", R"({"list":[{"id":1},{"id":2}]})"},
         {"{ a = { b = { c = true } } }", R"({"a": {"b": {"c": 1, "d": 2}, "e": 3}})", R"({"a":{"b":{"c":1}}})"},
         {"{ a = true }", R"({"b": "no \\\" } quote", "a": "kept"})", R"({"a":"kept"})"},
+        // "*" is every key that is not named: for objects keyed by ids.
+        {"{ ['*'] = { name = true } }", R"({"d1": {"name": "Lamp", "caps": {"x": [1, 2]}, "big": "..."}})", R"({"d1":{"name":"Lamp"}})"},
+        {"{ ['*'] = true }", R"({"a": {"x": [1]}})", R"({"a":{"x":[1]}})"},
+        {"{ ['*'] = { n = true }, total = true }", R"({"total": {"m": 2}})", R"({"total":{"m":2}})"},  // a name goes first
+        {"{ ['*'] = { n = true }, total = true }", R"({"a": {"n": 3, "m": 4}})", R"({"a":{"n":3}})"},
+        {"{ ['*'] = { n = true } }", R"({"b": [{"n": 1, "m": 2}], "c": null})", R"({"b":[{"n":1}]})"},
+        {"{ ['*'] = { n = true } }", R"({"a": 5})", R"({"a":5})"},
+        {"{ list = { { ['*'] = { id = true } } } }", R"({"list": [{"k": {"id": 1, "x": 2}}]})", R"({"list":[{"k":{"id":1}}]})"},
     };
     for (const Case& test : cases) {
         Fixture f;
@@ -1021,6 +1093,32 @@ TEST(http_only_survives_broken_and_deep_answers) {
         CHECK(!f.plugin.failed());
         CHECK_EQ(f.gfx.calls.back(), std::string("text 0,0 #ffffff small left ") + test.second);
     }
+}
+
+TEST(reading_a_setting_at_the_top_of_the_file_is_explained) {
+    const char* const sources[] = {
+        "config = { list = { default = 'a;b' } } for item in config.list:gmatch('[^;]+') do end",
+        "config = { city = { default = 'Antwerp' } } local url = 'https://x/' .. config.city",
+        "config = { days = { default = 3 } } local week = config.days * 7",
+        "config = { days = { default = 3 } } if config.days > 2 then end",
+    };
+    for (const char* source : sources) {
+        Fixture f;
+        CHECK(!f.start(source));
+        if (!contains(f.plugin.error(), "read them in load() or later")) printf("  %s\n", f.plugin.error().c_str());
+        CHECK(contains(f.plugin.error(), "test:1: attempt to"));
+        CHECK(contains(f.plugin.error(), "read them in load() or later"));
+    }
+    // Other mistakes, and plugins without settings, get no such advice.
+    Fixture other;
+    CHECK(!other.start("config = { a = 1 } error('boom')"));
+    CHECK(!contains(other.plugin.error(), "load()"));
+    Fixture none;
+    CHECK(!none.start("local t = {} local x = t.name:upper()"));
+    CHECK(!contains(none.plugin.error(), "load()"));
+    // In load() the same code is fine.
+    Fixture fine;
+    CHECK(fine.start("config = { days = { default = 3 } } function load() week = config.days * 7 end"));
 }
 
 TEST(settings_come_in_the_order_the_plugin_asks_for) {
@@ -1786,7 +1884,8 @@ TEST(every_plugin_in_the_directory_loads) {
 TEST(sample_clock) {
     Fixture f;
     f.services.epoch = 1763236140;  // Saturday 15 November 2025, 19:49 UTC
-    CHECK(f.startFile("clock", {{"offset", "1"}}));
+    f.services.zone = "CET-1CEST,M3.5.0,M10.5.0/3";
+    CHECK(f.startFile("clock", {{"offset", "5"}}));  // a setting from before version 2: ignored
     f.draw();
     CHECK(f.gfx.drew("Saturday"));
     CHECK(f.gfx.drew("20:49"));
@@ -1808,7 +1907,8 @@ TEST(sample_clock) {
 
     Fixture twelve;
     twelve.services.epoch = 1763236140 + 5 * 3600;  // 00:49 UTC the next day
-    CHECK(twelve.startFile("clock", {{"hours12", "true"}, {"label", "Home"}, {"offset", "-5.5"}}));
+    twelve.services.zone = "<-0530>5:30";
+    CHECK(twelve.startFile("clock", {{"hours12", "true"}, {"label", "Home"}}));
     twelve.draw();
     CHECK(twelve.gfx.drew("7:19 pm"));
     CHECK(twelve.gfx.drew("Home"));
@@ -1819,6 +1919,16 @@ TEST(sample_clock) {
     CHECK(unset.startFile("clock"));
     unset.draw();
     CHECK(unset.gfx.drew("Waiting for the time"));
+
+    // Summer time comes with the zone: the same clock, in July.
+    Fixture summer;
+    summer.services.zone = "CET-1CEST,M3.5.0,M10.5.0/3";
+    summer.services.epoch = 1752522540;  // Monday 14 July 2025, 19:49 UTC
+    CHECK(summer.startFile("clock"));
+    summer.draw();
+    CHECK(summer.gfx.drew("21:49"));
+    CHECK(summer.gfx.drew("Monday"));
+    CHECK_EQ(summer.plugin.configSchema().size(), (size_t)2);  // no offset to fill in any more
 }
 
 // ------------------------------------------------- more plugins in plugins/
@@ -2037,25 +2147,27 @@ TEST(sample_simon) {
 
 TEST(sample_countdown) {
     // The fake clock says Saturday 15 November 2025, 09:46:40 UTC.
-    struct Case { const char* date; const char* time; const char* offset; const char* expect; };
+    struct Case { const char* date; const char* time; const char* zone; const char* expect; };
     const Case cases[] = {
-        {"2025-12-25", "", "0", "large center 39 days"},
-        {"2025-11-15", "", "0", "Today!"},
-        {"2025-11-16", "", "15", "Today!"},              // fifteen hours ahead it is already tomorrow
-        {"2025-11-16", "9:00", "0", "23h 13m"},
-        {"2025-11-15", "10:00", "0", "13:20"},
-        {"2025-11-15", "9:00", "0", "Today!"},           // earlier today
-        {"2025-11-10", "", "0", "5 days ago"},
-        {"2025-11-14", "", "0", "1 day ago"},
-        {"2100-01-01", "", "0", " days"},                // far beyond what a 32-bit clock counts in seconds
-        {"next week", "", "0", "Write the date as"},
-        {"2025-13-01", "", "0", "Write the date as"},
+        {"2025-12-25", "", "UTC0", "large center 39 days"},
+        {"2025-11-15", "", "UTC0", "Today!"},
+        {"2025-11-16", "", "<+15>-15", "Today!"},           // fifteen hours ahead it is already tomorrow
+        {"2025-11-16", "9:00", "UTC0", "23h 13m"},
+        {"2025-11-16", "9:00", "CET-1CEST,M3.5.0,M10.5.0/3", "22h 13m"},  // the device's zone, an hour ahead
+        {"2025-11-15", "10:00", "UTC0", "13:20"},
+        {"2025-11-15", "9:00", "UTC0", "Today!"},           // earlier today
+        {"2025-11-10", "", "UTC0", "5 days ago"},
+        {"2025-11-14", "", "UTC0", "1 day ago"},
+        {"2100-01-01", "", "UTC0", " days"},                // far beyond what a 32-bit clock counts in seconds
+        {"next week", "", "UTC0", "Write the date as"},
+        {"2025-13-01", "", "UTC0", "Write the date as"},
     };
     for (const Case& c : cases) {
         Fixture f;
-        CHECK(f.startFile("countdown", {{"offset", c.offset}}, {{"what", "Launch"}, {"date", c.date}, {"time", c.time}}));
+        f.services.zone = c.zone;
+        CHECK(f.startFile("countdown", {}, {{"what", "Launch"}, {"date", c.date}, {"time", c.time}}));
         f.draw();
-        if (!f.gfx.drew(c.expect)) printf("  %s %s +%s: expected %s, drew\n%s", c.date, c.time, c.offset, c.expect, f.gfx.dump().c_str());
+        if (!f.gfx.drew(c.expect)) printf("  %s %s in %s: expected %s, drew\n%s", c.date, c.time, c.zone, c.expect, f.gfx.dump().c_str());
         CHECK(f.gfx.drew(c.expect));
         CHECK(f.gfx.drew("small left Launch"));
         CHECK(!f.plugin.failed());
@@ -2304,6 +2416,53 @@ TEST(sample_homey) {
     CHECK(none.startFile("homey"));
     none.draw();
     CHECK(none.gfx.drew("Set the address and the"));
+
+    // The lists behind the Device and Flow settings. Homey says a lot about each
+    // device; only names and rooms are kept.
+    Fixture lists;
+    CHECK(lists.startFile("homey", {{"url", "http://10.0.0.9"}, {"key", "k"}}, {{"device", "abc-123"}}));
+    lists.plugin.choices("listDevices", 1, {"device", {}});
+    CHECK_EQ(lists.services.requests[1].request.url, "http://10.0.0.9/api/manager/devices/device/");
+    CHECK(lists.services.requests[1].request.maxBytes > 48 * 1024);  // `only` allows a large answer
+    lists.respond(1, 200, R"({"d-2":{"id":"d-2","name":"Thermostat","zoneName":"Hall","capabilitiesObj":{"a":{"value":1}}},
+        "d-1":{"id":"d-1","name":"Lamp","capabilitiesObj":{}}})");
+    CHECK_EQ(lists.services.choiceAnswers[0].choices.size(), (size_t)2);
+    CHECK_EQ(lists.services.choiceAnswers[0].choices[0].value, "d-1");
+    CHECK_EQ(lists.services.choiceAnswers[0].choices[1].label, "Thermostat (Hall)");
+    // Which flows: the kind the form's box says, ticked or not, saved or not.
+    lists.plugin.choices("listFlows", 2, {"device", {}});
+    CHECK_EQ(lists.services.requests[2].request.url, "http://10.0.0.9/api/manager/flow/flow/");
+    lists.respond(2, 200, R"({"f-1":{"name":"Good night"}})");
+    CHECK_EQ(lists.services.choiceAnswers[1].choices[0].label, "Good night");
+    lists.plugin.choices("listFlows", 3, {"device", {{"advanced", "true"}}});
+    CHECK_EQ(lists.services.requests[3].request.url, "http://10.0.0.9/api/manager/flow/advancedflow/");
+    lists.respond(3, 401, "");
+    CHECK(contains(lists.services.choiceAnswers[2].error, "refused the API key"));
+}
+
+TEST(sample_reminders_count_down_over_a_clock_change) {
+    Fixture f;
+    f.services.zone = "CET-1CEST,M3.5.0,M10.5.0/3";
+    f.services.epoch = 1774735200;  // Saturday 28 March 2026, 23:00. That night 02:00 becomes 03:00
+    CHECK(f.startFile("reminders", {{"list", "10:30 Stand-up; 23:00 Bed"}}));
+    f.draw();
+    CHECK(f.gfx.drew("large center 10h 30m"));  // not 11h 30m: the night is an hour short
+    CHECK(f.gfx.drew("Tomorrow 10:30  Stand-up"));
+    f.services.epoch -= 3600;  // 22:00: bed time is today, an hour away
+    f.draw();
+    CHECK(f.gfx.drew("large center 1h 00m"));
+    CHECK(f.gfx.drew("center 23:00  Bed"));
+
+    Fixture doorbell;
+    CHECK(doorbell.startFile("doorbell"));
+    CHECK(doorbell.plugin.message("1", R"({"text":"One","color":"GREEN"})"));
+    CHECK(doorbell.plugin.message("1", R"({"text":"Two","color":"not-a-colour"})"));
+    CHECK(doorbell.plugin.message("1", R"({"text":"Three","color":["red"]})"));
+    doorbell.draw();
+    CHECK(!doorbell.plugin.failed());
+    CHECK(doorbell.gfx.drew("#2ecc71 tiny left One"));   // a colour gfx knows is used
+    CHECK(doorbell.gfx.drew("#ffffff tiny left Two"));   // one it does not know is not
+    CHECK(doorbell.gfx.drew("center Three"));
 }
 
 TEST(sample_trains) {
@@ -2865,6 +3024,1528 @@ TEST(sample_blocks) {
     CHECK(!f.plugin.failed());
     CHECK(atoi(f.services.stored["best"].c_str()) > 0);
     CHECK(f.plugin.memoryUsed() < 96 * 1024);
+}
+
+// ------------------------------------------------------------ plugin API v2
+
+TEST(time_zones_parse) {
+    TimeZone zone;
+    CHECK(zone.parse("UTC0"));
+    CHECK_EQ(zone.offsetAt(1763236140), 0);
+    CHECK(zone.parse("CET-1CEST,M3.5.0,M10.5.0/3"));
+    CHECK(zone.parse("EST5EDT,M3.2.0,M11.1.0"));
+    CHECK(zone.parse("EST5EDT"));                       // no rules: the American ones
+    CHECK(zone.parse("<+0545>-5:45"));                  // Kathmandu
+    CHECK_EQ(zone.offsetAt(0), 5 * 3600 + 45 * 60);
+    CHECK(zone.parse("<-03>3"));
+    CHECK_EQ(zone.offsetAt(0), -3 * 3600);
+    CHECK(zone.parse("NZST-12NZDT,M9.5.0,M4.1.0/3"));
+    CHECK(zone.parse("IST-2IDT,M3.4.4/26,M10.5.0"));    // Jerusalem: a time past midnight
+    CHECK(zone.parse("<-02>2<-01>,M3.5.0/-1,M10.5.0/0"));  // Nuuk: a negative time
+    CHECK(zone.parse("WGT3WGST,J60/2,J300/2"));
+    CHECK(zone.parse("AAA3BBB,59,300"));
+
+    const char* const bad[] = {"", "Europe/Brussels", "CET", "C-1", "CET-1CEST,M3.5.0", "CET-1CEST,M13.5.0,M10.5.0",
+                               "CET-1CEST,M3.6.0,M10.5.0", "CET-1CEST,M3.5.7,M10.5.0", "CET-99", "CET-1 junk",
+                               "<+01-1", "CET-1CEST,J0,J5", "CET-1:99"};
+    for (const char* text : bad) {
+        if (zone.parse(text)) printf("  parsed \"%s\"\n", text);
+        CHECK(!zone.parse(text));
+        CHECK_EQ(zone.offsetAt(1763236140), 0);  // a zone that did not parse is UTC
+    }
+    CHECK(!zone.parse(nullptr));
+}
+
+TEST(every_time_zone_the_web_page_offers_is_understood) {
+    // html/portal.js holds the list people pick from. The device gets the POSIX string.
+    const std::string page = readFile(g_pluginDir + "/../html/portal.js");
+    const size_t start = page.find("// <timezones>");
+    const size_t end = page.find("// </timezones>");
+    CHECK(start != std::string::npos && end != std::string::npos);
+    if (start == std::string::npos || end == std::string::npos) return;
+    int zones = 0, withSummerTime = 0;
+    size_t at = start;
+    for (;;) {
+        // Lines look like "Europe/Brussels":"CET-1CEST,M3.5.0,M10.5.0/3",
+        const size_t separator = page.find("\":\"", at);
+        if (separator == std::string::npos || separator > end) break;
+        const size_t nameStart = page.rfind('"', separator - 1) + 1;
+        const size_t valueEnd = page.find('"', separator + 3);
+        const std::string name = page.substr(nameStart, separator - nameStart);
+        const std::string posix = page.substr(separator + 3, valueEnd - separator - 3);
+        at = valueEnd;
+        TimeZone zone;
+        if (!zone.parse(posix.c_str())) printf("  %s: \"%s\" does not parse\n", name.c_str(), posix.c_str());
+        CHECK(zone.parse(posix.c_str()));
+        CHECK(posix.size() <= 64);  // what the device accepts
+        const int32_t winter = zone.offsetAt(1736899200), summer = zone.offsetAt(1752537600);
+        CHECK(winter >= -12 * 3600 && winter <= 14 * 3600);
+        if (winter != summer) withSummerTime++;
+        zones++;
+        if (name == "Europe/Brussels") CHECK_EQ(summer, 7200);
+        if (name == "Asia/Kolkata") CHECK_EQ(summer, 19800);
+        if (name == "America/Los_Angeles") CHECK_EQ(winter, -8 * 3600);
+        if (name == "Pacific/Chatham") CHECK_EQ(winter, 13 * 3600 + 45 * 60);
+    }
+    CHECK(zones > 300);
+    CHECK(withSummerTime > 50);
+}
+
+TEST(summer_time_starts_and_ends_on_the_right_second) {
+    TimeZone brussels;
+    CHECK(brussels.parse("CET-1CEST,M3.5.0,M10.5.0/3"));
+    bool dst = true;
+    // 2025: summer time from 30 March 01:00 UTC to 26 October 01:00 UTC.
+    CHECK_EQ(brussels.offsetAt(1743296399, &dst), 3600);
+    CHECK(!dst);
+    CHECK_EQ(brussels.offsetAt(1743296400, &dst), 7200);
+    CHECK(dst);
+    CHECK_EQ(brussels.offsetAt(1761440399, &dst), 7200);
+    CHECK_EQ(brussels.offsetAt(1761440400, &dst), 3600);
+    CHECK(!dst);
+    // 2024 was a leap year; the last Sundays fell on 31 March and 27 October.
+    CHECK_EQ(brussels.offsetAt(1711846799), 3600);
+    CHECK_EQ(brussels.offsetAt(1711846800), 7200);
+    CHECK_EQ(brussels.offsetAt(1729990799), 7200);
+    CHECK_EQ(brussels.offsetAt(1729990800), 3600);
+
+    TimeZone newYork;
+    CHECK(newYork.parse("EST5EDT,M3.2.0,M11.1.0"));
+    // 2025: from 9 March 07:00 UTC to 2 November 06:00 UTC.
+    CHECK_EQ(newYork.offsetAt(1741503599), -5 * 3600);
+    CHECK_EQ(newYork.offsetAt(1741503600), -4 * 3600);
+    CHECK_EQ(newYork.offsetAt(1762063199), -4 * 3600);
+    CHECK_EQ(newYork.offsetAt(1762063200), -5 * 3600);
+    TimeZone newYorkShort;
+    CHECK(newYorkShort.parse("EST5EDT"));
+    CHECK_EQ(newYorkShort.offsetAt(1741503600), -4 * 3600);
+
+    // South of the equator summer runs over new year.
+    TimeZone sydney;
+    CHECK(sydney.parse("AEST-10AEDT,M10.1.0,M4.1.0/3"));
+    CHECK_EQ(sydney.offsetAt(1736899200, &dst), 11 * 3600);  // 15 January 2025
+    CHECK(dst);
+    CHECK_EQ(sydney.offsetAt(1752537600, &dst), 10 * 3600);  // 15 July 2025
+    CHECK(!dst);
+    // Back to standard time on 6 April 2025 at 03:00 summer time = 5 April 16:00 UTC.
+    CHECK_EQ(sydney.offsetAt(1743868799), 11 * 3600);
+    CHECK_EQ(sydney.offsetAt(1743868800), 10 * 3600);
+    // And forward again on 5 October 2025 at 02:00 standard time = 4 October 16:00 UTC.
+    CHECK_EQ(sydney.offsetAt(1759593599), 10 * 3600);
+    CHECK_EQ(sydney.offsetAt(1759593600), 11 * 3600);
+
+    // Day-of-year rules. J60 is 1 March in every year; 59 (counted from 0) is
+    // 29 February in a leap year.
+    TimeZone julian;
+    CHECK(julian.parse("AAA0BBB,J60/0,J300/0"));
+    CHECK_EQ(julian.offsetAt(1709251199), 0);     // 29 February 2024, 23:59:59
+    CHECK_EQ(julian.offsetAt(1709251200), 3600);  // 1 March 2024
+    TimeZone counted;
+    CHECK(counted.parse("AAA0BBB,59/0,300/0"));
+    CHECK_EQ(counted.offsetAt(1709164799), 0);     // 28 February 2024, 23:59:59
+    CHECK_EQ(counted.offsetAt(1709164800), 3600);  // 29 February 2024
+}
+
+TEST(civil_time_knows_the_calendar) {
+    TimeZone utc;
+    CivilTime t = utc.toCivil(0);
+    CHECK_EQ(t.year, 1970);
+    CHECK_EQ(t.weekday, 4);  // a Thursday
+    CHECK_EQ(t.yearDay, 0);
+    t = utc.toCivil(1709208000);  // 29 February 2024, 12:00
+    CHECK_EQ(t.month, 2);
+    CHECK_EQ(t.day, 29);
+    CHECK_EQ(t.yearDay, 59);
+    CHECK_EQ(t.weekday, 4);
+    t = utc.toCivil(-1);  // the second before 1970
+    CHECK_EQ(t.year, 1969);
+    CHECK_EQ(t.month, 12);
+    CHECK_EQ(t.day, 31);
+    CHECK_EQ(t.hour, 23);
+    CHECK_EQ(t.second, 59);
+    CHECK_EQ(t.weekday, 3);
+    t = utc.toCivil(4102444800LL);  // 1 January 2100: past what 32 bits hold
+    CHECK_EQ(t.year, 2100);
+    CHECK_EQ(t.weekday, 5);
+    CHECK_EQ(TimeZone::daysFromCivil(2000, 3, 1), (int64_t)11017);
+
+    TimeZone brussels;
+    brussels.parse("CET-1CEST,M3.5.0,M10.5.0/3");
+    t = brussels.toCivil(1752522540);  // 14 July 2025, 19:49 UTC
+    CHECK_EQ(formatTime("%Y-%m-%d %H:%M:%S %Z %z", t), "2025-07-14 21:49:00 CEST +0200");
+    CHECK_EQ(formatTime("%a %A %b %B %j %e|%-d|%I %p|%-I|%y|%F %T|%R|100%%|%Q|%", t),
+             "Mon Monday Jul July 195 14|14|09 PM|9|25|2025-07-14 21:49:00|21:49|100%|%Q|%");
+    t = brussels.toCivil(1763164800);  // 15 November 2025, 00:00 UTC
+    CHECK_EQ(formatTime("%I:%M %p %Z", t), "01:00 AM CET");
+    TimeZone newfoundland;
+    newfoundland.parse("NST3:30NDT,M3.2.0,M11.1.0");
+    CHECK_EQ(formatTime("%z", newfoundland.toCivil(1763164800)), "-0330");
+    CHECK_EQ(formatTime(std::string(600, 'x').c_str(), t).size(), (size_t)256);
+}
+
+TEST(plugins_tell_local_time) {
+    Fixture f;
+    f.services.zone = "CET-1CEST,M3.5.0,M10.5.0/3";
+    f.services.epoch = 1752522540;  // Monday 14 July 2025, 19:49 UTC
+    CHECK(f.start(R"(
+        local d = time.date()
+        print(d.year, d.month, d.day, d.hour, d.min, d.sec, d.wday, d.yday, d.isdst, d.offset, d.zone)
+        local w = time.date(1763236140)                      -- a moment in winter
+        print(w.hour, w.isdst, w.offset, w.wday)
+        local ny = time.date(1763236140, "EST5EDT,M3.2.0,M11.1.0")
+        print(ny.hour, ny.offset, ny.zone)
+        print(time.date(nil, "").hour)                       -- "" is the device's zone, as an empty setting is
+        print(time.format("%H:%M %A"), time.format("%H:%M", 1763236140), time.format("%H:%M", 0, "UTC0"))
+        print(time.zone(), time.offset(), time.offset(1763236140), time.offset(nil, "<+0545>-5:45"))
+        print(time.date(4102444800.0, "UTC0").year)          -- past 2038, as a float
+    )"));
+    CHECK(f.services.logged("2025 7 14 21 49 0 2 195 true 7200 CEST"));
+    CHECK(f.services.logged("20 false 3600 7"));
+    CHECK(f.services.logged("14 -18000 EST"));
+    CHECK(f.services.logs.at(3) == "21");
+    CHECK(f.services.logged("21:49 Monday 20:49 00:00"));
+    CHECK(f.services.logged("CET-1CEST,M3.5.0,M10.5.0/3 7200 3600 20700"));
+    CHECK(f.services.logged("2100"));
+
+    // Before the clock is set there is no "now" to describe.
+    Fixture unset;
+    unset.services.epoch = 0;
+    CHECK(unset.start("print(time.date(), time.format('%H:%M'), time.offset(), time.date(60).min)"));
+    CHECK(unset.services.logged("nil nil 0 1"));
+
+    // A device zone that makes no sense reads as UTC; one a plugin passes is its mistake.
+    Fixture odd;
+    odd.services.zone = "Europe/Brussels";
+    CHECK(odd.start("print(time.date(3600).hour, time.zone())"));
+    CHECK(odd.services.logged("1 Europe/Brussels"));
+    Fixture empty;
+    empty.services.zone = "";
+    CHECK(empty.start("print(time.zone(), time.offset())"));
+    CHECK(empty.services.logged("UTC0 0"));
+    Fixture wrong;
+    CHECK(!wrong.start("time.date(0, 'Europe/Brussels')"));
+    CHECK(contains(wrong.plugin.error(), "not a POSIX time zone"));
+    Fixture huge;
+    CHECK(!huge.start("time.date(1e18)"));
+    CHECK(contains(huge.plugin.error(), "not a time"));
+}
+
+TEST(a_clock_reading_becomes_a_moment) {
+    TimeZone brussels;
+    brussels.parse("CET-1CEST,M3.5.0,M10.5.0/3");
+    CHECK_EQ(brussels.fromCivil(2025, 7, 14, 21, 49, 0), (int64_t)1752522540);   // summer
+    CHECK_EQ(brussels.fromCivil(2025, 11, 15, 20, 49, 0), (int64_t)1763236140);  // winter
+    // 29 March 2026: 02:00 becomes 03:00. Half past two never happens; it is read as half past three.
+    CHECK_EQ(brussels.fromCivil(2026, 3, 29, 1, 59, 59), (int64_t)1774747800 - 1801);
+    CHECK_EQ(brussels.fromCivil(2026, 3, 29, 2, 30, 0), (int64_t)1774747800);
+    CHECK_EQ(brussels.fromCivil(2026, 3, 29, 3, 30, 0), (int64_t)1774747800);
+    // 25 October 2026: 03:00 becomes 02:00 again. Half past two happens twice; the first one, unless told otherwise.
+    CHECK_EQ(brussels.fromCivil(2026, 10, 25, 2, 30, 0), (int64_t)1792888200);
+    CHECK_EQ(brussels.fromCivil(2026, 10, 25, 2, 30, 0, 1), (int64_t)1792888200);
+    CHECK_EQ(brussels.fromCivil(2026, 10, 25, 2, 30, 0, 0), (int64_t)1792891800);
+    CHECK_EQ(brussels.fromCivil(2026, 10, 25, 3, 0, 0), (int64_t)1792891800 + 1800);
+    // Fields past their range carry over.
+    CHECK_EQ(brussels.fromCivil(2025, 12, 32, 0, 0, 0), (int64_t)1767222000);  // 1 January 2026, 00:00 CET
+    CHECK_EQ(brussels.fromCivil(2025, 13, 1, 0, 0, 0), (int64_t)1767222000);
+    CHECK_EQ(brussels.fromCivil(2026, 1, 1, -1, 60, 0), (int64_t)1767222000);
+    CHECK_EQ(brussels.fromCivil(2027, 0, 1, 0, 0, 0), (int64_t)1796079600);    // month 0: December the year before
+    // South of the equator, where summer runs over new year, and a zone without summer time.
+    TimeZone sydney;
+    sydney.parse("AEST-10AEDT,M10.1.0,M4.1.0/3");
+    CHECK_EQ(sydney.fromCivil(2026, 1, 15, 0, 0, 0), (int64_t)1768395600);
+    TimeZone utc;
+    CHECK_EQ(utc.fromCivil(2100, 1, 1, 0, 0, 0), (int64_t)4102444800LL);
+    // There and back, an hour at a time over a whole year, both changes included.
+    for (int64_t t = 1767222000; t < 1767222000 + 366 * 86400; t += 3600) {
+        const CivilTime c = brussels.toCivil(t);
+        CHECK_EQ(brussels.fromCivil(c.year, c.month, c.day, c.hour, c.minute, c.second, c.dst ? 1 : 0), t);
+    }
+
+    Fixture f;
+    f.services.zone = "CET-1CEST,M3.5.0,M10.5.0/3";
+    CHECK(f.start(R"(
+        print(time.make({ year = 2025, month = 7, day = 14, hour = 21, min = 49 }))
+        print(time.make({ year = 2025, month = 7, day = 14 }))                       -- midnight when no time is given
+        print(time.make({ year = 2025, month = 7, day = 14, hour = 15, min = 49 }, "EST5EDT,M3.2.0,M11.1.0"))
+        print(time.make({ year = 2026, month = 10, day = 25, hour = 2, min = 30 }),
+              time.make({ year = 2026, month = 10, day = 25, hour = 2, min = 30, isdst = false }))
+        print(time.make({ year = 2026, month = 3, day = 29, hour = 2, min = 30 }))
+        local d = time.date(1763236140)
+        print(time.make(d) == 1763236140, math.type(time.make(d)))                   -- what time.date gives goes back in
+        local far = time.make({ year = 2100, month = 1, day = 1 }, "UTC0")
+        print(math.type(far), time.date(far, "UTC0").year)                           -- past 2038: a float, as time.date takes
+        print(time.make({ year = 2025, month = 12, day = 31 + 1, hour = 9.9 }))      -- carried over; fractions are dropped
+    )"));
+    CHECK(f.services.logged("1752522540"));
+    CHECK(f.services.logged("1752444000"));
+    CHECK_EQ(f.services.logs.at(2), "1752522540");
+    CHECK(f.services.logged("1792888200 1792891800"));
+    CHECK(f.services.logged("1774747800"));
+    CHECK(f.services.logged("true integer"));
+    CHECK(f.services.logged("float 2100"));
+    CHECK(f.services.logged("1767254400"));
+
+    const std::pair<const char*, const char*> wrong[] = {
+        {"time.make({ year = 2025, month = 7 })", "`day` is missing"},
+        {"time.make({ year = 2025, month = 7, day = 'x' })", "`day` is not a number"},
+        {"time.make({ year = 2025, month = 7, day = 1e9 })", "`day` is out of range"},
+        {"time.make({ year = 99999, month = 1, day = 1 })", "outside the years"},
+        {"time.make({ year = 2025, month = 7, day = 1 }, 'Europe/Brussels')", "not a POSIX time zone"},
+        {"time.make(1752522540)", "table expected"},
+    };
+    for (const auto& test : wrong) {
+        Fixture bad;
+        CHECK(!bad.start(test.first));
+        if (!contains(bad.plugin.error(), test.second)) printf("  %s: %s\n", test.first, bad.plugin.error().c_str());
+        CHECK(contains(bad.plugin.error(), test.second));
+    }
+}
+
+TEST(a_setting_can_be_a_time_zone) {
+    Fixture f;
+    CHECK(f.start(R"(
+        config = { zone = { label = "Time zone", type = "timezone" }, city = "Antwerp",
+                   count = { type = "timezone", default = 3 } }
+        cards = { city = { config = { tz = { label = "Zone", type = "timezone", default = "" } },
+                           draw = function(card) ui.big(time.format("%H:%M", 1763236140, card.config.tz)) end } }
+    )", {}));
+    const auto& schema = f.plugin.configSchema();
+    CHECK_EQ(schema.size(), (size_t)3);
+    for (const auto& field : schema) {
+        if (field.key == "zone") CHECK_EQ(field.type, "timezone");
+        if (field.key == "city") CHECK_EQ(field.type, "string");
+        if (field.key == "count") CHECK_EQ(field.type, "number");  // a time zone is text
+    }
+    CHECK_EQ(f.plugin.kinds()[0].config[0].type, "timezone");
+    f.services.zone = "CET-1CEST,M3.5.0,M10.5.0/3";
+    f.draw();
+    CHECK(f.gfx.drew("20:49"));  // empty: the device's zone
+    f.plugin.addCard("2", "city", {{"tz", "JST-9"}}, f.gfx);
+    f.gfx.calls.clear();
+    f.plugin.draw("2");
+    CHECK(f.gfx.drew("04:49"));
+}
+
+TEST(http_request_takes_every_method) {
+    Fixture f;
+    CHECK(f.start(R"(
+        local function cb(res) print("answer", res.status, res.body) end
+        http.put("https://a.example/1", { on = true }, cb)
+        http.patch("https://a.example/2", "raw", { headers = { ["X-Key"] = "k" }, insecure = true }, cb)
+        http.delete("https://a.example/3", cb)
+        http.delete("https://a.example/4", { timeout = 5 }, cb)
+        http.request({ url = "https://a.example/5", method = "head" }, cb)
+        http.request({ url = "http://a.example/6", method = "POST", body = { a = 1 }, timeout = 3,
+                       headers = { Accept = "text/plain" }, insecure = true }, cb)
+        http.request({ url = "https://a.example/7" }, cb)
+        http.request({ url = "https://a.example/8", method = "DELETE", body = "gone" }, cb)
+        http.request({ url = "https://a.example/9", method = "GET", body = "ignored", only = { "a" } }, cb)
+    )"));
+    const auto& r = f.services.requests;
+    CHECK_EQ(r.size(), (size_t)9);
+    CHECK_EQ(r[0].request.method, "PUT");
+    CHECK_EQ(r[0].request.body, "{\"on\":true}");
+    CHECK(hasHeader(r[0].request, "Content-Type", "application/json"));
+    CHECK(!r[0].request.insecure);  // certificates are checked unless the plugin says otherwise
+    CHECK_EQ(r[1].request.method, "PATCH");
+    CHECK_EQ(r[1].request.body, "raw");
+    CHECK(hasHeader(r[1].request, "X-Key", "k"));
+    CHECK(r[1].request.insecure);
+    CHECK_EQ(r[2].request.method, "DELETE");
+    CHECK_EQ(r[2].request.body, "");
+    CHECK_EQ(r[3].request.timeoutMs, (uint32_t)5000);
+    CHECK_EQ(r[4].request.method, "HEAD");
+    CHECK_EQ(r[5].request.method, "POST");
+    CHECK_EQ(r[5].request.body, "{\"a\":1}");
+    CHECK_EQ(r[5].request.timeoutMs, (uint32_t)3000);
+    CHECK(hasHeader(r[5].request, "Accept", "text/plain"));
+    CHECK(r[5].request.insecure);
+    CHECK_EQ(r[6].request.method, "GET");
+    CHECK_EQ(r[7].request.body, "gone");
+    CHECK_EQ(r[8].request.body, "");
+    CHECK_EQ(r[8].request.maxBytes, (size_t)(256 * 1024));
+    CHECK_EQ(r[0].request.imageMaxWidth, 0);
+    f.respond(4, 200, "");
+    CHECK(f.services.logged("answer 200"));
+    CHECK(!f.plugin.failed());
+
+    const char* const bad[] = {
+        "http.request({ method = 'GET' }, function() end)",                         // no url
+        "http.request({ url = 'https://a.example', method = 'TRACE' }, print)",
+        "http.request({ url = 'https://a.example', method = 5 }, print)",
+        "http.request({ url = 'ftp://a.example' }, print)",
+        "http.request({ url = 'https://a.example' })",                              // no callback
+        "http.request('https://a.example', print)",
+        "http.request({ url = 'https://a.example', method = 'PUT', body = 5 }, print)",
+        "http.put('https://a.example', print)",                                     // no body
+    };
+    for (const char* source : bad) {
+        Fixture broken;
+        if (broken.start(source)) printf("  accepted: %s\n", source);
+        CHECK(broken.plugin.failed());
+        CHECK_EQ(broken.services.requests.size(), (size_t)0);
+    }
+}
+
+TEST(http_answers_come_with_their_headers) {
+    Fixture f;
+    CHECK(f.start(R"(
+        http.get("https://a.example", function(res)
+          local names = {}
+          for name in pairs(res.headers) do names[#names + 1] = name end
+          table.sort(names)
+          print(table.concat(names, " "))
+          print(res.headers.etag, res.headers["x-ratelimit-remaining"], res.headers["set-cookie"], res.headers.ETag)
+        end)
+        http.get("https://b.example", function(res) print("none", type(res.headers), next(res.headers)) end)
+        http.get("https://c.example", function(res)
+          local total = 0
+          for name, value in pairs(res.headers) do total = total + #name + #value end
+          print("kept", total, res.headers.last)
+        end)
+    )"));
+    HttpResponse response;
+    response.status = 200;
+    response.headers = {{"ETag", "\"abc\""}, {"X-RateLimit-Remaining", "59"}, {"Set-Cookie", "a=1"}, {"set-cookie", "b=2"},
+                        {"", "nameless"}};
+    f.plugin.httpResponse(f.services.requests[0].id, response);
+    CHECK(f.services.logged("etag set-cookie x-ratelimit-remaining"));
+    CHECK(f.services.logged("\"abc\" 59 a=1, b=2 nil"));
+
+    f.respond(1, 0, "", "no WiFi");
+    CHECK(f.services.logged("none table nil"));
+
+    // Far too many headers: about 2 KB of them are kept.
+    HttpResponse flood;
+    flood.status = 200;
+    for (int i = 0; i < 200; i++) flood.headers.emplace_back("X-H" + std::to_string(i), std::string(40, 'v'));
+    flood.headers.emplace_back("Last", std::string(5000, 'z'));
+    f.plugin.httpResponse(f.services.requests[2].id, flood);
+    const std::string& line = f.services.logs.back();
+    CHECK(contains(line, "kept "));
+    const int kept = atoi(line.c_str() + 5);
+    CHECK(kept > 1900 && kept <= 2048);
+    CHECK(contains(line, " nil"));
+    CHECK(!f.plugin.failed());
+}
+
+TEST(net_reports_the_connection) {
+    Fixture offline;
+    CHECK(offline.start("print(net.online(), net.rssi(), net.ssid(), net.ip())"));
+    CHECK(offline.services.logged("false nil nil nil"));
+
+    Fixture f;
+    f.services.net.online = true;
+    f.services.net.rssi = -61;
+    f.services.net.ssid = "Hedgehog";
+    f.services.net.ip = "192.168.1.20";
+    CHECK(f.start("print(net.online(), net.rssi(), net.ssid(), net.ip())"));
+    CHECK(f.services.logged("true -61 Hedgehog 192.168.1.20"));
+}
+
+TEST(random_numbers_start_from_the_device) {
+    const char* source = "print(math.random(1000000), math.random(1000000), math.random(1000000))";
+    Fixture one, same, other;
+    other.services.entropyCalls = 7;  // another device, or another boot
+    CHECK(one.start(source));
+    CHECK(same.start(source));
+    CHECK(other.start(source));
+    CHECK_EQ(one.services.logs.at(0), same.services.logs.at(0));
+    CHECK(one.services.logs.at(0) != other.services.logs.at(0));
+    CHECK(one.services.entropyCalls >= 2);
+}
+
+TEST(draws_rings_arcs_and_shapes) {
+    Fixture f;
+    CHECK(f.start(R"(
+        function draw()
+          gfx.circle(50, 50, 20, "red")              -- filled, as always
+          gfx.circle(50, 50, 20, "red", 3)           -- a ring
+          gfx.circle(50, 50, 20, nil, 99)            -- never thicker than the radius
+          gfx.circle(50, 50, 20, "red", 0)           -- nothing
+          gfx.arc(100, 60, 40, 0, 90, "#00ff00", 6)
+          gfx.arc(100, 60, 40, 350, 10)              -- over the top, a filled slice
+          gfx.arc(100, 60, 40, -90, 45.4, "blue", 2)
+          gfx.arc(100, 60, 40, 720, 730, "blue", 2)
+          gfx.arc(100, 60, 40, 0, 360, "blue", 2)
+          gfx.arc(100, 60, 40, 10, 900, "blue", 2)   -- more than once round: the whole ring
+          gfx.arc(100, 60, 40, 30, 30, "blue", 2)    -- nothing
+          gfx.arc(100, 60, 0, 0, 90)                 -- nothing
+          gfx.arc(100, 60, 40, 180, 90, "white", 1)  -- three quarters, the long way
+          gfx.poly({ 10, 10, 60, 20.4, 30, 70.6, 5, 40 }, "yellow")
+          gfx.triangle(1, 2, 30, 4, 15, 60, "#abc")
+          gfx.triangle(1, 2, 30, 4, 15, 60)
+          gfx.text(4, 4, "tiny text", "white", "tiny", "right")
+        end
+        print(gfx.textHeight("tiny"), gfx.textWidth("abc", "tiny"))
+    )"));
+    f.draw();
+    CHECK(f.gfx.drew("rect 30,30 41x41 #e74c3c r21"));
+    CHECK(f.gfx.drew("arc 50,50 r20 0-360 #e74c3c w3"));
+    CHECK(f.gfx.drew("arc 50,50 r20 0-360 #ffffff w20"));
+    CHECK(f.gfx.drew("arc 100,60 r40 0-90 #00ff00 w6"));
+    CHECK(f.gfx.drew("arc 100,60 r40 350-370 #ffffff w40"));
+    CHECK(f.gfx.drew("arc 100,60 r40 270-405 #3498db w2"));
+    CHECK(f.gfx.drew("arc 100,60 r40 0-10 #3498db w2"));
+    CHECK(f.gfx.drew("arc 100,60 r40 0-360 #3498db w2"));
+    CHECK(f.gfx.drew("arc 100,60 r40 10-370 #3498db w2"));
+    CHECK(f.gfx.drew("arc 100,60 r40 180-450 #ffffff w1"));
+    int arcs = 0;
+    for (const std::string& call : f.gfx.calls) arcs += call.compare(0, 4, "arc ") == 0;
+    CHECK_EQ(arcs, 9);
+    CHECK(f.gfx.drew("poly 10,10 60,20 30,71 5,40 #f1c40f"));
+    CHECK(f.gfx.drew("poly 1,2 30,4 15,60 #aabbcc"));
+    CHECK(f.gfx.drew("poly 1,2 30,4 15,60 #ffffff"));
+    CHECK(f.gfx.drew("text 4,4 #ffffff tiny right tiny text"));
+    CHECK(f.services.logged("12 15"));
+    CHECK(!f.plugin.failed());
+
+    const char* const bad[] = {
+        "function draw() gfx.poly({ 1, 2, 3, 4 }) end",             // two points
+        "function draw() gfx.poly({ 1, 2, 3, 4, 5, 6, 7 }) end",    // half a point
+        "function draw() gfx.poly({ 1, 2, 3, 4, 5, 'x' }) end",
+        "function draw() gfx.poly(5) end",
+        "function draw() local p = {} for i = 1, 130 do p[i] = i end gfx.poly(p) end",
+        "function draw() gfx.triangle(1, 2, 3, 4, 5) end",
+        "function draw() gfx.arc(1, 2, 3, 0, 1 / 0) end",
+        "function draw() gfx.arc(1, 2, 3) end",
+        "function draw() gfx.text(1, 1, 'x', 'white', 'huge') end",
+        "gfx.arc(1, 2, 3, 0, 90)",                                  // outside draw()
+        "gfx.poly({ 1, 2, 3, 4, 5, 6 })",
+    };
+    for (const char* source : bad) {
+        Fixture broken;
+        broken.start(source);
+        broken.draw();
+        if (!broken.plugin.failed()) printf("  accepted: %s\n", source);
+        CHECK(broken.plugin.failed());
+    }
+}
+
+HttpResponse picture(int width, int height, uint32_t first = 0xFF112233, uint32_t last = 0xFF445566) {
+    HttpResponse response;
+    response.status = 200;
+    response.imageWidth = width;
+    response.imageHeight = height;
+    response.image.assign((size_t)width * height, 0xFF000000);
+    response.image.front() = first;
+    response.image.back() = last;
+    return response;
+}
+
+TEST(fetches_pictures_from_the_network) {
+    Fixture f;
+    CHECK(f.start(R"(
+        local art
+        gfx.fetchImage("https://img.example/cover.jpg", { width = 64, height = 48, insecure = true,
+                                                          headers = { Accept = "image/*" }, timeout = 4 },
+          function(image, err)
+            art = image
+            print("got", image and image.width, image and image.height, err)
+          end)
+        gfx.fetchImage("https://img.example/missing.png", function(image, err) print("second", image, err) end)
+        gfx.fetchImage("https://img.example/text", { width = 9999, height = 0 }, function(image, err) print("third", image, err) end)
+        gfx.fetchImage("https://img.example/down", function(image, err) print("fourth", image, err) end)
+        function draw()
+          if art then gfx.draw(art, 10, 20) end
+        end
+        local stale
+        function button(name)
+          if name == "center" then
+            stale = art
+            gfx.release(art)
+            gfx.release(art)   -- twice is fine
+            art = nil
+          else
+            art = stale
+          end
+          return true
+        end
+    )"));
+    const auto& r = f.services.requests;
+    CHECK_EQ(r.size(), (size_t)4);
+    CHECK_EQ(r[0].request.method, "GET");
+    CHECK_EQ(r[0].request.imageMaxWidth, 64);
+    CHECK_EQ(r[0].request.imageMaxHeight, 48);
+    CHECK(r[0].request.insecure);
+    CHECK(hasHeader(r[0].request, "Accept", "image/*"));
+    CHECK_EQ(r[0].request.timeoutMs, (uint32_t)4000);
+    CHECK_EQ(r[0].request.maxBytes, (size_t)(256 * 1024));
+    CHECK_EQ(r[1].request.imageMaxWidth, 240);  // no size asked for: whatever fits the largest picture
+    CHECK_EQ(r[1].request.imageMaxHeight, 240);
+    CHECK_EQ(r[2].request.imageMaxWidth, 240);
+    CHECK_EQ(r[2].request.imageMaxHeight, 1);
+
+    f.plugin.httpResponse(r[0].id, picture(64, 48));
+    CHECK(f.services.logged("got 64 48 nil"));
+    CHECK_EQ(f.plugin.imageBytesUsed(), (size_t)(64 * 48 * 4));
+    CHECK(f.needsDraw());
+    f.draw();
+    CHECK(f.gfx.drew("image 10,20 64x48 x1 ff112233..ff445566"));
+
+    f.respond(1, 404, "not here");
+    CHECK(f.services.logged("second nil HTTP 404"));
+    HttpResponse notAPicture;
+    notAPicture.status = 200;
+    notAPicture.error = "not a PNG or JPEG";
+    f.plugin.httpResponse(r[2].id, notAPicture);
+    CHECK(f.services.logged("third nil not a PNG or JPEG"));
+    f.respond(3, 0, "", "no WiFi");
+    CHECK(f.services.logged("fourth nil no WiFi"));
+    CHECK_EQ(f.plugin.imageBytesUsed(), (size_t)(64 * 48 * 4));
+
+    // Releasing gives the memory back; drawing it afterwards is the plugin's mistake.
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.plugin.imageBytesUsed(), (size_t)0);
+    f.draw();
+    CHECK(!f.plugin.failed());
+    f.button(Button::Up);
+    f.draw();
+    CHECK(f.plugin.failed());
+    CHECK(contains(f.plugin.error(), "released"));
+}
+
+TEST(pictures_count_against_the_image_budget) {
+    LuaPlugin::Limits limits;
+    limits.imageBytes = 100 * 100 * 4 + 16;
+    Fixture f(limits);
+    CHECK(f.start(R"(
+        local held = {}
+        function fetch()
+          gfx.fetchImage("https://img.example/a.png", function(image, err)
+            held[#held + 1] = image
+            print(image and "kept" or err)
+          end)
+        end
+        fetch() fetch()
+        function button(name)
+          if name == "up" then gfx.release(held[1]) fetch() end
+          if name == "down" then gfx.image({ "ab", colors = { a = "red", b = "blue" } }) end
+          return true
+        end
+    )"));
+    HttpResponse first = picture(100, 100);
+    f.plugin.httpResponse(f.services.requests[0].id, std::move(first));
+    CHECK(first.image.empty());  // handed over, not copied
+    CHECK(f.services.logged("kept"));
+    f.plugin.httpResponse(f.services.requests[1].id, picture(100, 100));
+    CHECK(f.services.logged("no room for this picture"));
+    CHECK(!f.plugin.failed());  // the plugin hears about it; it is not a crash
+    CHECK_EQ(f.plugin.imageBytesUsed(), (size_t)(100 * 100 * 4));
+
+    f.button(Button::Down);  // gfx.image shares the budget: 8 bytes still fit
+    CHECK(!f.plugin.failed());
+    f.button(Button::Up);    // let go of the first, fetch again
+    f.services.logs.clear();
+    f.plugin.httpResponse(f.services.requests[2].id, picture(100, 100));
+    CHECK(f.services.logged("kept"));
+
+    // A host that answers with nonsense cannot get it past the runtime.
+    Fixture g;
+    CHECK(g.start("for i = 1, 3 do gfx.fetchImage('https://img.example', function(image, err) print(image, err) end) end"));
+    HttpResponse tooLarge = picture(241, 10);
+    g.plugin.httpResponse(g.services.requests[0].id, tooLarge);
+    HttpResponse lying = picture(10, 10);
+    lying.imageWidth = 20;
+    g.plugin.httpResponse(g.services.requests[1].id, lying);
+    HttpResponse negative = picture(10, 10);
+    negative.imageHeight = -10;
+    g.plugin.httpResponse(g.services.requests[2].id, negative);
+    CHECK_EQ(g.services.logs.size(), (size_t)3);
+    for (const std::string& line : g.services.logs) CHECK(contains(line, "nil not a PNG or JPEG picture"));
+    CHECK_EQ(g.plugin.imageBytesUsed(), (size_t)0);
+
+    // Image requests share the limit on requests in flight, and a crash in the callback is contained.
+    Fixture h;
+    CHECK(!h.start("for i = 1, 13 do gfx.fetchImage('https://img.example', print) end"));
+    CHECK(contains(h.plugin.error(), "too many requests"));
+    Fixture crash;
+    CHECK(crash.start("gfx.fetchImage('https://img.example', function(image) error('boom') end)"));
+    crash.plugin.httpResponse(crash.services.requests[0].id, picture(4, 4));
+    CHECK(crash.plugin.failed());
+    CHECK(contains(crash.plugin.error(), "boom"));
+    CHECK_EQ(crash.plugin.imageBytesUsed(), (size_t)0);
+}
+
+TEST(old_plugins_only_hear_about_presses) {
+    Fixture f;
+    CHECK(f.start(R"(
+        local presses = 0
+        function button(name)
+          presses = presses + 1
+          print(name, presses)
+          return name == "center"
+        end
+    )"));
+    f.services.held[(int)Button::Center] = true;
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Down), false);
+    for (int i = 0; i < 10; i++) {
+        f.services.now += 100;
+        f.tick(f.services.now, true);
+    }
+    f.services.held[(int)Button::Center] = false;
+    f.services.now += 100;
+    f.tick(f.services.now, true);
+    CHECK_EQ(f.services.logs.size(), (size_t)2);  // no "long", no "release": exactly what it saw before
+    CHECK(f.services.logged("down 2"));
+}
+
+TEST(buttons_report_long_and_release) {
+    Fixture f;
+    CHECK(f.start(R"(
+        function button(name, event)
+          print(name, event)
+          return event ~= "press" or name == "center"
+        end
+    )"));
+    // A tap: down and up again within one tick.
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK(f.services.logged("center press"));
+    f.services.now += 33;
+    f.tick(f.services.now, true);
+    CHECK_EQ(f.services.logs.back(), "center release");
+    CHECK_EQ(f.services.logs.size(), (size_t)2);
+
+    // A hold: "long" once, after 600 ms, then "release".
+    f.services.logs.clear();
+    f.services.held[(int)Button::Center] = true;
+    CHECK_EQ(f.button(Button::Center), true);
+    for (int i = 0; i < 5; i++) {
+        f.services.now += 100;
+        f.tick(f.services.now, true);
+    }
+    CHECK_EQ(f.services.logs.size(), (size_t)1);  // 500 ms: not long yet
+    f.services.now += 100;
+    f.tick(f.services.now, true);
+    CHECK_EQ(f.services.logs.back(), "center long");
+    CHECK(f.needsDraw());
+    for (int i = 0; i < 20; i++) {
+        f.services.now += 100;
+        f.tick(f.services.now, true);
+    }
+    CHECK_EQ(f.services.logs.size(), (size_t)2);  // once per hold
+    f.services.held[(int)Button::Center] = false;
+    f.services.now += 100;
+    f.tick(f.services.now, true);
+    CHECK_EQ(f.services.logs.back(), "center release");
+    f.services.now += 100;
+    f.tick(f.services.now, true);
+    CHECK_EQ(f.services.logs.size(), (size_t)3);
+
+    // Navigation goes by the press alone: what "long" and "release" return changes nothing,
+    // and a press the plugin did not use still gets its release.
+    f.services.logs.clear();
+    CHECK_EQ(f.button(Button::Down), false);
+    f.services.now += 33;
+    f.tick(f.services.now, false);  // the stack moved on: the card is hidden
+    CHECK_EQ(f.services.logs.back(), "down release");
+
+    // A hold on a card that left the screen is not "long", but is released.
+    f.services.logs.clear();
+    f.services.held[(int)Button::Up] = true;
+    f.button(Button::Up);
+    for (int i = 0; i < 10; i++) {
+        f.services.now += 100;
+        f.tick(f.services.now, false);
+    }
+    CHECK_EQ(f.services.logs.size(), (size_t)1);
+    f.services.held[(int)Button::Up] = false;
+    f.services.now += 100;
+    f.tick(f.services.now, false);
+    CHECK_EQ(f.services.logs.back(), "up release");
+    CHECK(!f.plugin.failed());
+
+    // A crash in an event is contained like any other.
+    Fixture crash;
+    CHECK(crash.start("function button(name, event) if event == 'release' then error('let go') end end"));
+    crash.button(Button::Center);
+    CHECK(!crash.plugin.failed());
+    crash.services.now += 33;
+    crash.tick(crash.services.now, true);
+    CHECK(crash.plugin.failed());
+    CHECK(contains(crash.plugin.error(), "let go"));
+    crash.services.now += 33;
+    crash.tick(crash.services.now, true);  // and nothing more happens
+}
+
+TEST(cards_of_a_kind_get_button_events_too) {
+    Fixture f;
+    CHECK(f.start(R"(
+        cards = {
+          new = { button = function(card, name, event) print(card.id, name, event) return true end },
+          old = { button = function(card, name) print(card.id, name) return true end },
+        }
+    )"));
+    f.plugin.addCard("2", "old", {}, f.gfx);
+    f.services.held[(int)Button::Center] = true;
+    CHECK_EQ(f.plugin.button("1", Button::Center), true);
+    CHECK_EQ(f.plugin.button("2", Button::Center), true);
+    f.plugin.setVisible("1", true);
+    f.services.now += 700;
+    f.plugin.tick(f.services.now);
+    f.services.held[(int)Button::Center] = false;
+    f.services.now += 33;
+    f.plugin.tick(f.services.now);
+    CHECK_EQ(f.services.logs.size(), (size_t)4);
+    CHECK_EQ(f.services.logs[0], "1 center press");
+    CHECK_EQ(f.services.logs[1], "2 center");
+    CHECK_EQ(f.services.logs[2], "1 center long");
+    CHECK_EQ(f.services.logs[3], "1 center release");
+}
+
+TEST(timers_run_once_or_again_and_again) {
+    Fixture f;
+    CHECK(f.start(R"(
+        local ticks = 0
+        once = timer.after(0.5, function() print("once") end)
+        again = timer.every(0.2, function()
+          ticks = ticks + 1
+          print("tick", ticks)
+          if ticks == 3 then again:cancel() end
+        end)
+        quiet = timer.every(1, function() return false end)   -- nothing it draws changed
+        gone = timer.after(0.1, function() print("never") end)
+        gone:cancel()
+        gone:cancel()                                           -- twice is fine
+        timer.cancel(gone)
+        print(type(once), once.cancel == timer.cancel, getmetatable(once))
+    )"));
+    CHECK(f.services.logged("table true false"));
+    CHECK_EQ(f.plugin.timerCount(), (size_t)3);
+    f.draw();
+    CHECK(!f.needsDraw());
+    pass(f, 0.1f);
+    CHECK_EQ(f.services.logs.size(), (size_t)1);
+    pass(f, 0.1f);
+    CHECK_EQ(f.services.logs.back(), "tick 1");
+    CHECK(f.needsDraw());  // a timer's callback repaints the card
+    f.draw();
+    pass(f, 0.3f);
+    CHECK(f.services.logged("once"));
+    CHECK(f.services.logged("tick 2"));
+    CHECK_EQ(f.plugin.timerCount(), (size_t)2);  // the one-shot is gone
+    pass(f, 0.2f);
+    CHECK(f.services.logged("tick 3"));
+    CHECK_EQ(f.plugin.timerCount(), (size_t)1);
+    f.draw();
+    f.services.logs.clear();
+    pass(f, 3);
+    CHECK_EQ(f.services.logs.size(), (size_t)0);
+    CHECK(!f.services.logged("never"));
+    CHECK(!f.needsDraw());  // the quiet one returned false every time
+    CHECK(!f.plugin.failed());
+}
+
+TEST(timers_keep_running_while_hidden_but_slower) {
+    Fixture f;
+    CHECK(f.start(R"(
+        count = 0
+        timer.every(0.1, function() count = count + 1 end)
+        timer.every(0, function() end)                 -- never faster than ten times a second
+        timer.after(2.5, function() print("after", count) end)
+        function button() print("count", count) count = 0 return true end
+    )"));
+    pass(f, 2, true);
+    f.button(Button::Center);
+    CHECK(f.services.logged("count 20"));
+    pass(f, 5, false);  // hidden: once a second
+    CHECK(f.services.logged("after 1"));  // the one-shot came on time, half a second in
+    f.button(Button::Center);
+    CHECK(f.services.logged("count 5"));
+    pass(f, 1, true);   // and back to full speed
+    f.button(Button::Center);
+    const int count = atoi(f.services.logs.back().c_str() + 6);
+    CHECK(count >= 9 && count <= 10);
+
+    // After a stall the missed rounds are not made up for.
+    f.services.now += 60000;
+    f.tick(f.services.now, true);
+    f.services.now += 33;
+    f.tick(f.services.now, true);
+    f.button(Button::Center);
+    CHECK(f.services.logged("count 1"));
+
+    // The millisecond clock wrapping round does not stop them.
+    Fixture wrap;
+    wrap.services.now = 0xFFFFFF00u;
+    CHECK(wrap.start("timer.every(1, function() print('still here') end)"));
+    pass(wrap, 3);
+    CHECK(wrap.services.now < 0x80000000u);
+    CHECK_EQ(wrap.services.logs.size(), (size_t)3);
+}
+
+TEST(timers_have_limits) {
+    Fixture f;
+    CHECK(f.start(R"(
+        handles = {}
+        for i = 1, 16 do handles[i] = timer.every(60, function() end) end
+        print(pcall(timer.after, 1, function() end))
+        handles[1]:cancel()
+        print(pcall(timer.after, 1, function() end))
+    )"));
+    CHECK(f.services.logged("too many timers (max 16)"));
+    CHECK(contains(f.services.logs.back(), "true "));  // room again after a cancel
+    CHECK_EQ(f.plugin.timerCount(), (size_t)16);
+
+    const char* const bad[] = {"timer.after(1)", "timer.every('soon', print)", "timer.after(1, 'x')", "timer.cancel(5)"};
+    for (const char* source : bad) {
+        Fixture broken;
+        CHECK(!broken.start(source));
+    }
+    Fixture forgiving;
+    CHECK(forgiving.start("timer.after(-5, print) timer.after(0/0, print) timer.after(1e12, print) timer.cancel({})"));
+    CHECK_EQ(forgiving.plugin.timerCount(), (size_t)3);
+
+    // A timer that crashes or never returns takes the plugin down, not the device.
+    Fixture crash;
+    CHECK(crash.start("timer.after(0.1, function() error('timer broke') end) function draw() ui.big('fine') end"));
+    pass(crash, 0.3f);
+    CHECK(crash.plugin.failed());
+    CHECK(contains(crash.plugin.error(), "timer broke"));
+    crash.draw();
+    CHECK(crash.gfx.drew("crashed"));
+
+    Fixture spin;
+    spin.services.advancePerCall = 1;
+    CHECK(spin.start("timer.after(0.1, function() while true do end end)"));
+    pass(spin, 0.3f);
+    CHECK(spin.plugin.failed());
+    CHECK(contains(spin.plugin.error(), "took too long"));
+
+    // Timers end with the program that made them.
+    Fixture restart;
+    CHECK(restart.start("timer.every(0.1, function() print('old') end)"));
+    CHECK(restart.start("x = 1"));
+    CHECK_EQ(restart.plugin.timerCount(), (size_t)0);
+    pass(restart, 1);
+    CHECK(!restart.services.logged("old"));
+
+    // A callback can start and cancel timers, its own included.
+    Fixture chain;
+    CHECK(chain.start(R"(
+        local n = 0
+        local function step()
+          n = n + 1
+          print("step", n)
+          if n < 3 then timer.after(0.1, step) end
+        end
+        timer.after(0.1, step)
+        local self
+        self = timer.every(0.1, function() self:cancel() print("self") end)
+    )"));
+    pass(chain, 1);
+    CHECK(chain.services.logged("step 3"));
+    CHECK(!chain.services.logged("step 4"));
+    CHECK_EQ(chain.plugin.timerCount(), (size_t)0);
+    int selfs = 0;
+    for (const std::string& line : chain.services.logs) selfs += line == "self";
+    CHECK_EQ(selfs, 1);
+    CHECK(!chain.plugin.failed());
+}
+
+TEST(timers_reach_cards_through_closures) {
+    Fixture f;
+    CHECK(f.start(R"(
+        cards = { beat = {
+          load = function(card)
+            card.beats = 0
+            if not card.timer then card.timer = timer.every(0.5, function() card.beats = card.beats + 1 end) end
+          end,
+          draw = function(card) ui.big(tostring(card.beats)) end,
+        } }
+    )"));
+    f.plugin.addCard("2", "beat", {}, f.gfx);
+    pass(f, 1.1f, false);  // neither card is on screen: timers still run, once a second
+    f.draw();
+    CHECK(f.gfx.drew("large center 1"));
+    CHECK(f.plugin.needsDraw("2"));
+    CHECK_EQ(f.plugin.timerCount(), (size_t)2);
+}
+
+// ------------------------------------------------------------------- notify
+
+TEST(notify_asks_the_host_for_attention) {
+    Fixture f;
+    CHECK(f.start(R"(
+        notify("Tea is ready")
+        notify("Build failed", { led = "red" })
+        notify{ led = "#00ff00" }
+        notify()
+        notify(42)
+        notify(string.rep("é", 300))
+    )"));
+    CHECK_EQ(f.services.notices.size(), (size_t)6);
+    CHECK_EQ(f.services.notices[0].card, "");  // a single-card plugin: its only card
+    CHECK_EQ(f.services.notices[0].notice.text, "Tea is ready");
+    CHECK_EQ(f.services.notices[0].notice.hasLed, false);
+    CHECK_EQ(f.services.notices[1].notice.text, "Build failed");
+    CHECK_EQ(f.services.notices[1].notice.hasLed, true);
+    CHECK_EQ((int)f.services.notices[1].notice.ledRgb, 0xE74C3C);
+    CHECK_EQ(f.services.notices[2].notice.text, "");
+    CHECK_EQ((int)f.services.notices[2].notice.ledRgb, 0x00FF00);
+    CHECK_EQ(f.services.notices[3].notice.text, "");
+    CHECK_EQ(f.services.notices[3].notice.hasLed, false);
+    CHECK_EQ(f.services.notices[4].notice.text, "42");
+    CHECK_EQ(f.services.notices[5].notice.text.size(), (size_t)200);  // cut between characters, not inside one
+
+    const char* const bad[] = {"notify('x', 'red')", "notify('x', { led = 'nocolor' })", "notify(print)"};
+    for (const char* source : bad) {
+        Fixture wrong;
+        CHECK(!wrong.start(source));
+        CHECK(wrong.services.notices.empty());
+    }
+}
+
+TEST(notify_of_a_card_names_the_card) {
+    Fixture f;
+    CHECK(f.start(R"(
+        cards = { alarm = {
+          load = function(card) card.notify("from " .. card.id, { led = "blue" }) end,
+          button = function(card, name) card:notify("pressed " .. name) return true end,
+        } }
+    )"));
+    f.plugin.addCard("7", "alarm", {}, f.gfx);
+    CHECK_EQ(f.services.notices.size(), (size_t)2);
+    CHECK_EQ(f.services.notices[0].card, "1");
+    CHECK_EQ(f.services.notices[0].notice.text, "from 1");
+    CHECK_EQ(f.services.notices[1].card, "7");
+    CHECK(f.plugin.button("7", Button::Center));
+    CHECK_EQ(f.services.notices[2].card, "7");
+    CHECK_EQ(f.services.notices[2].notice.text, "pressed center");  // card:notify works like card.notify
+
+    // The plain notify() cannot know which card is meant.
+    Fixture wrong;
+    CHECK(!wrong.start("cards = { a = { load = function(card) notify('hi') end } }"));
+    CHECK(contains(wrong.plugin.error(), "card.notify"));
+}
+
+// ---------------------------------------------------------------- attention
+
+struct AttentionRig {
+    Attention attention;
+    uint32_t now = 100000;
+    std::string onScreen = "game:1";
+    std::vector<std::string> blocked;  ///< Cards whose "May come to the front" is off
+    std::vector<std::string> shows;
+    int flashes = 0;
+    uint32_t lastLed = 0;
+
+    bool allowed(const std::string& key) const {
+        for (const std::string& card : blocked) {
+            if (card == key) return false;
+        }
+        return true;
+    }
+    void ask(const std::string& key, const std::string& text, bool led = false, uint32_t rgb = 0) {
+        Notice notice;
+        notice.text = text;
+        notice.hasLed = led;
+        notice.ledRgb = rgb;
+        attention.request(key, notice, allowed(key), now);
+    }
+    /** Run for a while. A card that is asked to the front gets there, like on the device. */
+    void run(uint32_t ms) {
+        for (uint32_t passed = 0; passed < ms; passed += 50) {
+            now += 50;
+            const Attention::Actions actions =
+                attention.tick(onScreen, now, [this](const std::string& key) { return allowed(key); });
+            if (!actions.show.empty()) {
+                shows.push_back(actions.show);
+                onScreen = actions.show;
+            }
+            if (actions.led) {
+                flashes++;
+                lastLed = actions.ledRgb;
+            }
+        }
+    }
+    std::string banner(const std::string& key) const {
+        const std::string* text = attention.banner(key);
+        return text ? *text : "(none)";
+    }
+};
+
+TEST(attention_brings_a_card_to_the_front_with_a_banner) {
+    AttentionRig rig;
+    rig.ask("timer:1", "Tea is ready");
+    CHECK_EQ(rig.attention.pending().size(), (size_t)1);
+    rig.run(200);
+    CHECK_EQ(rig.shows.size(), (size_t)1);
+    CHECK_EQ(rig.shows[0], "timer:1");
+    CHECK_EQ(rig.banner("timer:1"), "Tea is ready");
+    CHECK_EQ(rig.banner("game:1"), "(none)");
+    CHECK(rig.attention.pending().empty());
+    CHECK_EQ(rig.flashes, 0);  // it came to the front, and gave no colour: the LED stays as it is
+    rig.run(3500);
+    CHECK_EQ(rig.banner("timer:1"), "Tea is ready");
+    rig.run(600);
+    CHECK_EQ(rig.banner("timer:1"), "(none)");  // about four seconds
+    CHECK_EQ(rig.shows.size(), (size_t)1);
+
+    // With a colour the LED flashes three times, even when the card comes up at once.
+    AttentionRig led;
+    led.ask("timer:1", "Done", true, 0x00FF00);
+    led.run(3000);
+    CHECK_EQ(led.flashes, 3);
+    CHECK_EQ((int)led.lastLed, 0x00FF00);
+
+    // A card that is on screen already just gets its banner.
+    AttentionRig here;
+    here.run(100);
+    here.ask("game:1", "New high score");
+    here.run(100);
+    CHECK(here.shows.empty());
+    CHECK_EQ(here.banner("game:1"), "New high score");
+    CHECK_EQ(here.flashes, 0);
+
+    // No text: the card comes to the front, and that is all.
+    AttentionRig quiet;
+    quiet.ask("timer:1", "");
+    quiet.run(200);
+    CHECK_EQ(quiet.shows.size(), (size_t)1);
+    CHECK_EQ(quiet.banner("timer:1"), "(none)");
+}
+
+TEST(attention_waits_while_a_card_is_being_played) {
+    AttentionRig rig;
+    rig.attention.busy(rig.now);  // the game on screen just used a press
+    rig.ask("timer:1", "Tea is ready");
+    rig.run(3000);
+    CHECK(rig.shows.empty());
+    CHECK_EQ(rig.flashes, 3);  // it has to wait: the LED says something is up
+    CHECK_EQ((int)rig.lastLed, 0xFFFFFF);
+    rig.attention.busy(rig.now);  // still playing: the five seconds start again
+    rig.run(4500);
+    CHECK(rig.shows.empty());
+    CHECK_EQ(rig.attention.pending().size(), (size_t)1);
+    rig.run(700);
+    CHECK_EQ(rig.shows.size(), (size_t)1);  // idle for five seconds
+    CHECK_EQ(rig.banner("timer:1"), "Tea is ready");
+
+    // A press that the card uses takes its banner away.
+    rig.attention.busy(rig.now);
+    rig.run(50);
+    CHECK_EQ(rig.banner("timer:1"), "(none)");
+}
+
+TEST(attention_respects_the_card_setting) {
+    AttentionRig rig;
+    rig.blocked.push_back("timer:1");
+    rig.ask("timer:1", "Tea is ready");
+    rig.run(60000);
+    CHECK(rig.shows.empty());  // it never comes to the front by itself
+    CHECK_EQ(rig.flashes, 3);
+    CHECK_EQ(rig.attention.pending().size(), (size_t)1);
+    CHECK_EQ(rig.attention.pending()[0].text, "Tea is ready");
+    CHECK_EQ(rig.banner("timer:1"), "(none)");
+
+    // More requests collapse into the one that waits. The latest text wins.
+    rig.ask("timer:1", "Tea is cold");
+    rig.ask("timer:1", "");
+    CHECK_EQ(rig.attention.pending().size(), (size_t)1);
+    CHECK_EQ(rig.attention.pending()[0].text, "Tea is cold");
+    CHECK_EQ(rig.attention.pending()[0].count, 3);
+
+    // Someone walks to the card: now it shows what it had to say.
+    rig.onScreen = "timer:1";
+    rig.run(100);
+    CHECK_EQ(rig.banner("timer:1"), "Tea is cold");
+    CHECK(rig.attention.pending().empty());
+    CHECK(rig.shows.empty());
+
+    // Walking away ends the banner.
+    rig.onScreen = "game:1";
+    rig.run(100);
+    CHECK_EQ(rig.banner("timer:1"), "(none)");
+}
+
+TEST(attention_is_rate_limited) {
+    AttentionRig rig;
+    rig.ask("timer:1", "one");
+    rig.run(200);
+    CHECK_EQ(rig.shows.size(), (size_t)1);
+    rig.onScreen = "game:1";  // someone goes back to what they were doing
+    rig.run(1000);
+
+    // The card asks again and again: nothing happens for 30 seconds.
+    for (int i = 0; i < 20; i++) {
+        rig.ask("timer:1", "again " + std::to_string(i));
+        rig.run(1000);
+    }
+    CHECK_EQ(rig.shows.size(), (size_t)1);
+    CHECK_EQ(rig.attention.pending().size(), (size_t)1);
+    CHECK_EQ(rig.attention.pending()[0].count, 20);
+    rig.run(10000);
+    CHECK_EQ(rig.shows.size(), (size_t)2);  // once, with the latest text
+    CHECK_EQ(rig.banner("timer:1"), "again 19");
+
+    // Two cards at once take turns, a few seconds apart.
+    AttentionRig two;
+    two.ask("a:1", "from a");
+    two.ask("b:1", "from b");
+    two.run(1000);
+    CHECK_EQ(two.shows.size(), (size_t)1);
+    CHECK_EQ(two.banner("a:1"), "from a");
+    two.run(5000);
+    CHECK_EQ(two.shows.size(), (size_t)2);
+    CHECK_EQ(two.banner("b:1"), "from b");
+
+    // A card that went away takes its requests with it.
+    AttentionRig gone;
+    gone.blocked.push_back("a:1");
+    gone.ask("a:1", "x");
+    gone.ask("ab:1", "y");
+    gone.attention.forget("a:");
+    CHECK_EQ(gone.attention.pending().size(), (size_t)1);
+    CHECK_EQ(gone.attention.pending()[0].key, "ab:1");
+
+    // Long text is cut, and the list of waiting cards cannot grow without end.
+    AttentionRig many;
+    for (int i = 0; i < 40; i++) {
+        many.blocked.push_back("c:" + std::to_string(i));
+        many.ask("c:" + std::to_string(i), std::string(500, 'x'));
+    }
+    CHECK_EQ(many.attention.pending().size(), Attention::kMaxPending);
+    CHECK_EQ(many.attention.pending()[0].text.size(), Attention::kMaxText);
+}
+
+TEST(banner_is_drawn_over_the_card) {
+    RecordingGfx gfx;
+    drawBanner(gfx, "Tea is ready");
+    CHECK(gfx.drew("clip off"));
+    CHECK(gfx.drew("rect 4,4 225x30"));
+    CHECK(gfx.drew("small left Tea is ready"));
+
+    // Long text wraps to two lines and ends in dots.
+    RecordingGfx tall;
+    drawBanner(tall, "The quick brown fox jumps over the lazy dog and then keeps running for a very long time");
+    CHECK(tall.drew("rect 4,4 225x48"));
+    CHECK(tall.drew("small left The quick brown fox jumps"));
+    CHECK(tall.drew("..."));
+    int lines = 0;
+    for (const std::string& call : tall.calls) lines += contains(call, "text ");
+    CHECK_EQ(lines, 2);
+
+    RecordingGfx none;
+    drawBanner(none, "");
+    CHECK(none.calls.empty());
+
+    CHECK_EQ(clipUtf8("héllo", 2), "h");  // never half a character
+    CHECK_EQ(clipUtf8("héllo", 3), "hé");
+    CHECK_EQ(clipUtf8("hi", 10), "hi");
+}
+
+// ----------------------------------------------------------------- messages
+
+TEST(message_reaches_a_single_card_plugin) {
+    Fixture f;
+    CHECK(f.start(R"(
+        local last = "nothing yet"
+        function message(msg)
+          last = msg.body
+          if msg.json then print("json", msg.json.who, msg.json.n) else print("text", msg.body) end
+          notify(msg.body)
+        end
+        function draw() ui.big(last) end
+    )"));
+    CHECK(f.plugin.takesMessages());
+    CHECK(f.plugin.kinds()[0].message);
+    f.draw();
+    CHECK(!f.needsDraw());
+
+    CHECK(f.plugin.message("", "Pizza's here"));
+    CHECK(f.services.logged("text Pizza's here"));
+    CHECK(f.needsDraw());  // a message repaints the card
+    f.draw();
+    CHECK(f.gfx.drew("Pizza's here"));
+    CHECK_EQ(f.services.notices.size(), (size_t)1);
+
+    // To the card or to the plugin: a single-card plugin has one message().
+    CHECK(f.plugin.message("1", R"(  {"who":"door","n":2})"));
+    CHECK(f.services.logged("json door 2"));
+    CHECK(f.plugin.message("", "{not json"));
+    CHECK(f.services.logged("text {not json"));
+    CHECK(f.plugin.message("", ""));
+    CHECK(!f.plugin.message("9", "no such card"));
+    CHECK(!f.plugin.failed());
+
+    // No message(): nothing to deliver to.
+    Fixture deaf;
+    CHECK(deaf.start("function draw() end"));
+    CHECK(!deaf.plugin.takesMessages());
+    CHECK(!deaf.plugin.kinds()[0].message);
+    CHECK(!deaf.plugin.message("", "hello?"));
+    CHECK(!deaf.plugin.message("1", "hello?"));
+
+    // A message handler that crashes or hangs takes the plugin down, not the device.
+    Fixture crash;
+    CHECK(crash.start("function message(msg) error('cannot read ' .. msg.body) end"));
+    CHECK(!crash.plugin.message("", "this"));
+    CHECK(crash.plugin.failed());
+    CHECK(contains(crash.plugin.error(), "cannot read this"));
+    CHECK(!crash.plugin.message("", "again"));
+
+    Fixture spin;
+    spin.services.advancePerCall = 1;
+    CHECK(spin.start("function message() while true do end end"));
+    CHECK(!spin.plugin.message("", "x"));
+    CHECK(contains(spin.plugin.error(), "took too long"));
+
+    // A message is held against the plugin's memory like everything else.
+    LuaPlugin::Limits small;
+    small.memoryBytes = 64 * 1024;
+    Fixture tight(small);
+    CHECK(tight.start("kept = {} function message(msg) kept[#kept + 1] = msg.body end"));
+    const std::string big(4096, 'x');
+    bool survived = true;
+    for (int i = 0; i < 40 && survived; i++) survived = tight.plugin.message("", big + std::to_string(i));
+    CHECK(!survived);
+    CHECK(contains(tight.plugin.error(), "out of memory"));
+}
+
+TEST(message_reaches_a_card_kind) {
+    Fixture f;
+    CHECK(f.start(R"(
+        function message(msg) print("plugin got", msg.body) end
+        cards = {
+          door = {
+            message = function(card, msg) card.last = msg.body print("card", card.id, "got", msg.body) end,
+            draw = function(card) ui.big(card.last or "quiet") end,
+          },
+          plain = { draw = function(card) ui.big("plain") end },
+        }
+    )"));
+    f.plugin.addCard("2", "plain", {}, f.gfx);
+    CHECK(f.plugin.takesMessages());
+    CHECK_EQ(f.plugin.kinds()[0].key, "door");
+    CHECK(f.plugin.kinds()[0].message);
+    CHECK(!f.plugin.kinds()[1].message);
+
+    CHECK(f.plugin.message("1", "ding"));
+    CHECK(f.services.logged("card 1 got ding"));
+    CHECK(!f.plugin.message("2", "dong"));  // that kind of card takes no messages
+    CHECK(f.plugin.message("", "for everyone"));
+    CHECK(f.services.logged("plugin got for everyone"));
+    f.draw();
+    CHECK(f.gfx.drew("ding"));
+
+    // Inspecting a plugin tells which kinds take messages, without running load().
+    Fixture probe;
+    const std::string source = "cards = { a = { message = function() end }, b = {} }";
+    CHECK(probe.plugin.inspect("probe", source.data(), source.size()));
+    CHECK(!probe.plugin.takesMessages());
+    CHECK(probe.plugin.kinds()[0].message);
+    CHECK(!probe.plugin.kinds()[1].message);
+}
+
+// ------------------------------------------------------------------ choices
+
+TEST(choices_are_listed_by_the_plugin) {
+    Fixture f;
+    CHECK(f.start(R"(
+        config = {
+          device = { label = "Device", choices = "listDevices" },
+          room = { label = "Room", choices = "not a name!" },
+          plain = "x",
+        }
+        function listDevices(done)
+          done({ { value = "abc", label = "Kitchen lamp" }, { value = 7 }, "plain", 12, { value = "x", label = 5 } })
+          done({ { value = "ignored" } })   -- only the first answer counts
+        end
+        function failing(done) done(nil, "log in first") end
+        function empty(done) done({}) end
+        function silent(done) end
+        function wrong(done) done({ { label = "no value" } }) end
+        function many(done)
+          local list = {}
+          for i = 1, 150 do list[i] = "item " .. i end
+          done(list)
+        end
+    )"));
+    // The settings say which function fills them in. Only a plain name counts.
+    const auto& schema = f.plugin.configSchema();
+    CHECK_EQ(schema[0].key, "device");
+    CHECK_EQ(schema[0].choices, "listDevices");
+    CHECK_EQ(schema[2].key, "room");
+    CHECK_EQ(schema[2].choices, "");
+    CHECK_EQ(schema[1].choices, "");
+
+    f.plugin.choices("listDevices", 1);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)1);
+    const auto& first = f.services.choiceAnswers[0];
+    CHECK_EQ(first.id, 1);
+    CHECK_EQ(first.error, "");
+    CHECK_EQ(first.choices.size(), (size_t)5);
+    CHECK_EQ(first.choices[0].value, "abc");
+    CHECK_EQ(first.choices[0].label, "Kitchen lamp");
+    CHECK_EQ(first.choices[1].value, "7");
+    CHECK_EQ(first.choices[1].label, "7");  // no label: the value
+    CHECK_EQ(first.choices[2].value, "plain");
+    CHECK_EQ(first.choices[3].value, "12");
+    CHECK_EQ(first.choices[4].label, "5");
+
+    f.plugin.choices("failing", 2);
+    CHECK_EQ(f.services.choiceAnswers[1].error, "log in first");
+    f.plugin.choices("empty", 3);
+    CHECK_EQ(f.services.choiceAnswers[2].error, "");
+    CHECK(f.services.choiceAnswers[2].choices.empty());
+    f.plugin.choices("nowhere", 4);
+    CHECK(contains(f.services.choiceAnswers[3].error, "no function nowhere()"));
+    f.plugin.choices("wrong", 5);
+    CHECK(contains(f.services.choiceAnswers[4].error, "needs a value"));
+    f.plugin.choices("many", 6);
+    CHECK_EQ(f.services.choiceAnswers[5].choices.size(), (size_t)100);
+    // Long entries: the list stops at 8 KB in total.
+    Fixture fat;
+    CHECK(fat.start("function list(done) local l = {} for i = 1, 100 do l[i] = { value = i, label = string.rep('x', 190) } end done(l) end"));
+    fat.plugin.choices("list", 1);
+    CHECK_EQ(fat.services.choiceAnswers[0].error, "");
+    CHECK_EQ(fat.services.choiceAnswers[0].choices.size(), (size_t)42);
+
+    f.plugin.choices("plain", 7);  // a global, but not a function
+    CHECK(contains(f.services.choiceAnswers[6].error, "no function"));
+
+    // A function that never answers: the host hears so after ten seconds.
+    f.plugin.choices("silent", 8);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)7);
+    pass(f, 9);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)7);
+    pass(f, 1.5f);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)8);
+    CHECK_EQ(f.services.choiceAnswers[7].id, 8);
+    CHECK(contains(f.services.choiceAnswers[7].error, "in time"));
+    CHECK(!f.plugin.failed());
+}
+
+TEST(choices_are_told_about_the_form) {
+    Fixture f;
+    CHECK(f.start(R"(
+        config = { url = "http://x", key = { secret = true }, home = { choices = "list" } }
+        cards = {
+          device = { config = {
+            flow = { choices = "list", default = "" },
+            advanced = { default = false },
+            count = 3,
+            room = "hall",
+          } },
+        }
+        function list(done, ctx)
+          local keys = {}
+          for key, value in pairs(ctx.settings) do keys[#keys + 1] = key .. "=" .. tostring(value) .. ":" .. type(value) end
+          table.sort(keys)
+          print(tostring(ctx.kind) .. " " .. table.concat(keys, " "))
+          done({})
+        end
+        function old(done) done({ "still works" }) end
+    )", {{"url", "http://homey"}, {"key", "s3cret"}}));
+    // Nothing sent: the kind's defaults, typed as `config` is.
+    f.plugin.choices("list", 1, {"device", {}});
+    CHECK_EQ(f.services.logs.back(), "device advanced=false:boolean count=3:number flow=:string room=hall:string");
+    // What the form holds wins, typed by the field it is for. Text that is no number leaves the default.
+    f.plugin.choices("list", 2, {"device", {{"advanced", "true"}, {"count", "7"}, {"flow", "f-1"}, {"extra", "5"}}});
+    CHECK_EQ(f.services.logs.back(), "device advanced=true:boolean count=7:number extra=5:string flow=f-1:string room=hall:string");
+    f.plugin.choices("list", 3, {"device", {{"count", "many"}}});
+    CHECK(contains(f.services.logs.back(), "count=3:number"));
+    // A setting of the plugin itself: no kind, and what is in use where the form says nothing.
+    f.plugin.choices("list", 4, {"", {{"url", "http://typed"}}});
+    CHECK_EQ(f.services.logs.back(), "nil home=:string key=s3cret:string url=http://typed:string");
+    f.plugin.choices("list", 5);
+    CHECK_EQ(f.services.logs.back(), "nil home=:string key=s3cret:string url=http://homey:string");
+    // A kind the plugin does not have: the form as text, and no crash.
+    f.plugin.choices("list", 6, {"nope", {{"a", "1"}}});
+    CHECK_EQ(f.services.logs.back(), "nope a=1:string");
+    // A function written before there was a second argument is called as before.
+    f.plugin.choices("old", 7);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)7);
+    CHECK_EQ(f.services.choiceAnswers[6].choices[0].value, "still works");
+    CHECK(!f.plugin.failed());
+}
+
+TEST(choices_may_fetch_first) {
+    Fixture f;
+    CHECK(f.start(R"(
+        function listFlows(done)
+          http.get("https://example.com/flows", function(res)
+            if not res.ok then return done(nil, "HTTP " .. res.status) end
+            local list = {}
+            for _, flow in ipairs(res.json) do list[#list + 1] = { value = flow.id, label = flow.name } end
+            done(list)
+          end)
+        end
+    )"));
+    f.plugin.choices("listFlows", 11);
+    CHECK(f.services.choiceAnswers.empty());
+    CHECK_EQ(f.services.requests.size(), (size_t)1);
+    f.respond(0, 200, R"([{"id":"f1","name":"Morning"},{"id":"f2","name":"Away"}])");
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)1);
+    CHECK_EQ(f.services.choiceAnswers[0].id, 11);
+    CHECK_EQ(f.services.choiceAnswers[0].choices.size(), (size_t)2);
+    CHECK_EQ(f.services.choiceAnswers[0].choices[1].label, "Away");
+
+    f.plugin.choices("listFlows", 12);
+    f.respond(1, 401, "");
+    CHECK_EQ(f.services.choiceAnswers[1].error, "HTTP 401");
+
+    // Answering after the ten seconds are over is ignored.
+    f.plugin.choices("listFlows", 13);
+    pass(f, 11);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)3);
+    f.respond(2, 200, "[]");
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)3);
+
+    // At most four lists at once.
+    for (int i = 0; i < 5; i++) f.plugin.choices("listFlows", 20 + i);
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)4);
+    CHECK_EQ(f.services.choiceAnswers[3].id, 24);
+    CHECK(contains(f.services.choiceAnswers[3].error, "busy"));
+
+    // A restart answers whoever is still waiting.
+    CHECK(f.start("x = 1"));
+    CHECK_EQ(f.services.choiceAnswers.size(), (size_t)8);
+    CHECK(contains(f.services.choiceAnswers[7].error, "restarted"));
+}
+
+TEST(choices_cannot_take_the_device_down) {
+    Fixture crash;
+    CHECK(crash.start("function list(done) error('list broke') end"));
+    crash.plugin.choices("list", 1);
+    CHECK(crash.plugin.failed());
+    CHECK_EQ(crash.services.choiceAnswers.size(), (size_t)1);
+    CHECK(contains(crash.services.choiceAnswers[0].error, "list broke"));
+    crash.plugin.choices("list", 2);  // asking a crashed plugin answers at once
+    CHECK(contains(crash.services.choiceAnswers[1].error, "crashed"));
+
+    Fixture spin;
+    spin.services.advancePerCall = 1;
+    CHECK(spin.start("function list(done) while true do end end"));
+    spin.plugin.choices("list", 1);
+    CHECK(contains(spin.plugin.error(), "took too long"));
+    CHECK_EQ(spin.services.choiceAnswers.size(), (size_t)1);
+
+    // A plugin that keeps `done` and calls it much later does no harm.
+    Fixture late;
+    CHECK(late.start(R"(
+        function list(done) kept = done end
+        function button() kept({ "late" }) return true end
+    )"));
+    late.plugin.choices("list", 1);
+    pass(late, 11);
+    CHECK_EQ(late.services.choiceAnswers.size(), (size_t)1);
+    CHECK(late.button(Button::Center));
+    CHECK_EQ(late.services.choiceAnswers.size(), (size_t)1);
+    CHECK(!late.plugin.failed());
+
+    // Going away with a list still wanted tells nobody: the host is going too.
+    MockServices services;
+    {
+        RecordingGfx gfx;
+        LuaPlugin plugin(gfx, services);
+        const std::string source = "function list(done) end";
+        plugin.start("gone", source.data(), source.size());
+        plugin.choices("list", 1);
+    }
+    CHECK(services.choiceAnswers.empty());
 }
 
 }  // namespace

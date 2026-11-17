@@ -1,5 +1,6 @@
 #include "plugins/PluginCard.h"
 
+#include "Attention.h"
 #include "hardware/Input.h"
 #include "plugins/PluginConnection.h"
 #include "plugins/PluginManager.h"
@@ -58,6 +59,8 @@ void PluginCard::paintIfNeeded() {
     if (!lua.needsDraw(cardId_)) return;
     gfx_.beginFrame();
     lua.draw(cardId_);
+    // What the card had to say with notify(), drawn by the device itself.
+    if (const std::string* banner = manager_.banner(key_)) deskhog::drawBanner(gfx_, *banner);
     gfx_.endFrame();
     frames_++;
 }
@@ -70,5 +73,8 @@ bool PluginCard::handleButtonPress(uint8_t button_index) {
     // taken: the main loop uses that pair for power off.)
     if (button_index == Input::BUTTON_UP && buttons[Input::BUTTON_CENTER].isPressed()) return false;
 
-    return connection_->lua().button(cardId_, static_cast<deskhog::Button>(button_index));
+    const bool used = connection_->lua().button(cardId_, static_cast<deskhog::Button>(button_index));
+    // A card that uses presses is being played: other cards wait with their notify().
+    if (used && onScreen()) manager_.pressUsed();
+    return used;
 }

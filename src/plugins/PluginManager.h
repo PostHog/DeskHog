@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "Attention.h"
 #include "LuaPlugin.h"
 #include "PluginHost.h"
 #include "config/CardConfig.h"
@@ -46,6 +47,9 @@ struct PluginCardRecord {
     std::string id;
     std::string kind;
     PluginSettings settings;
+    /// "May come to the front": whether notify() may put this card on screen.
+    /// Every plugin card has this setting; it is the host's, not the plugin's.
+    bool mayInterrupt = true;
 };
 
 /** A connection as saved on flash. */
@@ -74,6 +78,7 @@ struct PluginMeta {
     uint32_t hash = 0;  ///< Fingerprint of the source, see SourceHash.h
     std::string error;  ///< Set when the file does not even load
     bool multiCard = false;
+    bool message = false;  ///< It has a global message(), for messages pushed to a connection
     std::vector<deskhog::LuaPlugin::ConfigField> config;
     std::vector<deskhog::LuaPlugin::CardKind> kinds;
 };
@@ -96,6 +101,14 @@ struct PluginConnectionState {
     std::string error;
     size_t memory = 0;
     std::map<std::string, PluginCardState> cards;
+};
+
+/** A notify() that waits for someone to arrive at its card, for the web API. */
+struct PluginNotification {
+    std::string key;   ///< "<connection>:<card>"
+    std::string text;
+    int count = 1;     ///< How many notify() calls it stands for
+    uint32_t ageMs = 0;
 };
 
 /** Memory and stack headroom, for the web API. Sizes are in bytes. */
@@ -131,6 +144,11 @@ public:
     static constexpr size_t MAX_STORE_BYTES = 8 * 1024;  ///< A connection's saved data, in total
     static constexpr size_t MAX_PLUGIN_CARDS = 12;
     static constexpr size_t MAX_CONNECTIONS = 16;
+    static constexpr size_t MAX_MESSAGE_BYTES = 4096;  ///< A message pushed to a plugin
+    static constexpr size_t MAX_QUEUED_MESSAGES = 8;   ///< Per connection, waiting for the UI task
+    /// All messages waiting together. They sit in internal RAM, which WiFi needs too.
+    static constexpr size_t MAX_QUEUED_MESSAGE_BYTES = 16 * 1024;
+    static constexpr size_t MAX_CHOICE_JOBS = 4;       ///< Lists of choices being fetched or waiting to be picked up
 
     PluginManager(ConfigManager& configManager, NeoPixelController& led, EventQueue& eventQueue);
 
@@ -154,6 +172,14 @@ public:
     bool enqueueHttp(uint32_t connectionRuntimeId, int requestId, const deskhog::HttpRequest& request);
     void appendLog(const std::string& plugin, const std::string& line);
     NeoPixelController& led() { return led_; }
+    /** A plugin called notify() for the card stored as `key`. */
+    void requestAttention(const std::string& key, const deskhog::Notice& notice);
+    /** The card on screen used a button press: it is being played. */
+    void pressUsed();
+    /** The notify() banner to paint over a card right now, or nullptr. */
+    const std::string* banner(const std::string& key) const { return attention_.banner(key); }
+    /** A plugin answered (or failed to answer) a request for a list of choices. */
+    void finishChoices(const std::string& job, const std::vector<deskhog::Choice>& choices, const std::string& error);
     std::map<std::string, std::string> loadStore(const std::string& connectionId);
     bool saveStore(const std::string& connectionId, const std::map<std::string, std::string>& values);
 
@@ -193,8 +219,10 @@ public:
      */
     std::string addCard(const std::string& plugin, const std::string& connectionId, const std::string& connectionName,
                         const PluginSettings& connectionSettings, const std::string& kind, const std::string& cardName,
-                        const PluginSettings& cardSettings, String& error);
-    bool updateCard(const std::string& key, const std::string* cardName, const PluginSettings& cardSettings);
+                        const PluginSettings& cardSettings, String& error, bool mayInterrupt = true);
+    /** @param mayInterrupt The card's "May come to the front" setting, or nullptr to leave it. */
+    bool updateCard(const std::string& key, const std::string* cardName, const PluginSettings& cardSettings,
+                    const bool* mayInterrupt = nullptr);
     /**
      * Save the card stack: `keys` are "<TYPE>|<config>" in the new order. Cards
      * that are not listed are removed.
@@ -214,6 +242,19 @@ public:
     /** Give "" to go back to the default. */
     bool setDirectorySource(const String& source, String& error);
 
+    /**
+     * The device's time zone, which plugins tell local time by: a POSIX TZ
+     * string. "UTC0" until one is picked.
+     */
+    std::string timeZone();
+    /** The name the zone was picked by on the web page, e.g. "Europe/Brussels". May be "". */
+    std::string timeZoneName();
+    /**
+     * @param posix A POSIX TZ string; "" goes back to UTC.
+     * @param name  What to show for it. The device does not check that the two belong together.
+     */
+    bool setTimeZone(const String& posix, const String& name, String& error);
+
     // Live state
     std::map<std::string, PluginConnectionState> states();
     PluginSystemInfo systemInfo();
@@ -230,6 +271,30 @@ public:
     bool press(const std::string& key, uint8_t button);
     /** Bring a card to the front. */
     bool show(const std::string& key);
+    /**
+     * Hand a message to a plugin: to one card (its kind's message(card, msg))
+     * or, with `cardId` "", to the connection (the global message(msg)). It is
+     * delivered on the UI task a moment later.
+     * @return an HTTP status: 200 queued, 404 nothing there to take it, 409 the
+     *         connection is not running, 429 too many are waiting. `error` says more.
+     */
+    int sendMessage(const std::string& connectionId, const std::string& cardId, const std::string& body, String& error);
+    /**
+     * The list a plugin offers for a setting that has `choices`. Fetching it
+     * takes the plugin a while (it may ask the network), and happens on the UI
+     * task. So the first call only starts it and returns 202; ask again until
+     * the answer is there.
+     * @param kind The card kind the setting belongs to, or "" for a setting of the connection.
+     * @param form What the form that asks holds right now, saved or not. The plugin's
+     *             function gets it as its second argument. Asking again for the
+     *             same list has to give the same `form`.
+     * @return an HTTP status: 200 with `out` filled, 202 still working, 404 no
+     *         such connection or setting, 429 too busy, 502 the plugin could not say.
+     */
+    int choices(const std::string& connectionId, const std::string& kind, const std::string& field,
+                const PluginSettings& form, std::vector<deskhog::Choice>& out, String& error);
+    /** Requests from notify() that are waiting for someone to arrive at their card. */
+    std::vector<PluginNotification> notifications();
     /** The key of the first card that runs `plugin`, or "". */
     std::string firstCardOf(const std::string& plugin);
 
@@ -248,11 +313,21 @@ private:
         int requestId;
         deskhog::HttpResponse response;
     };
-    enum class CommandKind { PluginChanged, ConnectionChanged, RefreshAll, Press, Show };
+    enum class CommandKind { PluginChanged, ConnectionChanged, RefreshAll, Press, Show, Repaint, Message, Choices };
     struct Command {
         CommandKind kind;
         std::string target;
         uint8_t button = 0;  ///< For Press: which button. For PluginChanged: 1 to add a first card.
+        std::string card;    ///< For Message: the card it is for, or "" for the connection
+        std::string body;    ///< For Message: what was sent. For Choices: the plugin's function
+        std::string job;     ///< For Choices: which entry of choiceJobs_ waits for the answer
+        deskhog::LuaPlugin::ChoiceContext context;  ///< For Choices: the form that asks
+    };
+    struct ChoiceJob {
+        bool done = false;
+        std::vector<deskhog::Choice> choices;
+        std::string error;
+        uint32_t atMs = 0;  ///< When it started, then when it finished
     };
 
     static void httpTaskEntry(void* arg);
@@ -272,6 +347,9 @@ private:
     PluginCard* runningCard(const std::string& key);
     void publishStates(uint32_t now);
     void queue(CommandKind kind, const std::string& target, uint8_t button = 0);
+    void runAttention(uint32_t now);
+    bool mayInterrupt(const std::string& key);
+    void startChoices(const Command& command);
 
     // Record helpers. Call with lock_ held.
     bool saveRecord(const PluginConnectionRecord& record);
@@ -296,6 +374,7 @@ private:
     int cardWidth_ = 233;
     int cardHeight_ = 135;
     bool inspectedAll_ = false;
+    deskhog::Attention attention_;  ///< What becomes of notify(): see Attention.h
     bool wifiWasUp_ = false;
     uint32_t lastWifiCheckMs_ = 0;
     uint32_t lastMeasureMs_ = 0;
@@ -319,4 +398,8 @@ private:
     std::map<std::string, PluginMeta> metas_;
     std::map<std::string, PluginConnectionState> states_;
     std::map<std::string, std::deque<std::string>> logs_;
+    std::map<std::string, ChoiceJob> choiceJobs_;  ///< By "<connection>/<function>"
+    std::vector<PluginNotification> notifications_;
+    std::string timeZone_ = "UTC0";
+    std::string timeZoneName_;
 };

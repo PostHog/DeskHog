@@ -123,7 +123,9 @@ def main():
         {"name": "font_label", "file": "typography/Inter_18pt-Regular.ttf", "size": 15},
         {"name": "font_value", "file": "typography/Inter_18pt-SemiBold.ttf", "size": 16},
         {"name": "font_value_large", "file": "typography/Inter_18pt-SemiBold.ttf", "size": 36},
-        {"name": "font_loud_noises", "file": "typography/LoudNoises.ttf", "size": 20}
+        {"name": "font_loud_noises", "file": "typography/LoudNoises.ttf", "size": 20},
+        # For plugins: gfx.text(..., "tiny"), for dense lists
+        {"name": "font_tiny", "file": "typography/Inter_18pt-Regular.ttf", "size": 10}
     ]
     
     success_count = 0

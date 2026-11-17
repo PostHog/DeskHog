@@ -515,10 +515,10 @@
 #define LV_USE_FS_UEFI 0
 
 /* Image decoders - keep disabled unless specifically needed */
-#define LV_USE_LODEPNG 0
+#define LV_USE_LODEPNG 1 // For plugins: gfx.fetchImage decodes PNG with it, see src/plugins/ImageDecode.cpp
 #define LV_USE_LIBPNG 0
 #define LV_USE_BMP 0
-#define LV_USE_TJPGD 0
+#define LV_USE_TJPGD 1 // The same, for JPEG
 #define LV_USE_LIBJPEG_TURBO 0
 #define LV_USE_GIF 0
 #define LV_BIN_DECODER_RAM_LOAD 0

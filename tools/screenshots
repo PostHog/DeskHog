@@ -6,8 +6,10 @@
 
 Each plugin is run by tools/sim/run.sh the way its recipe below says: which
 settings, which buttons when, and for the plugins that need an account, a
-sample answer from tools/sim/replies/ instead of the network. A plugin without
-a recipe is simply run for two seconds.
+sample answer from tools/sim/replies/ instead of the network. Cards that show
+the time get a fixed moment (--time) and games a fixed --seed, so a picture only
+changes when its plugin does. A plugin without a recipe is simply run for two
+seconds.
 
 The picture is the card at twice its size, 466 by 270 pixels. Afterwards run
 `tools/deskhog index`, which lists the pictures in plugins/index.json and in
@@ -28,16 +30,29 @@ SHOTS = os.path.join(PLUGINS, "screenshots")
 REPLIES = os.path.join(ROOT, "tools", "sim", "replies")
 FIXTURES = os.path.join(ROOT, "test", "native", "fixtures")
 
-# Arguments for tools/sim/run.sh. {replies} and {fixtures} are folders with sample answers.
+# A moment for the cards that show the time or count from it, so that their
+# pictures come out the same on every run: a Tuesday afternoon in Brussels.
+WHEN = "--time 2026-11-17T14:05 --tz CET-1CEST,M3.5.0,M10.5.0/3"
+
+# Arguments for tools/sim/run.sh. {replies} and {fixtures} are folders with sample
+# answers, {when} is the moment above.
 RECIPES = {
     "air": "--reply geocoding={replies}/rain-place.json --reply air-quality-api={replies}/air.json",
     "blocks": "--seconds 9.5 --press center@0.3,down@0.8,up@1.2,down@1.5,up@2,up@2.2,down@2.5,up@3,up@3.2,up@3.4,down@3.7,"
     "center@4.2,up@4.4,up@4.6,up@4.8,up@5,down@5.3,up@5.8,down@6.1,up@6.6,up@6.8,down@7.1,up@7.6,up@7.8,up@8,down@8.3",
     "breakout": "--seconds 2.3 --press center@0.3,center@0.8 --hold down@1-1.5",
-    "clock": "--set offset=1",
-    "countdown": "--set what=Holiday --set date=2027-07-01",
+    "charge": "--seed 7 --seconds 2.6 --press center@0.3,center@0.8 --hold center@0.8-2.0",
+    # The newest runs in the sample answer are minutes old at that moment.
+    "ciwatch": "{when} --set repo=acme/app --set branch=main --reply /actions/runs={replies}/ciwatch-runs.json "
+    "--reply-header '/actions/runs=X-RateLimit-Remaining: 52' --reply-header '/actions/runs=X-RateLimit-Limit: 60'",
+    "clock": "{when}",
+    "countdown": "{when} --set what=Holiday --set date=2027-07-01",
     "crypto": "--seconds 6 --set coin=bitcoin",
     "daylight": "--reply geocoding={replies}/daylight-place.json --reply /v1/forecast={replies}/daylight-offset.json",
+    # Three that came earlier in the day, and one that arrives while you look.
+    "doorbell": "{when} --seconds 8 --store 'recent=[{{\"text\":\"Courier at the gate\",\"at\":1794919860}},"
+    "{{\"text\":\"Build failed on main\",\"color\":\"red\",\"at\":1794918000}},"
+    "{{\"text\":\"Deploy finished\",\"color\":\"green\",\"at\":1794912120}}]' --message 1=\"Pizza's here\"",
     "deploy": "--set url=https://example.com/deploy --set label='Ship it'",
     "expiry": "--set domains='example.com github.com expired.badssl.com vrt.be' "
     "--reply certificate/example.com={replies}/expiry-cert-example.json --reply certificate/github.com={replies}/expiry-cert-github.json "
@@ -45,14 +60,18 @@ RECIPES = {
     "--reply domain/example.com={replies}/expiry-rdap-example.json --reply domain/github.com={replies}/expiry-rdap-github.json "
     "--reply domain/badssl.com={replies}/expiry-rdap-badssl.json --reply domain/vrt.be={replies}/expiry-rdap-none.json",
     "flappy": "--seconds 2.3 --press center@0.5,center@1.1,center@1.7,center@2.1",
+    "gauge": "--reply open-meteo={replies}/gauge.json",
     "github": "--set repo=acme/app --reply /actions/runs={replies}/github-runs.json --reply /search/issues={replies}/github-pulls.json",
     "habits": "--set name=Read --store 'h1={{\"days\":\"fff6bfffffce6fffdda79e62\"}}'",
     "hackernews": "--reply topstories={replies}/hackernews-ids.json --reply /item/={replies}/hackernews-item.json",
     "homeassistant": "--set url=http://homeassistant.local:8123 --set token=sample --set entity=sensor.office_temperature "
     "--reply /api/states/={replies}/homeassistant.json",
-    "homey": "--set url=http://homey.local --set key=sample --set device=abc-123 --reply /api/manager/devices/={replies}/homey.json",
+    "homey": "--set url=http://homey.local --set key=sample --set device=lamp-1 --set value=onoff "
+    "--reply device/lamp-1={replies}/homey-lamp.json",
     "joke": "--reply icanhazdadjoke={replies}/joke.json",
     "lander": "--seconds 2.9 --press center@0.3 --hold center@2-3",
+    "nowplaying": "{when} --set user=max --set key=sample --reply audioscrobbler={replies}/nowplaying.json "
+    "--reply lastfm.freetls={replies}/nowplaying-cover.png",
     "onthisday": "--reply onthisday={replies}/onthisday.json",
     "paddle": "--seconds 2.6 --press center@0.3,center@0.8 --hold down@1-1.6",
     "planes": "--seconds 6 --reply geocoding={replies}/rain-place.json --reply adsb={replies}/planes.json",
@@ -61,6 +80,7 @@ RECIPES = {
     "queues": "--set title=Park --reply queue-times.com={replies}/queues.json",
     "rain": "--reply geocoding={replies}/rain-place.json --reply minutely_15={replies}/rain.json",
     "reaction": "--seconds 1 --press center@0.4",
+    "reminders": "{when}",
     "releases": "--set 'repos=oven-sh/bun astral-sh/uv posthog/posthog-js nodejs/node neovim/neovim' "
     "--store 'seen={{\"oven-sh/bun\":\"bun-v1.4.4\",\"astral-sh/uv\":\"0.9.11\"}}' "
     "--reply oven-sh/bun/={replies}/releases-bun.json --reply astral-sh/uv/={replies}/releases-uv.json "
@@ -83,8 +103,13 @@ RECIPES = {
     "weather": "--seconds 6",
     "webhook": "--set url=https://example.com/hook --set label='Open the door'",
     "whack": "--seconds 1.6 --press center@0.3",
+    # A walk through the house: good by the router, poor in the far room, and back.
+    "wifi": "--seconds 36 --rssi -52,-51,-53,-52,-54,-57,-56,-59,-61,-60,-63,-66,-65,-68,-71,-70,-73,-76,-78,-77,-79,-76,"
+    "-74,-72,-69,-70,-67,-64,-62,-63,-60,-58,-57,-55,-56,-54,-53",
     "word": "--reply Word_of_the_day={replies}/word.json --reply sections&page={replies}/word-sections.json "
     "--reply wikitext&section={replies}/word-pron.json",
+    # One card of it: Tokyo, where it is night at that moment.
+    "worldclock": "{when}",
 }
 
 
@@ -129,7 +154,7 @@ def main():
                 print("%-14s there is no plugins/%s.lua" % (name, name))
                 failed.append(name)
                 continue
-            recipe = RECIPES.get(name, "").format(replies=REPLIES, fixtures=FIXTURES)
+            recipe = RECIPES.get(name, "").format(replies=REPLIES, fixtures=FIXTURES, when=WHEN)
             large = os.path.join(scratch, name + ".png")
             command = [os.path.join(ROOT, "tools", "sim", "run.sh"), source, "--scale", "2", "--out", large] + shlex.split(recipe)
             result = subprocess.run(command, capture_output=True, text=True)

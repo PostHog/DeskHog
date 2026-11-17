@@ -29,6 +29,7 @@ bool jsonDecode(lua_State* L, const char* text, size_t length, const char** erro
  *   true              keep everything from here down
  *   { name = true }   in an object, keep only these keys, each with its own filter
  *   { { ... } }       in a list, the first entry is the filter for every item
+ *   { ["*"] = ... }   in an object, the filter for every key that is not named
  *
  * A table filter that meets a list and has no first entry is applied to each
  * item as it is, which lets one filter cover "an object or a list of them".

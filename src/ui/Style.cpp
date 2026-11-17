@@ -8,6 +8,7 @@ const lv_font_t* Style::_label_font = nullptr;
 const lv_font_t* Style::_value_font = nullptr;
 const lv_font_t* Style::_large_value_font = nullptr;
 const lv_font_t* Style::_loud_noises_font = nullptr;
+const lv_font_t* Style::_tiny_font = nullptr;
 bool Style::_fonts_initialized = false;
 
 void Style::initFonts() {
@@ -38,6 +39,8 @@ void Style::initFonts() {
 
     // Fourth font - LoudNoises for decorative text
     _loud_noises_font = &font_loud_noises;
+    // Fifth font - small Regular, for dense lists in plugins
+    _tiny_font = &font_tiny;
     Serial.println("LoudNoises font loaded (20pt)");
 
     _fonts_initialized = true;

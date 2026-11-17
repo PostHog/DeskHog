@@ -1,0 +1,1 @@
+{"id":"lamp-1","name":"Desk lamp","zoneName":"Office","capabilitiesObj":{"onoff":{"value":true,"title":"Turned on","getable":true,"setable":true},"dim":{"value":0.8,"title":"Dim level","setable":true}}}

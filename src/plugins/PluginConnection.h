@@ -46,6 +46,13 @@ public:
     void detach(PluginCard& card);
     /** Forget cards that stayed away. @return true when nothing is left and the connection can go. */
     bool cleanUp(uint32_t nowMs);
+    /**
+     * Ask the program for a list of choices (see LuaPlugin::choices). The
+     * answer goes to PluginManager::finishChoices. Also keeps a connection
+     * without cards running for a while: it was started just to answer this,
+     * and the card it is being asked for is probably about to be added.
+     */
+    void askChoices(const std::string& function, const std::string& job, const deskhog::LuaPlugin::ChoiceContext& context);
 
     // PluginServices
     uint32_t millis() override;
@@ -57,6 +64,11 @@ public:
     bool storeGet(const std::string& key, std::string& json) override;
     bool storeSet(const std::string& key, const std::string& json) override;
     void log(const std::string& line) override;
+    std::string timeZone() override;
+    deskhog::NetStatus netStatus() override;
+    uint32_t entropy() override;
+    void notify(const std::string& cardId, const deskhog::Notice& notice) override;
+    void choicesDone(int requestId, const std::vector<deskhog::Choice>& choices, const std::string& error) override;
 
 private:
     void addToProgram(PluginCard& card, const PluginConnectionRecord* record);
@@ -74,4 +86,8 @@ private:
     uint32_t emptySinceMs_ = 0;
     std::map<std::string, std::string> store_;
     bool ledHeld_ = false;  ///< This connection set the LED with no time limit
+    std::map<int, std::string> choiceRequests_;  ///< Request id -> the manager's job that waits for it
+    int nextChoiceRequest_ = 1;
+    bool kept_ = false;        ///< Stay around without cards until keepUntilMs_
+    uint32_t keepUntilMs_ = 0;
 };

@@ -46,10 +46,40 @@ function makeDirectory() {
     return { files, index };
 }
 
+/**
+ * Give a pretend device a plugin that uses the newer parts of the API: settings
+ * whose choices the plugin lists (`choices`), and messages pushed to it. It has
+ * one connection ("homey") with one card ("homey:1").
+ */
+function addHomey(device) {
+    device.plugins.push({
+        name: 'homey', title: 'Homey', multiCard: true, message: true,
+        config: [field('url', 'Address'), field('home', 'Home', { choices: true })],
+        kinds: [
+            { key: 'device', name: 'Device', message: true, config: [field('device', 'Device', { choices: true }), field('label', 'Label')] },
+            { key: 'flow', name: 'Flow', config: [field('flow', 'Flow', { choices: true })] },
+        ],
+        source: 'plugin = { name = "Homey" }\n', version: '1.0', hash: sourceHash('plugin = { name = "Homey" }\n'),
+    });
+    device.connections.push({ id: 'homey', plugin: 'homey', name: 'Homey', settings: { url: 'http://homey.local' }, secretsSet: [], state: 'running', memory: 20000 });
+    device.cards.push({ type: 'PLUGIN', config: 'homey:1', name: 'Device', plugin: 'homey', connection: 'homey', card: '1', kind: 'device', settings: { device: 'lamp' }, frames: 1, onScreen: false });
+    // What the plugin answers, by "<connection>/<kind>/<field>". A string is an error it reports.
+    device.choices['homey/device/device'] = [{ value: 'lamp', label: 'Kitchen lamp' }, { value: 'plug', label: 'Coffee machine' }];
+    device.choices['homey/flow/flow'] = 'log in to Homey first';
+    device.choices['homey//home'] = [{ value: 'h1', label: 'Home' }];
+    return device;
+}
+
 function makeDevice() {
     const device = {
         requests: [],
+        notifications: [],   // what plugins said with notify() that nobody has seen yet: {card, text, count, age}
+        messages: [],        // what was pushed to plugins: {card | connection, body}
+        choices: {},         // lists plugins offer for settings, see addHomey()
+        choiceForms: [],     // what each list was asked with: {key, form}, the form being the page's &settings=
+        choicePolls: {},     // how often each was asked for: the first answer is "pending", as on the device
         directory: { source: 'TimBroddin/DeskHog', default: 'TimBroddin/DeskHog' },
+        timezone: { posix: 'UTC0', name: '' },   // as on a new device
         internet: makeDirectory(),   // what the browser finds at the directory's address; null for "no internet"
         wifiConnected: true,
         plugins: [
@@ -102,9 +132,11 @@ function makeDevice() {
 
     device.state = () => ({
         directory: device.directory,
+        timezone: device.timezone,
         plugins: device.plugins.map(plugin => { const { source, ...rest } = plugin; return rest; }),
         connections: device.connections.map(c => Object.assign({ cards: device.cards.filter(card => card.connection === c.id).length }, c)),
-        cards: device.cards.map(c => Object.assign({ key: c.type + '|' + c.config }, c)),
+        cards: device.cards.map(c => Object.assign({ key: c.type + '|' + c.config, front: true }, c)),
+        notifications: device.notifications,
         storage: { used: 45056, total: 1048576 },
         system: { plugin_cards: 5, heap_free: 80000, psram_free: 1400000 },
     });
@@ -173,15 +205,58 @@ function makeDevice() {
                 device.connections.push(connection);
             }
             const id = String(device.cards.filter(c => c.connection === connection.id).length + 1);
-            device.cards.push({ type: 'PLUGIN', config: connection.id + ':' + id, name: body.name || (plugin.multiCard ? plugin.kinds.find(k => k.key === body.kind).name : plugin.title), plugin: plugin.name, connection: connection.id, card: id, kind: body.kind, settings: body.settings || {}, frames: 0, onScreen: false });
+            device.cards.push({ type: 'PLUGIN', config: connection.id + ':' + id, name: body.name || (plugin.multiCard ? plugin.kinds.find(k => k.key === body.kind).name : plugin.title), plugin: plugin.name, connection: connection.id, card: id, kind: body.kind, settings: body.settings || {}, front: body.front !== false, frames: 0, onScreen: false });
             return json({ ok: true, key: connection.id + ':' + id });
         }
         if (method === 'POST' && pathname === '/api/cards/update') {
             const card = device.cards.find(c => c.config === params.get('key'));
             if (!card) return json({ ok: false, error: 'no such card' }, 404);
             if (body.name) card.name = body.name;
+            if (typeof body.front === 'boolean') card.front = body.front;
             Object.assign(card.settings, body.settings || {});
             return json({ ok: true });
+        }
+        if (pathname === '/api/cards/message' || pathname === '/api/connections/message') {
+            // As the firmware does: the plugin's message() gets the body, if it has one.
+            if (method !== 'POST') return json({ ok: false, error: 'POST the message as the request body' }, 405);
+            const toCard = pathname === '/api/cards/message';
+            const card = toCard ? device.cards.find(c => c.config === params.get('key')) : null;
+            const connection = device.connections.find(c => c.id === (toCard ? card && card.connection : params.get('id')));
+            if (!connection) return json({ ok: false, error: toCard ? 'no such card' : 'no such connection' }, 404);
+            const plugin = device.plugins.find(p => p.name === connection.plugin);
+            const kind = card && plugin ? plugin.kinds.find(k => k.key === card.kind) : null;
+            const takes = plugin && (toCard ? (plugin.multiCard ? kind && kind.message : plugin.message) : plugin.message);
+            if (!takes) return json({ ok: false, error: 'this plugin has no message() function' }, 404);
+            const text = typeof body === 'string' ? body : Buffer.isBuffer(body) ? body.toString('utf8') : JSON.stringify(body === undefined ? '' : body);
+            if (Buffer.byteLength(text) > 4096) return json({ ok: false, error: 'the message is larger than 4 KB' }, 413);
+            if (device.messages.length >= 8) return json({ ok: false, error: 'too many messages are waiting for this plugin. Try again in a moment' }, 429);
+            device.messages.push(toCard ? { card: card.config, body: text } : { connection: connection.id, body: text });
+            return json({ ok: true });
+        }
+        if (method === 'GET' && pathname === '/api/connections/choices') {
+            const connection = device.connections.find(c => c.id === params.get('id'));
+            if (!connection) return json({ ok: false, error: 'no such connection' }, 404);
+            const plugin = device.plugins.find(p => p.name === connection.plugin);
+            const kind = params.get('kind') || '';
+            const fields = !plugin ? [] : kind ? ((plugin.kinds.find(k => k.key === kind) || {}).config || []) : plugin.config;
+            if (!fields.some(f => f.key === params.get('field') && f.choices)) return json({ ok: false, error: 'that setting has no list of choices' }, 404);
+            const key = connection.id + '/' + kind + '/' + params.get('field');
+            // As the firmware does: the first request starts the plugin on it, a later one gets the list.
+            // &settings= is what the form holds, as a JSON object: the plugin's function gets it.
+            let form = {};
+            if (params.get('settings')) {
+                try { form = JSON.parse(params.get('settings')); } catch (error) { form = null; }
+                if (!form || typeof form !== 'object' || Array.isArray(form) || params.get('settings').length > 1024) {
+                    return json({ ok: false, error: 'settings is a JSON object of at most 1 KB' }, 400);
+                }
+            }
+            device.choicePolls[key] = (device.choicePolls[key] || 0) + 1;
+            if (device.choicePolls[key] % 2 === 1) return json({ ok: true, pending: true }, 202);
+            device.choiceForms.push({ key, form });
+            // A function stands for a plugin whose list depends on the form.
+            const answer = typeof device.choices[key] === 'function' ? device.choices[key](form) : device.choices[key];
+            if (typeof answer === 'string') return json({ ok: false, error: answer }, 502);
+            return json({ ok: true, choices: answer || [] });
         }
         if (method === 'POST' && pathname === '/api/cards/layout') {
             device.cards = body.map(key => device.cards.find(c => c.type + '|' + c.config === key)).filter(Boolean);
@@ -249,6 +324,12 @@ function makeDevice() {
             device.directory.source = body.source || device.directory.default;
             return json({ ok: true, source: device.directory.source });
         }
+        if (method === 'POST' && pathname === '/api/timezone') {
+            // As the firmware does: a POSIX string, or nothing for UTC.
+            if (body.posix && !/^(<[^>]+>|[A-Za-z]{3,})[-+]?\d/.test(body.posix)) return json({ ok: false, error: 'that is not a POSIX time zone' }, 400);
+            device.timezone = body.posix ? { posix: body.posix, name: body.name || '' } : { posix: 'UTC0', name: '' };
+            return json({ ok: true, posix: device.timezone.posix });
+        }
         if (method === 'POST' && pathname === '/api/actions/save-wifi') return json({ status: 'queued' }, 202);
         return json({ ok: false, error: 'not found: ' + method + ' ' + pathname }, 404);
     };
@@ -267,4 +348,4 @@ function makeDevice() {
     return device;
 }
 
-module.exports = { makeDevice, makeDirectory, sourceHash };
+module.exports = { makeDevice, makeDirectory, addHomey, sourceHash };
