@@ -77,6 +77,12 @@ public:
 
     const std::vector<Pending>& pending() const { return pending_; }
 
+    /** A card was used within the last kPlayingMs. */
+    bool playing(uint32_t nowMs) const { return everBusy_ && nowMs - lastBusyMs_ < kPlayingMs; }
+
+    /** A banner is on screen. */
+    bool bannerShowing() const { return bannerOn_; }
+
     /** Forget everything about cards whose name starts with `prefix`. */
     void forget(const std::string& prefix);
 
@@ -86,7 +92,6 @@ private:
         uint32_t atMs;
     };
 
-    bool playing(uint32_t nowMs) const { return everBusy_ && nowMs - lastBusyMs_ < kPlayingMs; }
     bool canInterrupt(const std::string& key, uint32_t nowMs) const;
     void endBanner(Actions* actions);
 

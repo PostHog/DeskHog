@@ -202,4 +202,25 @@ void DeskRules::preview(bool night, uint32_t nowMs) {
     previewStart_ = nowMs;
 }
 
+int Rotation::tick(const Input& input, uint32_t nowMs) {
+    if (!seen_ || input.onScreen != lastOnScreen_) {
+        seen_ = true;
+        lastOnScreen_ = input.onScreen;
+        since_ = nowMs;
+    }
+    if (seconds_ <= 0 || input.playing || input.banner || input.screenOff) return -1;
+    if (handActive_ && nowMs - handAt_ < kHandPauseMs) return -1;
+    if (nowMs - since_ < static_cast<uint32_t>(seconds_) * 1000u) return -1;
+
+    const int count = static_cast<int>(input.rotates.size());
+    const int here = input.onScreen;
+    if (here < 0 || here >= count || !input.rotates[here]) return -1;
+    // The next card that takes part, wrapping round; the card itself comes last.
+    for (int step = 1; step < count; step++) {
+        const int index = (here + step) % count;
+        if (input.rotates[index]) return index;
+    }
+    return -1;
+}
+
 }  // namespace deskhog

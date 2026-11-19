@@ -4517,6 +4517,132 @@ TEST(wake_timer_survives_millis_wrapping) {
 }
 
 
+namespace {
+
+Rotation::Input rotationInput(std::vector<bool> rotates, int onScreen) {
+    Rotation::Input input;
+    input.rotates = rotates;
+    input.onScreen = onScreen;
+    return input;
+}
+
+Rotation rotationEvery(int seconds) {
+    Rotation rotation;
+    rotation.setSeconds(seconds);
+    return rotation;
+}
+
+}  // namespace
+
+TEST(rotation_is_off_by_default) {
+    Rotation rotation;
+    const Rotation::Input input = rotationInput({false, true, true}, 1);
+    for (uint32_t t = 0; t < 1000000; t += 5000) CHECK_EQ(rotation.tick(input, t), -1);
+}
+
+TEST(rotation_moves_on_and_wraps) {
+    Rotation rotation = rotationEvery(30);
+    Rotation::Input input = rotationInput({false, true, true, true}, 1);
+    CHECK_EQ(rotation.tick(input, 0), -1);
+    CHECK_EQ(rotation.tick(input, 29900), -1);
+    CHECK_EQ(rotation.tick(input, 30000), 2);
+    input.onScreen = 3;
+    CHECK_EQ(rotation.tick(input, 30100), -1);
+    CHECK_EQ(rotation.tick(input, 60100), 1);
+}
+
+TEST(rotation_skips_cards) {
+    Rotation rotation = rotationEvery(10);
+    Rotation::Input input = rotationInput({false, true, false, true}, 1);
+    rotation.tick(input, 0);
+    CHECK_EQ(rotation.tick(input, 10000), 3);
+    input.onScreen = 3;
+    rotation.tick(input, 10000);
+    CHECK_EQ(rotation.tick(input, 20000), 1);
+}
+
+TEST(rotation_never_leaves_a_skipped_card) {
+    Rotation rotation = rotationEvery(10);
+    for (int onScreen : {0, 2}) {
+        const Rotation::Input input = rotationInput({false, true, false, true}, onScreen);
+        for (uint32_t t = 0; t < 200000; t += 7000) CHECK_EQ(rotation.tick(input, t), -1);
+    }
+}
+
+TEST(rotation_needs_two_cards) {
+    Rotation rotation = rotationEvery(10);
+    const Rotation::Input one = rotationInput({false, true}, 1);
+    const Rotation::Input alone = rotationInput({false, true, false}, 1);
+    for (uint32_t t = 0; t < 100000; t += 5000) {
+        CHECK_EQ(rotation.tick(one, t), -1);
+        CHECK_EQ(rotation.tick(alone, t), -1);
+    }
+}
+
+TEST(rotation_waits_while_playing_a_banner_or_dark) {
+    for (int flag = 0; flag < 3; flag++) {
+        Rotation rotation = rotationEvery(30);
+        Rotation::Input input = rotationInput({false, true, true}, 1);
+        rotation.tick(input, 0);
+        input.playing = flag == 0;
+        input.banner = flag == 1;
+        input.screenOff = flag == 2;
+        CHECK_EQ(rotation.tick(input, 31000), -1);
+        input.playing = input.banner = input.screenOff = false;
+        CHECK_EQ(rotation.tick(input, 31100), 2);
+    }
+}
+
+TEST(rotation_pauses_after_a_move_by_hand) {
+    Rotation rotation = rotationEvery(10);
+    Rotation::Input input = rotationInput({false, true, true}, 1);
+    rotation.tick(input, 0);
+    input.onScreen = 2;
+    rotation.movedByHand(0);
+    CHECK_EQ(rotation.tick(input, 0), -1);
+    CHECK_EQ(rotation.tick(input, 20000), -1);
+    CHECK_EQ(rotation.tick(input, Rotation::kHandPauseMs - 1), -1);
+    CHECK_EQ(rotation.tick(input, Rotation::kHandPauseMs), 1);
+}
+
+TEST(a_card_that_came_to_the_front_gets_a_full_interval) {
+    Rotation rotation = rotationEvery(30);
+    Rotation::Input input = rotationInput({false, true, true}, 1);
+    rotation.tick(input, 0);
+    input.onScreen = 2;
+    CHECK_EQ(rotation.tick(input, 25000), -1);
+    CHECK_EQ(rotation.tick(input, 54900), -1);
+    CHECK_EQ(rotation.tick(input, 55000), 1);
+}
+
+TEST(rotation_survives_a_changing_stack) {
+    Rotation rotation = rotationEvery(10);
+    const std::vector<std::vector<bool>> lists = {
+        {}, {true}, {false, true, true, true, true}, {false, true, true}, {true, false}, {}, {false, true, true, true}};
+    uint32_t now = 0;
+    for (int onScreen : {-3, -1, 0, 1, 2, 3, 4, 9, 1000}) {
+        for (const auto& rotates : lists) {
+            now += 20000;
+            Rotation::Input input = rotationInput(rotates, onScreen);
+            const int next = rotation.tick(input, now);
+            CHECK(next == -1 || (next >= 0 && next < static_cast<int>(rotates.size()) && rotates[next]));
+        }
+    }
+}
+
+TEST(rotation_timer_survives_millis_wrapping) {
+    Rotation rotation = rotationEvery(30);
+    Rotation::Input input = rotationInput({false, true, true}, 1);
+    rotation.tick(input, 0xFFFFFFF0u);
+    CHECK_EQ(rotation.tick(input, 0x00000010u), -1);
+    CHECK_EQ(rotation.tick(input, 0xFFFFFFF0u + 30000u), 2);
+
+    rotation.movedByHand(0xFFFFFFF0u);
+    CHECK_EQ(rotation.tick(input, 0x00000010u), -1);
+    CHECK_EQ(rotation.tick(input, 0xFFFFFFF0u + Rotation::kHandPauseMs), 2);
+}
+
+
 // ----------------------------------------------------------------- messages
 
 TEST(message_reaches_a_single_card_plugin) {

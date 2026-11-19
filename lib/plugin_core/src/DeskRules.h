@@ -42,8 +42,8 @@ DeviceSettings sanitized(const DeviceSettings& stored);
 
 class DeskRules {
 public:
-    static const uint32_t kWakeMs = 30000;     // screen stays at the day level after a press at night
-    static const uint32_t kPreviewMs = 3000;   // a slider on the web page shows its level this long
+    static constexpr uint32_t kWakeMs = 30000;     // screen stays at the day level after a press at night
+    static constexpr uint32_t kPreviewMs = 3000;   // a slider on the web page shows its level this long
     struct Levels { int screen; int led; bool night; bool manual; };
     void setSettings(const DeviceSettings& settings);
     /** @param epochSeconds 0 while the clock is not set: then it is never night by schedule. */
@@ -79,6 +79,33 @@ private:
     uint32_t wakeStart_ = 0, wakeSpan_ = 0;
     bool previewActive_ = false, previewNight_ = false;
     uint32_t previewStart_ = 0;
+};
+
+/** Moves to the next card every few seconds, when nobody is using the device. */
+class Rotation {
+public:
+    static constexpr uint32_t kHandPauseMs = 60000;  // after someone changed cards themselves
+    struct Input {
+        std::vector<bool> rotates;  // one per card in stack order; false for the status card and skipped cards
+        int onScreen = 0;           // index into `rotates`
+        bool playing = false;       // Attention::playing
+        bool banner = false;        // Attention::bannerShowing
+        bool screenOff = false;     // Levels.screen == 0
+    };
+    void setSeconds(int seconds) { seconds_ = seconds; }  // 0 switches it off
+    /** Someone changed cards with a button or from the web page. */
+    void movedByHand(uint32_t nowMs) { handActive_ = true; handAt_ = nowMs; }
+    /** @return the index to show now, or -1. */
+    int tick(const Input& input, uint32_t nowMs);
+
+private:
+    int seconds_ = 0;
+    bool handActive_ = false;
+    uint32_t handAt_ = 0;
+    // A card gets a full interval from the moment it appears, whoever brought it.
+    bool seen_ = false;
+    int lastOnScreen_ = 0;
+    uint32_t since_ = 0;
 };
 
 }  // namespace deskhog
