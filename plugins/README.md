@@ -556,6 +556,13 @@ changes, not every frame.
 | `net.ssid()` | The name of the network, or `nil` while offline |
 | `net.ip()` | The device's address as text, or `nil` while offline |
 
+### `device`
+
+| Call | Returns |
+|---|---|
+| `device.battery()` | `{ percent = 82, volts = 3.98, charging = false }`, or `nil` unless the owner said in the device's settings that it has a battery |
+| `device.name()` | The name the owner gave the device, `"deskhog"` unless changed |
+
 ### `time` and `input`
 
 | Call | Returns |
@@ -918,6 +925,8 @@ usually shorter. What goes where:
   | `--time 2026-11-17T14:05` | What the clock says when the run starts, in the `--tz` zone. Seconds may follow (`T14:05:30`), a `Z` at the end means UTC, and a plain number is Unix time. Now, without it. The clock runs with the simulation either way, so `--seconds 70` crosses a minute |
   | `--seed 7` | `math.random` gives the same numbers on every run, for a game whose picture should not change |
   | `--rssi -52,-60,-71` | WiFi signal strength: one value per second, over and over. -58 without it |
+  | `--battery 82` | The device has a battery at 82 percent (`--battery 82+` while charging; volts are 3.7 + percent/200). `device.battery()` is `nil` without it |
+  | `--name kitchen` | What `device.name()` says. `deskhog` without it |
   | `--offline` | No WiFi: `net.online()` is false and every request fails with `"no WiFi"` |
   | `--reply <part of URL>=<file>` | Answer requests whose address contains that part from a file, with status 200. For services that need a login, and for pictures that stay the same |
   | `--reply-status <part>=304` | Answer them with another status. Works without `--reply` too: the body is then empty |

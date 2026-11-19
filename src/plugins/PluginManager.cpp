@@ -617,6 +617,8 @@ void PluginManager::inspectPlugin(const std::string& name) {
         void log(const std::string&) override {}
         std::string timeZone() override { return "UTC0"; }
         deskhog::NetStatus netStatus() override { return deskhog::NetStatus(); }
+        bool battery(deskhog::BatteryStatus&) override { return false; }
+        std::string deviceName() override { return "deskhog"; }
         uint32_t entropy() override { return 0; }
         void notify(const std::string&, const deskhog::Notice&) override {}
         void choicesDone(int, const std::vector<deskhog::Choice>&, const std::string&) override {}

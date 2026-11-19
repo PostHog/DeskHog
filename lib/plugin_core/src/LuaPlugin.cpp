@@ -743,6 +743,11 @@ void LuaPlugin::openSandbox(lua_State* L) {
     };
     setFunctions(L, "net", net);
 
+    static const luaL_Reg device[] = {
+        {"battery", l_device_battery}, {"name", l_device_name}, {nullptr, nullptr},
+    };
+    setFunctions(L, "device", device);
+
     static const luaL_Reg timer[] = {
         {"after", l_timer_after}, {"every", l_timer_every}, {"cancel", l_timer_cancel}, {nullptr, nullptr},
     };
@@ -2285,6 +2290,40 @@ static int pushNetText(lua_State* L, PluginServices& services, bool ip) {
 
 int LuaPlugin::l_net_ssid(lua_State* L) { return pushNetText(L, from(L)->services_, false); }
 int LuaPlugin::l_net_ip(lua_State* L) { return pushNetText(L, from(L)->services_, true); }
+
+// ---- device
+
+// device.battery(): { percent, volts, charging }, or nil when there is no battery to read.
+int LuaPlugin::l_device_battery(lua_State* L) {
+    BatteryStatus battery;
+    bool present = false;
+    {
+        present = from(L)->services_.battery(battery);
+    }
+    if (!present) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_createtable(L, 0, 3);
+    lua_pushinteger(L, battery.percent);
+    lua_setfield(L, -2, "percent");
+    lua_pushnumber(L, (lua_Number)battery.volts);
+    lua_setfield(L, -2, "volts");
+    lua_pushboolean(L, battery.charging);
+    lua_setfield(L, -2, "charging");
+    return 1;
+}
+
+// device.name(): what the owner called this device.
+int LuaPlugin::l_device_name(lua_State* L) {
+    int status = LUA_OK;
+    {
+        const std::string name = from(L)->services_.deviceName();
+        status = pushStringProtected(L, name.data(), name.size());
+    }
+    if (status != LUA_OK) return lua_error(L);
+    return 1;
+}
 
 // ---- notify
 

@@ -92,6 +92,12 @@ struct NetStatus {
     std::string ip;
 };
 
+struct BatteryStatus {
+    int percent = 0;
+    float volts = 0;
+    bool charging = false;
+};
+
 /** A plugin asking for attention with notify(). */
 struct Notice {
     std::string text;      ///< For the banner over the card. May be "".
@@ -129,6 +135,10 @@ public:
     /** The device's time zone as a POSIX TZ string, e.g. "CET-1CEST,M3.5.0,M10.5.0/3". "" or "UTC0" for UTC. */
     virtual std::string timeZone() = 0;
     virtual NetStatus netStatus() = 0;
+    /** @return false when the device has no battery, or its owner has not said it has one. */
+    virtual bool battery(BatteryStatus& status) = 0;
+    /** The name the owner gave the device. */
+    virtual std::string deviceName() = 0;
     /** A number nobody can guess, from the hardware if it can make one. Seeds math.random. */
     virtual uint32_t entropy() = 0;
     /**

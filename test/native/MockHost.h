@@ -145,10 +145,19 @@ public:
     std::string led = "default";
     std::string zone = "UTC0";
     NetStatus net;
+    bool hasBattery = false;
+    BatteryStatus batteryStatus;
+    std::string name = "deskhog";
     uint32_t entropyCalls = 0;
 
     std::string timeZone() override { return zone; }
     NetStatus netStatus() override { return net; }
+    bool battery(BatteryStatus& status) override {
+        if (!hasBattery) return false;
+        status = batteryStatus;
+        return true;
+    }
+    std::string deviceName() override { return name; }
     uint32_t entropy() override { return 0x9E3779B9u * ++entropyCalls; }
 
     uint32_t millis() override {

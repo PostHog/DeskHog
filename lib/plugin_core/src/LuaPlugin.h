@@ -342,6 +342,8 @@ private:
     static int l_net_rssi(lua_State* L);
     static int l_net_ssid(lua_State* L);
     static int l_net_ip(lua_State* L);
+    static int l_device_battery(lua_State* L);
+    static int l_device_name(lua_State* L);
     static int l_timer_after(lua_State* L);
     static int l_timer_every(lua_State* L);
     static int l_timer_cancel(lua_State* L);

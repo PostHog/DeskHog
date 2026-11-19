@@ -3444,6 +3444,29 @@ TEST(net_reports_the_connection) {
     CHECK(f.services.logged("true -61 Hedgehog 192.168.1.20"));
 }
 
+TEST(device_battery_is_nil_without_one) {
+    Fixture f;
+    CHECK(f.start("print(device.battery())"));
+    CHECK(f.services.logged("nil"));
+}
+
+TEST(device_battery_reports_the_reading) {
+    Fixture f;
+    f.services.hasBattery = true;
+    f.services.batteryStatus.percent = 82;
+    f.services.batteryStatus.volts = 3.98f;
+    f.services.batteryStatus.charging = true;
+    CHECK(f.start("local b = device.battery(); print(b.percent, string.format('%.2f', b.volts), b.charging)"));
+    CHECK(f.services.logged("82 3.98 true"));
+}
+
+TEST(device_name_is_the_devices_name) {
+    Fixture f;
+    f.services.name = "kitchen";
+    CHECK(f.start("print(device.name())"));
+    CHECK(f.services.logged("kitchen"));
+}
+
 TEST(random_numbers_start_from_the_device) {
     const char* source = "print(math.random(1000000), math.random(1000000), math.random(1000000))";
     Fixture one, same, other;

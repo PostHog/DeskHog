@@ -66,6 +66,8 @@ public:
     void log(const std::string& line) override;
     std::string timeZone() override;
     deskhog::NetStatus netStatus() override;
+    bool battery(deskhog::BatteryStatus& status) override;
+    std::string deviceName() override;
     uint32_t entropy() override;
     void notify(const std::string& cardId, const deskhog::Notice& notice) override;
     void choicesDone(int requestId, const std::vector<deskhog::Choice>& choices, const std::string& error) override;

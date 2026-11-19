@@ -183,6 +183,15 @@ public:
         status.ip = "192.168.1.50";
         return status;
     }
+    bool hasBattery = false;
+    BatteryStatus batteryStatus;
+    std::string name = "deskhog";
+    bool battery(BatteryStatus& status) override {
+        if (!hasBattery) return false;
+        status = batteryStatus;
+        return true;
+    }
+    std::string deviceName() override { return name; }
     uint32_t entropy() override { return seeded ? (uint32_t)seededNumbers() : std::random_device()(); }
 
     // notify(): the same rules as on the device decide what comes of it.
@@ -410,6 +419,9 @@ void usage() {
            "  --seed N          math.random gives the same numbers on every run (default: different ones)\n"
            "  --rssi LIST       WiFi signal strength in dBm, e.g. -58 or -52,-55,-61,-70: one value per second,\n"
            "                    over and over (default: -58)\n"
+           "  --battery N[+]    the device has a battery at N percent; a + means it is charging\n"
+           "                    (default: no battery, device.battery() is nil)\n"
+           "  --name TEXT       what device.name() says (default: deskhog)\n"
            "  --offline         no WiFi: net.online() is false and every request fails with \"no WiFi\"\n"
            "  --store KEY=JSON  a value the plugin saved earlier, e.g. best=42; repeat for more\n"
            "  --card KIND       which kind of card to show, for plugins with several (default: the first)\n"
@@ -494,6 +506,15 @@ int main(int argc, char** argv) {
                 usage();
                 return 2;
             }
+        } else if (arg == "--battery" && hasValue) {
+            const char* value = argv[++i];
+            const int percent = atoi(value);
+            services.hasBattery = true;
+            services.batteryStatus.percent = percent < 0 ? 0 : (percent > 100 ? 100 : percent);
+            services.batteryStatus.volts = 3.7f + services.batteryStatus.percent / 200.0f;
+            services.batteryStatus.charging = value[strlen(value) - 1] == '+';
+        } else if (arg == "--name" && hasValue) {
+            services.name = argv[++i];
         } else if (arg == "--offline") {
             services.offline = true;
         } else if (arg == "--tz" && hasValue) {
