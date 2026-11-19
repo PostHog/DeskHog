@@ -818,7 +818,10 @@ void PluginManager::runAttention(uint32_t now) {
     }
     if (!actions.show.empty()) {
         PluginCard* card = runningCard(actions.show);
-        if (card && showCard_) showCard_(card->getCard());
+        if (card && showCard_) {
+            showCard_(card->getCard());
+            if (onBanner_) onBanner_(deskhog::Attention::kBannerMs);
+        }
     }
     // A banner went up over the card on screen: light the screen while it shows.
     if (onBanner_ && !onScreen.empty() && attention_.banner(onScreen) &&

@@ -162,6 +162,7 @@ DeskRules::Levels DeskRules::tick(int64_t epochSeconds, const std::string& posix
     if (previewActive_ && nowMs - previewStart_ < kPreviewMs) {
         Levels levels = levelsFor(previewNight_, manual_, nowMs);
         if (previewNight_) levels.screen = settings_.screenNight;
+        levels.night = night_;  // only the levels follow the preview; the mode stays the real one
         return levels;
     }
     previewActive_ = false;

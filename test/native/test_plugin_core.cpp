@@ -4519,7 +4519,8 @@ TEST(preview_shows_a_level_briefly) {
     rules.tick(noon, "UTC0", 1000);
     rules.preview(true, 1000);
     DeskRules::Levels levels = rules.tick(noon, "UTC0", 3999);
-    CHECK(levels.night);
+    CHECK(!levels.night);
+    CHECK(!levels.manual);
     CHECK_EQ(levels.screen, 10);
     CHECK_EQ(levels.led, 0);
     levels = rules.tick(noon, "UTC0", 4000);
@@ -4536,7 +4537,7 @@ TEST(wake_timer_survives_millis_wrapping) {
     CHECK_EQ(rules.tick(late, "UTC0", 0xFFFFFFF0u + DeskRules::kWakeMs).screen, 10);
 
     rules.preview(true, 0xFFFFFFF0u);
-    CHECK_EQ(rules.tick(utcAt(2026, 3, 1, 12, 0), "UTC0", 0x00000010u).night, true);
+    CHECK_EQ(rules.tick(utcAt(2026, 3, 1, 12, 0), "UTC0", 0x00000010u).screen, 10);
 }
 
 
