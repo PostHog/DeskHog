@@ -165,6 +165,42 @@ void ConfigManager::setTimeZone(const String& posix, const String& name) {
     commit();
 }
 
+// The device settings sit next to the time zone, one key per field.
+deskhog::DeviceSettings ConfigManager::getDeviceSettings() {
+    deskhog::DeviceSettings settings;
+    auto number = [this](const char* key, int& value) {
+        if (_preferences.isKey(key)) value = _preferences.getInt(key, value);
+    };
+    auto flag = [this](const char* key, bool& value) {
+        if (_preferences.isKey(key)) value = _preferences.getBool(key, value);
+    };
+    if (_preferences.isKey("dm_name")) settings.name = _preferences.getString("dm_name", "").c_str();
+    number("dm_screen_day", settings.screenDay);
+    number("dm_screen_night", settings.screenNight);
+    number("dm_led_day", settings.ledDay);
+    number("dm_led_night", settings.ledNight);
+    flag("dm_night_on", settings.nightEnabled);
+    number("dm_night_from", settings.nightFrom);
+    number("dm_night_until", settings.nightUntil);
+    number("dm_rotate", settings.rotateSeconds);
+    flag("dm_battery", settings.battery);
+    return deskhog::sanitized(settings);
+}
+
+void ConfigManager::saveDeviceSettings(const deskhog::DeviceSettings& settings) {
+    _preferences.putString("dm_name", settings.name.c_str());
+    _preferences.putInt("dm_screen_day", settings.screenDay);
+    _preferences.putInt("dm_screen_night", settings.screenNight);
+    _preferences.putInt("dm_led_day", settings.ledDay);
+    _preferences.putInt("dm_led_night", settings.ledNight);
+    _preferences.putBool("dm_night_on", settings.nightEnabled);
+    _preferences.putInt("dm_night_from", settings.nightFrom);
+    _preferences.putInt("dm_night_until", settings.nightUntil);
+    _preferences.putInt("dm_rotate", settings.rotateSeconds);
+    _preferences.putBool("dm_battery", settings.battery);
+    commit();
+}
+
 std::vector<CardConfig> ConfigManager::getCardConfigs() {
     std::vector<CardConfig> configs;
     

@@ -35,6 +35,7 @@ void NeoPixelController::update() {
     }
     
     lastUpdate = currentTime;
+    FastLED.setBrightness(static_cast<uint8_t>(level.load() * 255 / 100));
 
     const uint32_t override = overrideColor.load();
     if (override & OVERRIDE_ACTIVE) {
@@ -85,4 +86,8 @@ void NeoPixelController::setOverride(uint8_t r, uint8_t g, uint8_t b, uint32_t d
 
 void NeoPixelController::clearOverride() {
     overrideColor.store(0);
+}
+
+void NeoPixelController::setLevel(uint8_t percent) {
+    level.store(percent > 100 ? 100 : percent);
 }

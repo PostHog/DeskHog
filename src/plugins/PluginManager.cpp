@@ -12,6 +12,7 @@
 #include <WiFi.h>
 
 #include "ConfigManager.h"
+#include "DeskManners.h"
 #include "EventQueue.h"
 #include "HttpRedirect.h"
 #include "bundled_plugins.h"
@@ -799,7 +800,7 @@ void PluginManager::runAttention(uint32_t now) {
     // long ago the press was. Nothing takes the screen away mid-hold.
     if (!onScreen.empty()) {
         for (int i = 0; i <= Input::BUTTON_UP; i++) {
-            if (buttons[i].isPressed()) {
+            if (buttonHeld(i)) {
                 attention_.busy(now);
                 break;
             }
@@ -837,6 +838,12 @@ void PluginManager::requestAttention(const std::string& key, const deskhog::Noti
 }
 
 void PluginManager::pressUsed() { attention_.busy(millis()); }
+
+bool PluginManager::buttonHeld(uint8_t button) {
+    if (button > Input::BUTTON_UP) return false;
+    if (manners_ && manners_->swallowing(button)) return false;
+    return buttons[button].isPressed();
+}
 
 std::vector<PluginNotification> PluginManager::notifications() {
     Locked locked(lock_);

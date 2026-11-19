@@ -86,9 +86,8 @@ void DisplayInterface::begin() {
     // Attach pin with 5000 Hz frequency and 8-bit resolution
     ledcAttach(_backlight_pin, 5000, 8);
     
-    // Set brightness to 80% (204 out of 255)
-    ledcWrite(_backlight_pin, 204);
-    Serial.println("Display backlight set to 80% brightness");
+    // Dark until DeskManners::begin applies the screen level from the device settings.
+    ledcWrite(_backlight_pin, 0);
     
     _tft->fillScreen(ST77XX_BLACK);
     
@@ -197,7 +196,7 @@ DisplayInterface::~DisplayInterface() {
     }
 }
 
-void DisplayInterface::setBrightness(uint8_t brightness) {
-    // Update the PWM duty cycle on the backlight pin
-    ledcWrite(_backlight_pin, brightness);
+void DisplayInterface::setBrightness(uint8_t percent) {
+    if (percent > 100) percent = 100;
+    ledcWrite(_backlight_pin, percent * 255 / 100);
 }

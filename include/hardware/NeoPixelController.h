@@ -25,6 +25,12 @@ public:
     /** Go back to the breathing animation. */
     void clearOverride();
 
+    /**
+     * How bright everything the LED shows is, in percent: the breathing, the
+     * fixed colors and notify flashes alike. 0 is dark. Safe to call from any task.
+     */
+    void setLevel(uint8_t percent);
+
 private:
     static constexpr uint8_t NUM_PIXELS = 1;
     static constexpr uint16_t UPDATE_INTERVAL_MS = 16;  // ~60fps
@@ -38,6 +44,7 @@ private:
     static constexpr uint32_t OVERRIDE_ACTIVE = 0x01000000;
     std::atomic<uint32_t> overrideColor{0};  ///< OVERRIDE_ACTIVE | 0xRRGGBB, or 0
     std::atomic<uint32_t> overrideUntil{0};  ///< millis() deadline, or 0 for none
+    std::atomic<uint8_t> level{100};         ///< Percent
     unsigned long lastUpdate;
     float breathPhase;
 }; 

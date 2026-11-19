@@ -34,6 +34,7 @@
 #include "EventQueue.h"
 #include "esp_partition.h" // Include for partition functions
 #include "plugins/PluginManager.h"
+#include "DeskManners.h"
 #include <esp_sleep.h> // Added for deep sleep functionality
 #include <esp_pm.h> // Added for power management
 
@@ -64,6 +65,7 @@ CardController* cardController; // Replace individual card objects with controll
 EventQueue* eventQueue; // Add global EventQueue
 NeoPixelController* neoPixelController;  // Renamed from neoPixelManager
 PluginManager* pluginManager;
+DeskManners* deskManners;  // Brightness and night hours
 
 // Task handles
 TaskHandle_t wifiTask;
@@ -96,7 +98,7 @@ void portalTaskFunction(void* parameter) {
 // LVGL handler task that includes button polling - added here to consolidate UI operations
 void lvglHandlerTask(void* parameter) {
     TickType_t lastButtonCheck = xTaskGetTickCount();
-    const TickType_t buttonCheckInterval = pdMS_TO_TICKS(50); // Check buttons every 50ms
+    const TickType_t buttonCheckInterval = pdMS_TO_TICKS(10); // Check buttons every 10ms
     
     static unsigned long powerOffPressStartTime = 0;
     // static bool upPressedState = false; // Unused
@@ -107,6 +109,8 @@ void lvglHandlerTask(void* parameter) {
         displayInterface->handleLVGLTasks();
 
         cardController->processUIQueue();
+
+        deskManners->tick();
         
         // Poll buttons at regular intervals
         TickType_t currentTime = xTaskGetTickCount();
@@ -130,8 +134,10 @@ void lvglHandlerTask(void* parameter) {
                 } else {
                     if (millis() - powerOffPressStartTime >= 2000) { // Held for 2 seconds
                         Serial.println("Simultaneous CENTER and DOWN hold for 2s detected. Entering deep sleep.");
-                        // Optional: Turn off display backlight or other peripherals before sleep
-                        // displayInterface->setBacklight(0); // Example if such a function exists
+                        // Dark before sleeping. The LED task shows the new level within 16 ms.
+                        displayInterface->setBrightness(0);
+                        neoPixelController->setLevel(0);
+                        vTaskDelay(pdMS_TO_TICKS(50));
 			esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
                         esp_deep_sleep_start();
                     }
@@ -143,16 +149,17 @@ void lvglHandlerTask(void* parameter) {
                 // Process individual button presses if power-off sequence is not active or completed.
                 // Check .pressed() for single press actions (triggers on state change).
                 // This ensures that navigation still works if the power-off combo isn't fully executed.
-                if (buttons[Input::BUTTON_UP].pressed()) {
+                // A press that only wakes a dark screen at night goes no further.
+                if (buttons[Input::BUTTON_UP].pressed() && !deskManners->buttonPressed(Input::BUTTON_UP)) {
                     // Ensure this doesn't trigger if it was part of the combo that just got released
                     // However, .pressed() fires on the transition, so if it was held and released, 
                     // it won't fire again here unless pressed again separately.
                     cardController->getCardStack()->handleButtonPress(Input::BUTTON_UP);
                 }
-                if (buttons[Input::BUTTON_DOWN].pressed()) {
+                if (buttons[Input::BUTTON_DOWN].pressed() && !deskManners->buttonPressed(Input::BUTTON_DOWN)) {
                     cardController->getCardStack()->handleButtonPress(Input::BUTTON_DOWN);
                 }
-                if (buttons[Input::BUTTON_CENTER].pressed()) {
+                if (buttons[Input::BUTTON_CENTER].pressed() && !deskManners->buttonPressed(Input::BUTTON_CENTER)) {
                     cardController->getCardStack()->handleButtonPress(Input::BUTTON_CENTER);
                 }
             }
@@ -268,6 +275,11 @@ void setup() {
     // Lua plugins: storage, the network task and the cards that run them
     pluginManager = new PluginManager(*configManager, *neoPixelController, *eventQueue);
     pluginManager->begin();
+
+    // Screen and LED levels, night hours. Lights the screen, still blank, at its level.
+    deskManners = new DeskManners(*configManager, *displayInterface, *neoPixelController, *pluginManager);
+    deskManners->begin();
+    pluginManager->setDeskManners(deskManners);
 
     // Create and initialize card controller
     cardController = new CardController(

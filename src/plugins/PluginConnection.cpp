@@ -6,7 +6,6 @@
 
 #include "esp_heap_caps.h"
 #include "esp_random.h"
-#include "hardware/Input.h"
 #include "hardware/NeoPixelController.h"
 #include "plugins/PluginCard.h"
 #include "plugins/PluginManager.h"
@@ -153,7 +152,7 @@ int64_t PluginConnection::epochSeconds() {
     return now > 1600000000 ? static_cast<int64_t>(now) : 0;
 }
 
-bool PluginConnection::buttonHeld(deskhog::Button button) { return buttons[static_cast<int>(button)].isPressed(); }
+bool PluginConnection::buttonHeld(deskhog::Button button) { return manager_.buttonHeld(static_cast<uint8_t>(button)); }
 
 void PluginConnection::ledSet(uint8_t r, uint8_t g, uint8_t b, uint32_t durationMs) {
     manager_.led().setOverride(r, g, b, durationMs);

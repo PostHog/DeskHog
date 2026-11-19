@@ -5,6 +5,7 @@
 #include <vector>
 #include "EventQueue.h"
 #include "config/CardConfig.h"
+#include "DeskRules.h"
 
 /**
  * @class ConfigManager
@@ -108,6 +109,10 @@ public:
     String getTimeZone();
     String getTimeZoneName();
     void setTimeZone(const String& posix, const String& name);
+    /** The device settings (brightness, night hours, rotation, name, battery). Defaults for
+     *  whatever was never saved; anything out of range goes back to its default. */
+    deskhog::DeviceSettings getDeviceSettings();
+    void saveDeviceSettings(const deskhog::DeviceSettings& settings);
     std::vector<CardConfig> getCardConfigs();
 
     /**

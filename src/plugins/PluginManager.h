@@ -21,6 +21,7 @@
 #include "plugins/LvglGfx.h"
 
 class ConfigManager;
+class DeskManners;
 class DisplayInterface;
 class EventQueue;
 class NeoPixelController;
@@ -157,6 +158,7 @@ public:
     void setDisplayInterface(DisplayInterface* display) { display_ = display; }
     /** How to bring a card to the front. Called on the UI task with the LVGL mutex held. */
     void setShowCard(std::function<void(lv_obj_t*)> showCard) { showCard_ = std::move(showCard); }
+    void setDeskManners(DeskManners* manners) { manners_ = manners; }
 
     // ---- UI task only -------------------------------------------------
 
@@ -176,6 +178,8 @@ public:
     void requestAttention(const std::string& key, const deskhog::Notice& notice);
     /** The card on screen used a button press: it is being played. */
     void pressUsed();
+    /** Whether a button is down as plugins see it: a press that only woke a dark screen is not theirs. */
+    bool buttonHeld(uint8_t button);
     /** The notify() banner to paint over a card right now, or nullptr. */
     const std::string* banner(const std::string& key) const { return attention_.banner(key); }
     /** A plugin answered (or failed to answer) a request for a list of choices. */
@@ -365,6 +369,7 @@ private:
     EventQueue& eventQueue_;
     DisplayInterface* display_ = nullptr;
     std::function<void(lv_obj_t*)> showCard_;
+    DeskManners* manners_ = nullptr;
     bool storageReady_ = false;
 
     // UI task only
