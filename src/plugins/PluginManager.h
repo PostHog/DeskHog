@@ -161,6 +161,8 @@ public:
     /** How to bring a card to the front. Called on the UI task with the LVGL mutex held. */
     void setShowCard(std::function<void(lv_obj_t*)> showCard) { showCard_ = std::move(showCard); }
     void setDeskManners(DeskManners* manners) { manners_ = manners; }
+    /** The device's own settings, for the web API. nullptr until setup() gives it. */
+    DeskManners* deskManners() const { return manners_; }
     /** Called on the UI task when a notify() banner goes up, with how long it stays. */
     void setOnBanner(std::function<void(uint32_t forMs)> onBanner) { onBanner_ = std::move(onBanner); }
     /** Called on the UI task when the web page shows a card or presses a button for one. */
@@ -320,6 +322,14 @@ public:
 
     static bool splitKey(const std::string& key, std::string& connectionId, std::string& cardId);
 
+    // The device itself, for plugins and the network
+    /** The device's name on the network, "deskhog" unless someone changed it. */
+    std::string deviceName();
+    /** The battery, for plugins. False unless the device is set to have one and the gauge answers. */
+    bool battery(deskhog::BatteryStatus& status);
+    /** The name was changed: the network task announces the device under the new one. */
+    void deviceRenamed() { renameWanted_ = true; }
+
 private:
     friend class PluginConnection;
 
@@ -354,6 +364,7 @@ private:
     void httpLoop();
     void perform(const deskhog::HttpRequest& request, deskhog::HttpResponse& response);
     void startNetworkServices();
+    void renameNetworkServices();
 
     void installBundledPlugins();
     void loadConnections();
@@ -408,6 +419,7 @@ private:
     QueueHandle_t jobs_ = nullptr;
     QueueHandle_t results_ = nullptr;
     std::atomic<bool> networkServicesWanted_{false};
+    std::atomic<bool> renameWanted_{false};
     bool networkServicesStarted_ = false;
 
     std::atomic<uint32_t> uiStackUnused_{0};

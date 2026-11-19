@@ -208,10 +208,9 @@ deskhog::NetStatus PluginConnection::netStatus() {
     return status;
 }
 
-// Task 7 connects the real battery and name.
-bool PluginConnection::battery(deskhog::BatteryStatus&) { return false; }
+bool PluginConnection::battery(deskhog::BatteryStatus& status) { return manager_.battery(status); }
 
-std::string PluginConnection::deviceName() { return "deskhog"; }
+std::string PluginConnection::deviceName() { return manager_.deviceName(); }
 
 // The radio's noise makes these numbers; before WiFi is up they are weaker,
 // but still differ from boot to boot.

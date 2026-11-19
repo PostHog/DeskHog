@@ -11,8 +11,17 @@ class PluginManager;
  *
  *   GET  /api/state                         plugins, connections, the card stack and their live state
  *   POST /api/timezone                      {posix, name}: the device's time zone, as a POSIX TZ string; "" is UTC
- *   POST /api/cards/add                     {plugin, kind, name, settings, front, connection | connectionName + connectionSettings}
- *   POST /api/cards/update?key=<c>:<n>      {name, settings, front}; front: may the card come to the front by itself
+ *   GET  /api/device                        the device's settings and status (also `device` in /api/state):
+ *                                           {name, screen: {day, night}, led: {day, night},
+ *                                            night: {enabled, from, until}, rotate: {seconds}, battery,
+ *                                            status: {night, manual, battery, gauge}}
+ *   POST /api/device                        any part of the same, without status; all or nothing.
+ *                                           {preview: "night" | "day"} shows those levels for a few
+ *                                           seconds and saves nothing. Answers like GET
+ *   POST /api/restart                       restarts the device half a second after answering
+ *   POST /api/cards/add                     {plugin, kind, name, settings, front, rotate, connection | connectionName + connectionSettings}
+ *   POST /api/cards/update?key=<c>:<n>      {name, settings, front, rotate}; front: may the card come to the front
+ *                                           by itself; rotate: does auto-rotate stop at it
  *   POST /api/cards/layout                  ["<TYPE>|<config>", ...] in the new order; cards left out are removed
  *   GET  /api/cards/screen?key=<c>:<n>      the card's pixels, raw RGB565 (width and height in X-Width, X-Height)
  *   POST /api/cards/press?key=..&button=..  press up, center or down for a card

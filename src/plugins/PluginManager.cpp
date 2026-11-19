@@ -588,12 +588,30 @@ void PluginManager::installBundledPlugins() {
 void PluginManager::startNetworkServices() {
     if (networkServicesStarted_) return;
     networkServicesStarted_ = true;
-    // So tools can find the device as http://deskhog.local
-    if (MDNS.begin("deskhog")) MDNS.addService("http", "tcp", 80);
+    // So tools can find the device as http://deskhog.local, or by the name it was given
+    const std::string name = deviceName();
+    if (MDNS.begin(name.c_str())) MDNS.addService("http", "tcp", 80);
     // The device's own clock stays on UTC. Plugins get local time from
     // time.date() and time.format(), which apply the time zone themselves.
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 }
+
+// Network task. mDNS answers to the new name at once; the router learns it
+// the next time the device connects.
+void PluginManager::renameNetworkServices() {
+    const std::string name = deviceName();
+    WiFi.setHostname(name.c_str());
+    WiFi.STA.setHostname(name.c_str());
+    if (!networkServicesStarted_) return;  // starting them will use the new name
+    MDNS.end();
+    if (MDNS.begin(name.c_str())) MDNS.addService("http", "tcp", 80);
+}
+
+std::string PluginManager::deviceName() {
+    return manners_ ? manners_->settings().name : deskhog::DeviceSettings().name;
+}
+
+bool PluginManager::battery(deskhog::BatteryStatus& status) { return manners_ && manners_->battery(status); }
 
 // Run a plugin file just far enough to learn its title, settings and card kinds.
 void PluginManager::inspectPlugin(const std::string& name) {
@@ -1158,6 +1176,7 @@ void PluginManager::httpLoop() {
         HttpJob* job = nullptr;
         const bool gotJob = xQueueReceive(jobs_, &job, pdMS_TO_TICKS(1000)) == pdTRUE && job;
         if (networkServicesWanted_.exchange(false)) startNetworkServices();
+        if (renameWanted_.exchange(false)) renameNetworkServices();
         if (!gotJob) continue;
 
         HttpResult* result = new HttpResult{job->runtimeId, job->requestId, {}};

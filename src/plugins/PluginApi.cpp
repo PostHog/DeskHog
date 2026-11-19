@@ -4,8 +4,11 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 
+#include <atomic>
+#include <cmath>
 #include <memory>
 
+#include "DeskManners.h"
 #include "plugins/PluginManager.h"
 
 namespace {
@@ -140,6 +143,154 @@ void storageToJson(JsonObject storage, PluginManager& manager) {
     storage["total"] = total;
 }
 
+// ------------------------------------------------------------------ device
+
+void batteryToJson(JsonObject target, int percent, float volts, bool charging) {
+    target["percent"] = percent;
+    target["volts"] = std::round(volts * 100) / 100.0;  // 4.2, not 4.19999981
+    target["charging"] = charging;
+}
+
+// The device's settings as GET /api/device gives them, and how it is doing.
+void deviceToJson(JsonObject device, DeskManners& manners) {
+    const deskhog::DeviceSettings settings = manners.settings();
+    device["name"] = String(settings.name.c_str());
+    JsonObject screen = device.createNestedObject("screen");
+    screen["day"] = settings.screenDay;
+    screen["night"] = settings.screenNight;
+    JsonObject led = device.createNestedObject("led");
+    led["day"] = settings.ledDay;
+    led["night"] = settings.ledNight;
+    JsonObject night = device.createNestedObject("night");
+    night["enabled"] = settings.nightEnabled;
+    night["from"] = String(deskhog::formatClock(settings.nightFrom).c_str());
+    night["until"] = String(deskhog::formatClock(settings.nightUntil).c_str());
+    device.createNestedObject("rotate")["seconds"] = settings.rotateSeconds;
+    device["battery"] = settings.battery;
+
+    const DeskManners::Status now = manners.status();
+    JsonObject status = device.createNestedObject("status");
+    status["night"] = now.night;
+    status["manual"] = now.manual;
+    deskhog::BatteryStatus battery;
+    if (manners.battery(battery)) {
+        batteryToJson(status.createNestedObject("battery"), battery.percent, battery.volts, battery.charging);
+    } else {
+        status["battery"] = nullptr;
+    }
+    const BatteryGauge::Reading gauge = manners.gauge();
+    if (gauge.found) {
+        batteryToJson(status.createNestedObject("gauge"), gauge.percent, gauge.volts, gauge.charging);
+    } else {
+        status["gauge"] = nullptr;
+    }
+}
+
+// The groups a POST body may nest settings in: {"screen": {"day": 80}} is "screen.day".
+bool isSettingsGroup(const char* key) {
+    return !strcmp(key, "screen") || !strcmp(key, "led") || !strcmp(key, "night") || !strcmp(key, "rotate");
+}
+
+/** One value of a POST body as the text applyDeviceSettings reads. False for an array, an object or null. */
+bool settingText(JsonVariantConst value, std::string& text) {
+    if (value.is<bool>()) {
+        text = value.as<bool>() ? "true" : "false";
+    } else if (value.is<const char*>()) {
+        text = value.as<const char*>();
+    } else if (value.is<long>() || value.is<double>()) {
+        String number;
+        serializeJson(value, number);
+        text = number.c_str();
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/** A POST body's settings as dotted pairs. `preview` is left out; `status` is not a setting. */
+bool flattenSettings(JsonObjectConst body, std::vector<std::pair<std::string, std::string>>& out,
+                     std::string& error) {
+    for (JsonPairConst pair : body) {
+        const char* key = pair.key().c_str();
+        if (!strcmp(key, "preview")) continue;
+        if (isSettingsGroup(key) && pair.value().is<JsonObjectConst>()) {
+            for (JsonPairConst inner : pair.value().as<JsonObjectConst>()) {
+                const std::string name = std::string(key) + "." + inner.key().c_str();
+                std::string text;
+                if (!settingText(inner.value(), text)) {
+                    error = "unknown setting " + name;
+                    return false;
+                }
+                out.emplace_back(name, text);
+            }
+            continue;
+        }
+        std::string text;
+        if (isSettingsGroup(key) || !strcmp(key, "status") || !settingText(pair.value(), text)) {
+            error = std::string("unknown setting ") + key;
+            return false;
+        }
+        out.emplace_back(key, text);
+    }
+    return true;
+}
+
+void sendDevice(AsyncWebServerRequest* request, DeskManners& manners) {
+    DynamicJsonDocument doc(1024);
+    deviceToJson(doc.to<JsonObject>(), manners);
+    sendJson(request, 200, doc);
+}
+
+// GET /api/device, and POST with any part of the same object. A POST changes
+// all of it or nothing, and answers with the whole object as GET gives it.
+void handleDevice(AsyncWebServerRequest* request, PluginManager& manager) {
+    if (answerPreflight(request)) return;
+    DeskManners* manners = manager.deskManners();
+    if (!manners) return sendError(request, 503, "the device is still starting");
+    if (request->method() == HTTP_GET) return sendDevice(request, *manners);
+    if (request->method() != HTTP_POST) return sendError(request, 405, "GET or POST /api/device");
+
+    DynamicJsonDocument doc(2048);
+    if (!readJson(request, doc)) return;
+    if (!doc.is<JsonObject>()) return sendError(request, 400, "send a JSON object of the settings to change");
+    const JsonObjectConst body = doc.as<JsonObjectConst>();
+
+    // While a slider on the web page moves, the device shows those levels for a few seconds.
+    int preview = 0;
+    if (body.containsKey("preview")) {
+        const char* which = body["preview"] | "";
+        preview = !strcmp(which, "night") ? 2 : !strcmp(which, "day") ? 1 : 0;
+        if (!preview) return sendError(request, 400, "preview is night or day");
+    }
+
+    std::vector<std::pair<std::string, std::string>> changes;
+    std::string error;
+    if (!flattenSettings(body, changes, error)) return sendError(request, 400, error.c_str());
+    if (!changes.empty()) {
+        const std::string oldName = manners->settings().name;
+        if (!manners->change(changes, error)) return sendError(request, 400, error.c_str());
+        // mDNS restarts on the network task, not here.
+        if (manners->settings().name != oldName) manager.deviceRenamed();
+    }
+    if (preview) manners->preview(preview == 2);
+    sendDevice(request, *manners);
+}
+
+// Restarting from here would cut off the answer, so a small task waits a moment first.
+void handleRestart(AsyncWebServerRequest* request, PluginManager&) {
+    if (answerPreflight(request)) return;
+    if (request->method() != HTTP_POST) return sendError(request, 405, "POST /api/restart");
+    sendOk(request);
+    static std::atomic<bool> restarting{false};
+    if (restarting.exchange(true)) return;
+    xTaskCreate(
+        [](void*) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            ESP.restart();
+        },
+        "restart", 4096, nullptr, 1, nullptr);
+}
+
 // ------------------------------------------------------------------- state
 
 void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
@@ -217,6 +368,7 @@ void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
             if (card) {
                 item["kind"] = card->kind.c_str();
                 item["front"] = card->mayInterrupt;  // "May come to the front"
+                item["rotate"] = card->rotate;       // auto-rotate stops at it
                 JsonObject values = item.createNestedObject("settings");
                 for (const auto& pair : card->settings) values[pair.first.c_str()] = pair.second.c_str();
             }
@@ -242,6 +394,8 @@ void handleState(AsyncWebServerRequest* request, PluginManager& manager) {
         item["count"] = waiting.count;
         item["age"] = waiting.ageMs / 1000;
     }
+
+    if (manager.deskManners()) deviceToJson(doc.createNestedObject("device"), *manager.deskManners());
 
     // String, not c_str(): the two are temporaries.
     JsonObject timezone = doc.createNestedObject("timezone");
@@ -289,7 +443,8 @@ void handleAddCard(AsyncWebServerRequest* request, PluginManager& manager) {
     String error;
     const std::string key = manager.addCard(doc["plugin"] | "", doc["connection"] | "", doc["connectionName"] | "",
                                             settingsFrom(doc["connectionSettings"]), doc["kind"] | "", doc["name"] | "",
-                                            settingsFrom(doc["settings"]), error, doc["front"] | true);
+                                            settingsFrom(doc["settings"]), error, doc["front"] | true,
+                                            doc["rotate"] | true);
     if (key.empty()) return sendError(request, 400, error);
     sendOk(request, "key", key.c_str());
 }
@@ -305,7 +460,11 @@ void handleUpdateCard(AsyncWebServerRequest* request, PluginManager& manager) {
     // "front": may the card come to the front by itself when its plugin calls notify()?
     const bool hasFront = doc["front"].is<bool>();
     const bool front = doc["front"] | true;
-    if (!manager.updateCard(key, hasName ? &name : nullptr, settingsFrom(doc["settings"]), hasFront ? &front : nullptr)) {
+    // "rotate": does auto-rotate stop at the card?
+    const bool hasRotate = doc["rotate"].is<bool>();
+    const bool rotate = doc["rotate"] | true;
+    if (!manager.updateCard(key, hasName ? &name : nullptr, settingsFrom(doc["settings"]), hasFront ? &front : nullptr,
+                            hasRotate ? &rotate : nullptr)) {
         return sendError(request, 404, "no such card");
     }
     sendOk(request);
@@ -663,6 +822,8 @@ void registerPluginRoutes(AsyncWebServer& server, PluginManager& manager) {
     route("/api/state", handleState);
     route("/api/directory", handleDirectory);
     route("/api/timezone", handleTimeZone);
+    route("/api/device", handleDevice);
+    route("/api/restart", handleRestart);
     route("/api/cards/add", handleAddCard);
     route("/api/cards/update", handleUpdateCard);
     route("/api/cards/layout", handleLayout);

@@ -1,6 +1,19 @@
 #include "WifiInterface.h"
 #include "ui/ProvisioningCard.h"
 
+namespace {
+
+// The name the router lists the device under. WiFi.setHostname takes effect
+// when station mode starts; a station that is already started takes it
+// directly, for the next time it asks for an address.
+void useDeviceName(ConfigManager& config) {
+    const std::string name = config.getDeviceSettings().name;
+    WiFi.setHostname(name.c_str());
+    WiFi.STA.setHostname(name.c_str());
+}
+
+}  // namespace
+
 WiFiInterface* WiFiInterface::_instance = nullptr;
 WiFiStateCallback WiFiInterface::_stateCallback = nullptr;
 
@@ -82,6 +95,7 @@ void WiFiInterface::begin() {
     WiFi.onEvent(onWiFiEvent);
     
     // Initialize WiFi
+    useDeviceName(_configManager);
     WiFi.mode(WIFI_STA);
     
     // Enable WiFi power save mode
@@ -121,6 +135,7 @@ bool WiFiInterface::connectToStoredNetwork(unsigned long timeout) {
     }
     
     // Start connection attempt
+    useDeviceName(_configManager);
     WiFi.begin(_ssid.c_str(), _password.c_str());
     
     return true;
