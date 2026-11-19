@@ -905,8 +905,8 @@ test('shows the device\'s settings', async () => {
     check(!enabled.checked, 'night hours are off');
     equal([from.value, until.value], ['22:00', '07:00'], 'from 22:00 until 07:00');
     equal(document.querySelector('#display-form select').selectedOptions[0].textContent, 'Off', 'the rotation is off');
-    equal(document.title, 'deskhog', 'the name is in the title');
-    equal(document.querySelector('[data-brand]').textContent, 'deskhog', 'and in the header');
+    equal(document.title, 'DeskHog', 'the title is as before at the default name');
+    equal(document.querySelector('[data-brand]').textContent, 'DeskHog', 'and so is the header');
 });
 
 test('an older device without settings has no such panels', async () => {
@@ -972,7 +972,7 @@ test('a poll does not undo a slider or a name that someone is working on', async
     name.dispatchEvent(new window.Event('input', { bubbles: true }));
     await window.refresh();
     equal(name.value, 'kitch', 'a half-typed name stays');
-    equal(document.querySelector('#name-form small').textContent, 'http://kitch.local', 'and the address follows it');
+    equal(document.querySelector('#name-form small').textContent, 'http://deskhog.local', 'and the address stays that of the saved name');
     const other = slidersOf(document)[3];
     device.device.led.night = 40;
     await window.refresh();
@@ -1015,8 +1015,8 @@ test('renaming sends you to the new address', async () => {
     await click(window, buttonNamed(document.getElementById('name-form'), 'Save'));
     equal(lastRequest(device, '/api/device').body, { name: 'kitchen' }, 'the name is sent');
     check(document.getElementById('notice').textContent.includes('http://kitchen.local'), 'and the notice gives the address');
-    equal(document.title, 'kitchen', 'the title shows it');
-    equal(document.querySelector('[data-brand]').textContent, 'kitchen', 'and so does the header');
+    equal(document.title, 'DeskHog · kitchen', 'the title shows the new name');
+    equal(document.querySelector('[data-brand]').textContent, 'DeskHog · kitchen', 'and so does the header');
 });
 
 test('a bad name shows the device\'s reason', async () => {

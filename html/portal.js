@@ -442,28 +442,17 @@ function renderTimeZone() {
 
 // ----------------------------------------------------------- device settings
 
-/** Brightness and the like read "off" at 0. */
-const level = value => (Number(value) === 0 ? 'off' : value + '%');
-
-/** What "every 30 s" and "every 2 min" are called on the rotation's dropdown. */
+const level = value => (value === '0' ? 'off' : value + '%');
 const ROTATE_STEPS = [0, 15, 30, 60, 120, 300];
 const rotateLabel = seconds => (seconds === 0 ? 'Off' : seconds % 60 === 0 ? seconds / 60 + ' min' : seconds + ' s');
-
-/** The control values the page has put on the Device tab, to tell them from what someone is typing. */
+const nested = (path, value) => path.reduceRight((inner, key) => ({ [key]: inner }), value);
 const shownValue = control => (control.type === 'checkbox' ? String(control.checked) : control.value);
 
-/**
- * Put the device's value into a control, unless someone is working on it: a
- * poll that lands in the middle of a drag or while typing must not undo it.
- * A control is "worked on" while it is focused or holds something other than
- * what was last put there. It catches up once the device says the same.
- */
+/** Put the device's value into a control, unless someone is working on it (focused, or holding what the device has not confirmed). */
 function showValue(control, value) {
-    value = String(value);
-    const same = shownValue(control) === value;
-    const idle = (control.dataset.shown === undefined || shownValue(control) === control.dataset.shown) && (control.type === 'checkbox' || document.activeElement !== control);
-    if (same || idle) {
-        if (control.type === 'checkbox') control.checked = value === 'true';
+    const idle = control.dataset.shown === undefined || shownValue(control) === control.dataset.shown;
+    if (String(value) === shownValue(control) || (idle && (control.type === 'checkbox' || document.activeElement !== control))) {
+        if (control.type === 'checkbox') control.checked = value;
         else control.value = value;
         control.dataset.shown = shownValue(control);
     }
@@ -477,113 +466,87 @@ async function saveDevice(body, doneText) {
     }, doneText);
 }
 
-const nested = (path, value) => path.reduceRight((inner, key) => ({ [key]: inner }), value);
+let deviceControls = null;
 
-/** A slider that saves where it is let go and, while it is dragged, at most every 150 ms (the night ones with a preview). */
-function slider(path, min, preview) {
-    const input = el('input', { type: 'range', min: String(min), max: '100', step: '1' });
-    const output = el('output');
-    let last = 0;
-    let timer = null;
-    const send = withPreview => {
-        clearTimeout(timer);
-        timer = null;
-        last = Date.now();
-        const body = nested(path, Number(input.value));
-        if (withPreview && preview) body.preview = preview;
-        saveDevice(body);
-    };
-    input.addEventListener('input', () => {
-        output.textContent = level(input.value);
-        const wait = 150 - (Date.now() - last);
-        if (wait <= 0) send(true);
-        else if (!timer) timer = setTimeout(() => send(true), wait);
-    });
-    input.addEventListener('change', () => send(false));
-    return { input, output, row: el('div', { class: 'slider' }, input, output) };
-}
-
-/** The panels' controls, built once: they are updated in place, so a slider is never rebuilt under a finger. */
+/** The controls, built once and updated in place, so a slider is never rebuilt under a finger. Keyed by their setting. */
 function buildDevice() {
-    const parts = {};
-    const levelField = (label, path, min, preview) => {
-        const made = slider(path, min, preview);
-        parts[path.join('.')] = made;
-        return el('label', { class: 'field' }, el('span', {}, label), made.row);
+    const controls = {};
+    const bind = (path, input) => {
+        controls[path] = input;
+        const read = () => (input.type === 'checkbox' ? input.checked : input.type === 'time' ? input.value : Number(input.value));
+        input.addEventListener('change', () => input.value && saveDevice(nested(path.split('.'), read())));
+        return input;
     };
-    const enabled = el('input', { type: 'checkbox' });
-    const from = el('input', { type: 'time' });
-    const until = el('input', { type: 'time' });
-    enabled.addEventListener('change', () => saveDevice({ night: { enabled: enabled.checked } }));
-    from.addEventListener('change', () => from.value && saveDevice({ night: { from: from.value } }));
-    until.addEventListener('change', () => until.value && saveDevice({ night: { until: until.value } }));
-    const rotate = el('select', {});
-    rotate.addEventListener('change', () => saveDevice({ rotate: { seconds: Number(rotate.value) } }));
-    const battery = el('input', { type: 'checkbox' });
-    battery.addEventListener('change', () => saveDevice({ battery: battery.checked }));
-    const name = el('input', { type: 'text', maxlength: '24', autocapitalize: 'none', spellcheck: 'false' });
-    const address = el('small', {});
-    const hint = el('small', {});
-    name.addEventListener('input', () => { address.textContent = 'http://' + name.value + '.local'; });
-    const rename = async () => {
-        const wanted = name.value.trim();
-        if (await saveDevice({ name: wanted })) notify('Saved. This device is now at http://' + wanted + '.local');
+    // Saves where it is let go and, while dragged, at most every 150 ms; the night ones also preview.
+    const slider = (label, path, min) => {
+        const input = bind(path, el('input', { type: 'range', min, max: '100', step: '1' }));
+        const output = el('output');
+        let last = 0;
+        let timer = null;
+        const send = () => {
+            timer = null;
+            last = Date.now();
+            saveDevice({ ...nested(path.split('.'), Number(input.value)), preview: path.endsWith('night') ? 'night' : undefined });
+        };
+        input.addEventListener('input', () => {
+            output.textContent = level(input.value);
+            if (!timer) timer = setTimeout(send, Math.max(0, 150 - (Date.now() - last)));
+        });
+        return el('label', { class: 'field' }, el('span', {}, label), el('div', { class: 'pick' }, input, output));
     };
-    name.addEventListener('keydown', event => { if (event.key === 'Enter') rename(); });
+    const rename = () => {
+        const wanted = controls.name.value.trim();
+        return saveDevice({ name: wanted }, 'Saved. This device is now at http://' + wanted + '.local');
+    };
+    controls.name = el('input', { type: 'text', maxlength: '24', autocapitalize: 'none', spellcheck: 'false' });
+    controls.name.addEventListener('keydown', event => { if (event.key === 'Enter') rename(); });
+    const rotate = bind('rotate.seconds', el('select'));
+    controls.address = el('small');
+    controls.hint = el('small');
 
     $('display-form').replaceChildren(
-        el('div', { class: 'levels' }, levelField('Screen', ['screen', 'day'], 5), levelField('Screen at night', ['screen', 'night'], 0, 'night')),
-        el('div', { class: 'levels' }, levelField('LED', ['led', 'day'], 0), levelField('LED at night', ['led', 'night'], 0, 'night')),
-        el('div', { class: 'field times' }, enabled, el('span', {}, 'Night hours from'), from, el('span', {}, 'until'), until,
+        el('div', { class: 'levels' }, slider('Screen', 'screen.day', '5'), slider('Screen at night', 'screen.night', '0')),
+        el('div', { class: 'levels' }, slider('LED', 'led.day', '0'), slider('LED at night', 'led.night', '0')),
+        el('div', { class: 'field times' }, bind('night.enabled', el('input', { type: 'checkbox' })), el('span', {}, 'Night hours from'),
+            bind('night.from', el('input', { type: 'time' })), el('span', {}, 'until'), bind('night.until', el('input', { type: 'time' })),
             el('small', {}, 'They follow the time zone above.')),
         el('label', { class: 'field' }, el('span', {}, 'Rotate cards'), rotate,
             el('small', {}, 'Moves on to the next card by itself. Games and cards you are on wait their turn.')));
-    $('name-form').replaceChildren(
-        el('label', { class: 'field' }, el('span', {}, 'Name on the network'),
-            el('div', { class: 'pick' }, name, el('button', { type: 'button', onclick: rename }, 'Save')), address));
-    $('battery-form').replaceChildren(
-        el('label', { class: 'field check' }, battery, el('span', {}, 'This device has a battery', hint)));
+    $('name-form').replaceChildren(el('label', { class: 'field' }, el('span', {}, 'Name on the network'),
+        el('div', { class: 'pick' }, controls.name, el('button', { type: 'button', onclick: rename }, 'Save')), controls.address));
+    $('battery-form').replaceChildren(el('label', { class: 'field check' }, bind('battery', el('input', { type: 'checkbox' })), el('span', {}, 'This device has a battery', controls.hint)));
     $('restart-btn').addEventListener('click', async () => {
-        if (!window.confirm('Restart the DeskHog?')) return;
-        await attempt(() => api('POST', '/api/restart', {}), 'Restarting. The page picks up again when the device is back.');
+        if (window.confirm('Restart the DeskHog?')) await attempt(() => api('POST', '/api/restart', {}), 'Restarting. The page picks up again when the device is back.');
     });
-    return { parts, enabled, from, until, rotate, battery, name, address, hint };
+    return controls;
 }
-
-let deviceControls = null;
 
 /** The device's own settings, on the Device page. Not on older firmware, which has none. */
 function renderDevice() {
     const settings = state && state.device;
-    for (const id of ['display-panel', 'name-panel', 'battery-panel']) $(id).hidden = !settings;
-    $('restart-btn').hidden = !settings;
+    for (const id of ['display-panel', 'name-panel', 'battery-panel', 'restart-btn']) $(id).hidden = !settings;
     if (!settings) return;
     if (!deviceControls) deviceControls = buildDevice();
     const c = deviceControls;
-    for (const path of ['screen.day', 'screen.night', 'led.day', 'led.night']) {
-        const [group, when] = path.split('.');
-        showValue(c.parts[path].input, settings[group][when]);
-        c.parts[path].output.textContent = level(c.parts[path].input.value);
-    }
-    showValue(c.enabled, settings.night.enabled);
-    showValue(c.from, settings.night.from);
-    showValue(c.until, settings.night.until);
     // A value set through the API that the steps lack still has to show.
     const seconds = settings.rotate.seconds;
-    const steps = ROTATE_STEPS.includes(seconds) ? ROTATE_STEPS : [...ROTATE_STEPS, seconds].sort((a, b) => a - b);
-    if (c.rotate.options.length !== steps.length || steps.some((step, i) => c.rotate.options[i].value !== String(step))) {
-        c.rotate.replaceChildren(...steps.map(step => el('option', { value: String(step) }, rotateLabel(step))));
-        c.rotate.value = String(seconds);
-        c.rotate.dataset.shown = c.rotate.value;
+    const steps = [...new Set([...ROTATE_STEPS, seconds])].sort((a, b) => a - b);
+    const rotate = c['rotate.seconds'];
+    if (rotate.dataset.steps !== String(steps)) {
+        rotate.dataset.steps = String(steps);
+        rotate.replaceChildren(...steps.map(step => el('option', { value: String(step) }, rotateLabel(step))));
+        rotate.value = String(seconds);
+        rotate.dataset.shown = rotate.value;
     }
-    showValue(c.rotate, seconds);
-    showValue(c.battery, settings.battery);
+    for (const path of Object.keys(c).filter(key => key.includes('.') || key === 'battery')) {
+        showValue(c[path], path.split('.').reduce((inner, key) => inner[key], settings));
+        if (c[path].type === 'range') c[path].nextElementSibling.textContent = level(c[path].value);
+    }
     showValue(c.name, settings.name);
-    c.address.textContent = 'http://' + c.name.value + '.local';
+    c.address.textContent = 'http://' + settings.name + '.local';
     c.hint.textContent = settings.status.gauge ? 'A battery gauge was found. Leave this off on USB power alone: the gauge then reads about 100%.'
         : 'No battery gauge was found.';
-    document.title = settings.name;
-    document.querySelector('[data-brand]').textContent = settings.name;
+    document.title = document.querySelector('[data-brand]').textContent = settings.name === 'deskhog' ? 'DeskHog' : 'DeskHog · ' + settings.name;
 }
 
 // ------------------------------------------------------------------ cards
@@ -718,7 +681,6 @@ function cardPanel(card) {
     const frontInput = el('input', { type: 'checkbox', checked: card.front !== false });
     const front = el('label', { class: 'field check' }, frontInput, el('span', {}, 'May come to the front',
         el('small', {}, 'When its plugin has something to tell you. Off: the light flashes, and the card says it when you get there.')));
-    // Older firmware has no rotation, and no such setting.
     const skipInput = el('input', { type: 'checkbox', checked: card.rotate === false });
     const skip = state.device ? el('label', { class: 'field check' }, skipInput, el('span', {}, 'Skip in rotation',
         el('small', {}, 'The rotation passes this card by, and stays on it when you go there yourself.'))) : null;

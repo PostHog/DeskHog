@@ -377,12 +377,9 @@ button:disabled { opacity: 0.5; cursor: default; }
     white-space: pre-wrap;
 }
 
-/* A slider with its value beside it; two of them sit side by side on a wide panel. */
 .levels { display: flex; flex-wrap: wrap; gap: 0 24px; }
 .levels > .field { flex: 1 1 180px; }
-.slider { display: flex; align-items: center; gap: 8px; }
-.slider > input { flex: 1; min-width: 0; }
-.slider > output { flex: none; min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+.pick > output { align-self: center; min-width: 3.2em; text-align: right; }
 .field.times { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .about { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0 0 12px; }
