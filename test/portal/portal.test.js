@@ -951,6 +951,19 @@ test('dragging a night slider previews it', async () => {
     equal(lastRequest(device, '/api/device').body, { led: { day: 53 } }, 'and the last one is sent');
 });
 
+test('letting go of a night slider cancels its pending preview', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const night = slidersOf(document)[1];
+    await move(window, night, 20, 'input');
+    await move(window, night, 25, 'input');
+    await move(window, night, 25, 'change');
+    await new Promise(resolve => window.setTimeout(resolve, 250));
+    const posts = device.requests.filter(r => r.url.startsWith('/api/device'));
+    equal(posts[posts.length - 1].body, { screen: { night: 25 } }, 'the last word is the save, not a preview');
+    equal(posts.filter(r => r.body.preview).length, 1, 'and no preview follows it');
+});
+
 test('a poll does not undo a slider or a name that someone is working on', async () => {
     const device = makeDevice();
     const { window, document } = await openPage(device, { hash: '#device' });

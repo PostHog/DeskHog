@@ -492,6 +492,8 @@ function buildDevice() {
             output.textContent = level(input.value);
             if (!timer) timer = setTimeout(send, Math.max(0, 150 - (Date.now() - last)));
         });
+        // Letting go saves the value itself, so a held-back preview must not follow it.
+        input.addEventListener('change', () => { clearTimeout(timer); timer = null; last = 0; });
         return el('label', { class: 'field' }, el('span', {}, label), el('div', { class: 'pick' }, input, output));
     };
     const rename = () => {
