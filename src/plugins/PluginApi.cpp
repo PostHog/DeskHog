@@ -203,8 +203,8 @@ bool settingText(const std::string& key, JsonVariantConst value, std::string& te
             error = key + " must be true or false";
             return false;
         case deskhog::SettingKind::WholeNumber:
-            // A boolean is not a whole number, and neither is 80.0.
-            if (value.is<long>() && !value.is<bool>() && !value.is<double>()) {
+            // is<long>() is already false for a boolean and for 80.0.
+            if (value.is<long>()) {
                 text = std::to_string(value.as<long>());
                 return true;
             }
