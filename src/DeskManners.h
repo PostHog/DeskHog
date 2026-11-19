@@ -11,6 +11,7 @@
 
 #include "DeskRules.h"
 
+class CardController;
 class ConfigManager;
 class DisplayInterface;
 class NeoPixelController;
@@ -18,9 +19,10 @@ class PluginManager;
 
 /**
  * How the device itself behaves: how bright the screen and the LED are, by day
- * and at night, and what a button press at night does. The rules are in
- * DeskRules.h (lib/plugin_core); this class keeps the settings and applies the
- * rules' answers to the hardware.
+ * and at night, what a button press at night does, and moving on to the next
+ * card by itself. The rules are in DeskRules.h (lib/plugin_core); this class
+ * keeps the settings and applies the rules' answers to the hardware and the
+ * card stack.
  *
  * The UI task owns the rules and calls tick() every loop. Other tasks (the web
  * server) change the settings under a lock; tick() picks them up.
@@ -34,6 +36,8 @@ public:
 
     /** Load the settings and light the screen and LED at their level at once. Call in setup(). */
     void begin();
+    /** The card stack to rotate, and the status card's night switch. Call in setup(), after it is initialized. */
+    void setCardController(CardController* cards);
 
     // ---- UI task only -------------------------------------------------
 
@@ -58,6 +62,8 @@ public:
 
 private:
     static void fadeToward(int& milli, int target, int step);
+    void rotate(bool screenOff, uint32_t now);
+    void showNightLine(const deskhog::DeskRules::Levels& levels, bool settingsChanged);
 
     ConfigManager& config_;
     DisplayInterface& display_;
@@ -74,6 +80,10 @@ private:
 
     // UI task only
     deskhog::DeskRules rules_;
+    deskhog::Rotation rotation_;
+    deskhog::DeviceSettings applied_;  ///< The settings the rules have
+    CardController* cards_ = nullptr;
+    int nightLineMode_ = 0;  ///< 0 no line, 1 day by hand, 2 night by hand
     std::string zone_;
     uint32_t zoneAtMs_ = 0;
     uint32_t lastTickMs_ = 0;

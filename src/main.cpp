@@ -294,7 +294,8 @@ void setup() {
     // Initialize with display interface directly
     cardController->setPluginManager(pluginManager);
     cardController->initialize(displayInterface);
-    
+    deskManners->setCardController(cardController);  // auto-rotate, and ● on the status card
+
     // Initialize captive portal
     captivePortal = new CaptivePortal(*configManager, *wifiInterface, *eventQueue, *pluginManager);
     captivePortal->begin();

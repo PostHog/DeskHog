@@ -51,6 +51,8 @@ struct PluginCardRecord {
     /// "May come to the front": whether notify() may put this card on screen.
     /// Every plugin card has this setting; it is the host's, not the plugin's.
     bool mayInterrupt = true;
+    /// Whether auto-rotate stops at this card. False also keeps the rotation from leaving it.
+    bool rotate = true;
 };
 
 /** A connection as saved on flash. */
@@ -159,6 +161,10 @@ public:
     /** How to bring a card to the front. Called on the UI task with the LVGL mutex held. */
     void setShowCard(std::function<void(lv_obj_t*)> showCard) { showCard_ = std::move(showCard); }
     void setDeskManners(DeskManners* manners) { manners_ = manners; }
+    /** Called on the UI task when a notify() banner goes up, with how long it stays. */
+    void setOnBanner(std::function<void(uint32_t forMs)> onBanner) { onBanner_ = std::move(onBanner); }
+    /** Called on the UI task when the web page shows a card or presses a button for one. */
+    void setOnMovedByHand(std::function<void()> onMovedByHand) { onMovedByHand_ = std::move(onMovedByHand); }
 
     // ---- UI task only -------------------------------------------------
 
@@ -180,6 +186,12 @@ public:
     void pressUsed();
     /** Whether a button is down as plugins see it: a press that only woke a dark screen is not theirs. */
     bool buttonHeld(uint8_t button);
+    /** Whether auto-rotate stops at the card stored as `key`. */
+    bool cardRotates(const std::string& key);
+    /** A card was used within the last few seconds: see Attention::playing. */
+    bool attentionPlaying(uint32_t nowMs) const { return attention_.playing(nowMs); }
+    /** A notify() banner is on screen. */
+    bool attentionBanner() const { return attention_.bannerShowing(); }
     /** The notify() banner to paint over a card right now, or nullptr. */
     const std::string* banner(const std::string& key) const { return attention_.banner(key); }
     /** A plugin answered (or failed to answer) a request for a list of choices. */
@@ -223,10 +235,14 @@ public:
      */
     std::string addCard(const std::string& plugin, const std::string& connectionId, const std::string& connectionName,
                         const PluginSettings& connectionSettings, const std::string& kind, const std::string& cardName,
-                        const PluginSettings& cardSettings, String& error, bool mayInterrupt = true);
-    /** @param mayInterrupt The card's "May come to the front" setting, or nullptr to leave it. */
+                        const PluginSettings& cardSettings, String& error, bool mayInterrupt = true,
+                        bool rotate = true);
+    /**
+     * @param mayInterrupt The card's "May come to the front" setting, or nullptr to leave it.
+     * @param rotate       Whether auto-rotate stops at the card, or nullptr to leave it.
+     */
     bool updateCard(const std::string& key, const std::string* cardName, const PluginSettings& cardSettings,
-                    const bool* mayInterrupt = nullptr);
+                    const bool* mayInterrupt = nullptr, const bool* rotate = nullptr);
     /**
      * Save the card stack: `keys` are "<TYPE>|<config>" in the new order. Cards
      * that are not listed are removed.
@@ -370,6 +386,8 @@ private:
     DisplayInterface* display_ = nullptr;
     std::function<void(lv_obj_t*)> showCard_;
     DeskManners* manners_ = nullptr;
+    std::function<void(uint32_t)> onBanner_;
+    std::function<void()> onMovedByHand_;
     bool storageReady_ = false;
 
     // UI task only

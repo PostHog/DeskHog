@@ -78,7 +78,8 @@ void CardController::initialize(DisplayInterface* display) {
         screenHeight
     );
     
-    // Add provisioning card to navigation stack
+    // Add provisioning card to navigation stack. Its ● switches night mode.
+    cardStack->registerInputHandler(provisioningCard->getCard(), provisioningCard);
     cardStack->addCard(provisioningCard->getCard());
     
     // Load current card configuration and create cards
@@ -265,6 +266,26 @@ void CardController::reconcileCards(const std::vector<CardConfig>& newConfigs) {
         
         displayInterface->giveMutex();
     }, true); // Use to_front=true for immediate processing
+}
+
+std::vector<bool> CardController::rotationList() {
+    std::vector<bool> rotates;
+    rotates.reserve(pluginCards.size() + 1);
+    rotates.push_back(false);  // the status card
+    for (PluginCard* card : pluginCards) {
+        rotates.push_back(pluginManager && pluginManager->cardRotates(card->key()));
+    }
+    return rotates;
+}
+
+int CardController::currentIndex() { return cardStack ? cardStack->getCurrentIndex() : 0; }
+
+void CardController::showIndex(int index) {
+    if (!cardStack || index < 0 || index >= static_cast<int>(cardStack->getCardCount())) return;
+    // Skipped when LVGL is busy elsewhere: the rotation asks again on the next loop.
+    if (!displayInterface || !displayInterface->takeMutex(pdMS_TO_TICKS(10))) return;
+    cardStack->goToCard(static_cast<uint8_t>(index));
+    displayInterface->giveMutex();
 }
 
 void CardController::initUIQueue() {

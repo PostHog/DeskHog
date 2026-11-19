@@ -88,6 +88,15 @@ public:
      */
     DisplayInterface* getDisplayInterface() { return displayInterface; }
 
+    // ---- For auto-rotate. UI task only --------------------------------
+
+    /** One entry per card in stack order: does the rotation stop there? The status card does not. */
+    std::vector<bool> rotationList();
+    /** The index of the card on screen. */
+    int currentIndex();
+    /** Bring the card at `index` to the front. Does nothing for an index that is not there. */
+    void showIndex(int index);
+
     /**
      * @brief Process card configuration changes from the web UI
      * Called when CARD_CONFIG_CHANGED event is received

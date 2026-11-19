@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include <Arduino.h>
 #include <Bounce2.h>
+#include <functional>
 #include <vector>
 #include "ui/InputHandler.h"
 
@@ -104,6 +105,14 @@ public:
      * @param handler InputHandler implementation
      */
     void registerInputHandler(lv_obj_t* card, InputHandler* handler);
+
+    /**
+     * @brief Be told when someone changes cards with ▲ or ▼
+     *
+     * Only the button path calls it: a card brought to the front by a plugin,
+     * by the rotation or by a rebuild of the stack is not a move by hand.
+     */
+    void setOnMovedByHand(std::function<void()> callback) { _on_moved_by_hand = std::move(callback); }
     
     /**
      * @brief Force update of pip indicators
@@ -161,4 +170,5 @@ private:
     
     // Input handling
     std::vector<std::pair<lv_obj_t*, InputHandler*>> _input_handlers;  ///< Card-specific input handlers
+    std::function<void()> _on_moved_by_hand;
 }; 

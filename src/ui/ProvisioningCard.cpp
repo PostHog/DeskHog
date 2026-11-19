@@ -3,6 +3,7 @@
 #include "SystemController.h"
 #include "UICallback.h"
 #include "hardware/DisplayInterface.h"
+#include "hardware/Input.h"
 
 // Defined in main.cpp
 extern DisplayInterface* displayInterface;
@@ -11,7 +12,7 @@ ProvisioningCard::ProvisioningCard(lv_obj_t* parent, WiFiInterface& wifiInterfac
     : _parent(parent), _wifiInterface(wifiInterface), _width(width), _height(height),
     _card(nullptr), _qrScreen(nullptr), _statusScreen(nullptr),
     _qrCode(nullptr), _ssidLabel(nullptr), _statusLabel(nullptr), _ipLabel(nullptr), _signalLabel(nullptr), _versionLabel(nullptr),
-    _topLeftVersionLabel(nullptr) {
+    _topLeftVersionLabel(nullptr), _nightLabel(nullptr) {
     
     createCard();
     createQRScreen();
@@ -179,6 +180,13 @@ void ProvisioningCard::createStatusScreen() {
     createTableRow(table, "IP", &_ipLabel, Style::labelColor());
     createTableRow(table, "Signal", &_signalLabel, Style::labelColor());
     createTableRow(table, "Version", &_versionLabel, Style::labelColor());
+
+    // Hidden objects take no room in the column.
+    _nightLabel = lv_label_create(table);
+    lv_obj_set_style_text_font(_nightLabel, Style::labelFont(), 0);
+    lv_obj_set_style_text_color(_nightLabel, Style::valueColor(), 0);
+    lv_label_set_text(_nightLabel, "");
+    lv_obj_add_flag(_nightLabel, LV_OBJ_FLAG_HIDDEN);
     
     // Set initial values (some will be updated by handleSystemStateChange or other methods)
     lv_label_set_text(_statusLabel, "Initializing..."); 
@@ -271,6 +279,22 @@ void ProvisioningCard::toggleScreens(lv_obj_t* showScreen, lv_obj_t* hideScreen)
         if (hideScreen && lv_obj_is_valid(hideScreen)) {
             lv_obj_add_flag(hideScreen, LV_OBJ_FLAG_HIDDEN);
         }
+    });
+}
+
+bool ProvisioningCard::handleButtonPress(uint8_t button_index) {
+    if (button_index != Input::BUTTON_CENTER) return false;
+    if (_onCenter) _onCenter();
+    return true;
+}
+
+void ProvisioningCard::setNightLine(const String& text) {
+    lv_obj_t* label = _nightLabel;
+    runOnUiTask([label, text]() {
+        if (!label || !lv_obj_is_valid(label)) return;
+        lv_label_set_text(label, text.c_str());
+        if (text.length() == 0) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
     });
 }
 

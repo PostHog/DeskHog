@@ -5,6 +5,7 @@
 #include <string>  // For String class (or could be Arduino's String)
 #include "hardware/WifiInterface.h"  // Custom WiFi interface class
 #include "SystemController.h" // For ControllerState
+#include "ui/InputHandler.h"
 
 /**
  * @class ProvisioningCard
@@ -15,8 +16,9 @@
  * - Thread-safe label updates using LVGL timers
  * - WiFi status table with custom fonts and styling
  * - QR code generation for WiFi network connection
+ * - ● switches night mode by hand; a line on the status screen says while it applies
  */
-class ProvisioningCard {
+class ProvisioningCard : public InputHandler {
 public:
     /**
      * @brief Construct a new WiFi provisioning card UI component
@@ -80,6 +82,17 @@ public:
      * Thread-safe screen transition.
      */
     void showWiFiStatus();
+
+    /** ● calls this; ▲ and ▼ move between cards as on any card. UI task. */
+    void setOnCenter(std::function<void()> callback) { _onCenter = std::move(callback); }
+    bool handleButtonPress(uint8_t button_index) override;
+
+    /**
+     * @brief Shows a line about night mode under the status rows
+     *
+     * @param text What to say; "" hides the line. Thread-safe.
+     */
+    void setNightLine(const String& text);
     
 private:
     /**
@@ -185,6 +198,9 @@ private:
     lv_obj_t* _signalLabel;       ///< Signal strength text
     lv_obj_t* _versionLabel;      ///< Firmware version text
     lv_obj_t* _topLeftVersionLabel; ///< Firmware version text (on card top-left)
+    lv_obj_t* _nightLabel;        ///< Night mode by hand, hidden while there is none
+
+    std::function<void()> _onCenter;
 
     // Helper methods for SystemController integration
     void handleSystemStateChange(const ControllerState& newState);

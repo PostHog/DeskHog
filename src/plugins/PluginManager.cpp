@@ -289,7 +289,8 @@ void appendJsonString(std::string& out, const std::string& value) {
 // A connection is saved as one small JSON file:
 //   {"plugin":"weather","name":"Weather","next":3,"settings":{"unit":"C"},
 //    "cards":[{"id":"1","kind":"city","settings":{"city":"Antwerp"}}]}
-// A card that may not come to the front by itself also has "front":false.
+// A card that may not come to the front by itself also has "front":false, and
+// one that auto-rotate skips has "rotate":false.
 
 void settingsToJson(JsonObject target, const PluginSettings& settings) {
     for (const auto& pair : settings) target[pair.first.c_str()] = pair.second.c_str();
@@ -317,6 +318,7 @@ String recordToJson(const PluginConnectionRecord& record) {
         item["kind"] = card.kind.c_str();
         settingsToJson(item.createNestedObject("settings"), card.settings);
         if (!card.mayInterrupt) item["front"] = false;
+        if (!card.rotate) item["rotate"] = false;
     }
     String text;
     serializeJson(doc, text);
@@ -337,6 +339,7 @@ bool recordFromJson(const String& text, PluginConnectionRecord& record) {
         card.kind = item["kind"] | "";
         card.settings = settingsFromJson(item["settings"]);
         card.mayInterrupt = item["front"] | true;
+        card.rotate = item["rotate"] | true;
         if (!card.id.empty()) record.cards.push_back(card);
     }
     return deskhog::isValidPluginName(record.plugin);
@@ -817,6 +820,11 @@ void PluginManager::runAttention(uint32_t now) {
         PluginCard* card = runningCard(actions.show);
         if (card && showCard_) showCard_(card->getCard());
     }
+    // A banner went up over the card on screen: light the screen while it shows.
+    if (onBanner_ && !onScreen.empty() && attention_.banner(onScreen) &&
+        std::find(actions.repaint.begin(), actions.repaint.end(), onScreen) != actions.repaint.end()) {
+        onBanner_(deskhog::Attention::kBannerMs);
+    }
     if (actions.led) {
         led_.setOverride(static_cast<uint8_t>(actions.ledRgb >> 16), static_cast<uint8_t>(actions.ledRgb >> 8),
                          static_cast<uint8_t>(actions.ledRgb), actions.ledMs);
@@ -831,6 +839,16 @@ bool PluginManager::mayInterrupt(const std::string& key) {
     if (found == records_.end()) return false;
     const PluginCardRecord* card = found->second.card(cardId);
     return card && card->mayInterrupt;
+}
+
+bool PluginManager::cardRotates(const std::string& key) {
+    std::string connectionId, cardId;
+    if (!splitKey(key, connectionId, cardId)) return false;
+    Locked locked(lock_);
+    const auto found = records_.find(connectionId);
+    if (found == records_.end()) return false;
+    const PluginCardRecord* card = found->second.card(cardId);
+    return card && card->rotate;
 }
 
 void PluginManager::requestAttention(const std::string& key, const deskhog::Notice& notice) {
@@ -934,11 +952,13 @@ void PluginManager::runCommand(const Command& command) {
         case CommandKind::Press: {
             PluginCard* card = runningCard(command.target);
             if (card) card->handleButtonPress(command.button);
+            if (card && onMovedByHand_) onMovedByHand_();
             break;
         }
         case CommandKind::Show: {
             PluginCard* card = runningCard(command.target);
             if (card && showCard_) showCard_(card->getCard());
+            if (card && onMovedByHand_) onMovedByHand_();
             break;
         }
         case CommandKind::Repaint:
@@ -1504,7 +1524,8 @@ bool PluginManager::removeConnection(const std::string& id) {
 std::string PluginManager::addCard(const std::string& plugin, const std::string& connectionId,
                                    const std::string& connectionName, const PluginSettings& connectionSettings,
                                    const std::string& kind, const std::string& cardName,
-                                   const PluginSettings& cardSettings, String& error, bool mayInterrupt) {
+                                   const PluginSettings& cardSettings, String& error, bool mayInterrupt,
+                                   bool rotate) {
     if (!storageReady_) {
         error = "plugin storage is not available";
         return std::string();
@@ -1577,6 +1598,7 @@ std::string PluginManager::addCard(const std::string& plugin, const std::string&
         card.kind = cardKind;
         card.settings = cardSettings;
         card.mayInterrupt = mayInterrupt;
+        card.rotate = rotate;
         record->cards.push_back(card);
         if (!saveRecord(*record)) {
             error = "could not save (storage full?)";
@@ -1598,7 +1620,7 @@ std::string PluginManager::addCard(const std::string& plugin, const std::string&
 }
 
 bool PluginManager::updateCard(const std::string& key, const std::string* cardName, const PluginSettings& cardSettings,
-                               const bool* mayInterrupt) {
+                               const bool* mayInterrupt, const bool* rotate) {
     std::string connectionId, cardId;
     if (!splitKey(key, connectionId, cardId)) return false;
     {
@@ -1610,10 +1632,12 @@ bool PluginManager::updateCard(const std::string& key, const std::string* cardNa
             if (candidate.id == cardId) card = &candidate;
         }
         if (!card) return false;
-        // The host's own setting takes effect at once: no need to restart the plugin for it.
+        // The host's own settings take effect at once: no need to restart the plugin for them.
         const bool frontChanged = mayInterrupt && card->mayInterrupt != *mayInterrupt;
         if (frontChanged) card->mayInterrupt = *mayInterrupt;
-        if (!cardSettings.empty() || frontChanged) {
+        const bool rotateChanged = rotate && card->rotate != *rotate;
+        if (rotateChanged) card->rotate = *rotate;
+        if (!cardSettings.empty() || frontChanged || rotateChanged) {
             for (const auto& pair : cardSettings) card->settings[pair.first] = pair.second;
             if (!saveRecord(found->second)) return false;
         }
