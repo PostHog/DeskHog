@@ -14,10 +14,14 @@
     tools/deskhog show weather:2             bring a card to the front on the device
     tools/deskhog send doorbell "Pizza!"     push a message to a card's plugin: text, JSON, or @file
     tools/deskhog config timers:1 front=no   stop a card from coming to the front by itself (front=yes: let it)
+    tools/deskhog config timers:1 rotate=no  make auto-rotate stop at a card and stay (rotate=yes: let it move on)
     tools/deskhog pull weather               print the source that is on the device
     tools/deskhog rm weather                 remove a plugin with its connections and cards
     tools/deskhog system                     memory and stack headroom on the device
     tools/deskhog timezone Europe/Brussels   set the time zone plugins tell local time by (no name: show it)
+    tools/deskhog device                     the device's own settings: name, brightness, night hours, auto-rotate, battery
+    tools/deskhog device screen.night=5 night.enabled=yes   change some of them (keys as `device` prints them)
+    tools/deskhog restart                    restart the device and wait until it answers again
     tools/deskhog sim weather.lua            run a plugin on this computer and save a screenshot
     tools/deskhog image walk1.png walk2.png  turn PNG files into gfx.image() source for a plugin
 
@@ -259,10 +263,17 @@ def parse_settings(pairs):
     return settings
 
 
+def parse_yes_no(text, what):
+    answer = text.lower()
+    if answer not in ("yes", "no", "true", "false", "on", "off", "1", "0"):
+        raise DeviceError("%s is yes or no" % what)
+    return answer in ("yes", "true", "on", "1")
+
+
 def command_config(device, args):
     target = args.target
     settings = parse_settings(args.settings)
-    front = None
+    front = rotate = None
     if ":" in target:
         # One card's own settings. Every card also has one of the device's own:
         # "front", whether it may come to the front when its plugin calls notify().
@@ -274,11 +285,10 @@ def command_config(device, args):
         kind = next((k for k in (plugin or {}).get("kinds", []) if k["key"] == card.get("kind")), None)
         fields = (kind or {}).get("config", [])
         update = {}
-        if "front" in settings and not any(field["key"] == "front" for field in fields):
-            answer = settings.pop("front").lower()
-            if answer not in ("yes", "no", "true", "false", "on", "off", "1", "0"):
-                raise DeviceError("front is yes or no")
-            update["front"] = answer in ("yes", "true", "on", "1")
+        # Both are the device's own, kept for every card; a plugin's field of the same name wins.
+        for own in ("front", "rotate"):
+            if own in settings and not any(field["key"] == own for field in fields):
+                update[own] = parse_yes_no(settings.pop(own), own)
         if settings:
             update["settings"] = settings
         if update:
@@ -287,7 +297,7 @@ def command_config(device, args):
                 time.sleep(1.5)  # its connection restarts with the new values
             card = next((c for c in device.state()["cards"] if c["config"] == target), card)
         values, secrets = card.get("settings", {}), []
-        front = card.get("front", True)
+        front, rotate = card.get("front", True), card.get("rotate", True)
     else:
         if settings:
             device.json("POST", "/api/connections/update?id=" + urllib.parse.quote(target), json.dumps({"settings": settings}), "application/json")
@@ -310,6 +320,8 @@ def command_config(device, args):
         print("%-12s = %s%s    # %s" % (field["key"], shown, note, field["label"]))
     if front is not None:
         print("%-12s = %s    # %s" % ("front", "yes" if front else "no", "May come to the front (when its plugin calls notify)"))
+    if rotate is not None:
+        print("%-12s = %s    # %s" % ("rotate", "yes" if rotate else "no", "Auto-rotate moves on from it (no: it stops there and stays)"))
     return 0
 
 
@@ -534,6 +546,87 @@ def posix_zone(name):
         return None
     # Every compiled zone file ends with its rules as a POSIX string, on a line of its own.
     return data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii") or None
+
+
+# The device's settings as `device` shows and changes them, by the kind of value the device takes.
+DEVICE_KEYS = (
+    ("name", "text"),
+    ("screen.day", "number"),
+    ("screen.night", "number"),
+    ("led.day", "number"),
+    ("led.night", "number"),
+    ("night.enabled", "yesno"),
+    ("night.from", "text"),
+    ("night.until", "text"),
+    ("rotate.seconds", "number"),
+    ("battery", "yesno"),
+)
+
+
+def device_value(settings, key):
+    for part in key.split("."):
+        settings = settings[part]
+    return settings
+
+
+def print_device(settings):
+    for key, kind in DEVICE_KEYS:
+        value = device_value(settings, key)
+        print("%-15s = %s" % (key, str(value).lower() if kind == "yesno" else value))
+    status = settings.get("status") or {}
+    gauge, battery = status.get("gauge"), status.get("battery")
+    if battery:
+        print("battery status: %d%%, %.2f V%s" % (battery["percent"], battery["volts"], ", charging" if battery["charging"] else ""))
+    elif gauge:
+        print("battery status: not counted (battery = false); a gauge reads %d%%, %.2f V" % (gauge["percent"], gauge["volts"]))
+    else:
+        print("battery status: no battery gauge found")
+    print("night mode now: %s%s" % ("on" if status.get("night") else "off", " (switched by hand)" if status.get("manual") else ""))
+
+
+def command_device(device, args):
+    kinds = dict(DEVICE_KEYS)
+    update = {}
+    for key, text in parse_settings(args.settings).items():
+        if key not in kinds:
+            raise DeviceError('"%s" is not a device setting. They are: %s.' % (key, ", ".join(k for k, _ in DEVICE_KEYS)))
+        if kinds[key] == "yesno":
+            value = parse_yes_no(text, key)
+        elif kinds[key] == "number":
+            if not re.match(r"^[0-9]+$", text):
+                raise DeviceError("%s takes a whole number, got \"%s\"" % (key, text))
+            value = int(text)
+        else:
+            value = text  # the key decides the kind: name=123 is the text "123"
+        node = update
+        *path, last = key.split(".")
+        for part in path:
+            node = node.setdefault(part, {})
+        node[last] = value
+    if update:
+        settings = device.json("POST", "/api/device", json.dumps(update), "application/json")
+    else:
+        settings = device.json("GET", "/api/device")
+    print_device(settings)
+    if "name" in update:
+        print("The device is now at http://%s.local. Use --host %s.local to reach it from now on." % (update["name"], update["name"]))
+    return 0
+
+
+def command_restart(device, args):
+    device.json("POST", "/api/restart")
+    print("Restarting.", end=" ", flush=True)
+    time.sleep(2)  # it goes down half a second after it answers; do not catch it still up
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        try:
+            device.request("GET", "/api/status")
+            print("The device is back.")
+            return 0
+        except DeviceError:
+            time.sleep(1)
+    print()
+    raise DeviceError("the device did not answer within 30 seconds. Check it, or its new address if you renamed it.")
 
 
 def command_timezone(device, args):
@@ -851,6 +944,12 @@ def main():
     sub = commands.add_parser("timezone", help="show or set the time zone plugins tell local time by")
     sub.add_argument("zone", nargs="?", help="a place such as Europe/Brussels, a POSIX string such as CET-1CEST,M3.5.0,M10.5.0/3, or UTC")
     sub.set_defaults(run=command_timezone)
+
+    sub = commands.add_parser("device", help="show or change the device's own settings (name, brightness, night hours, auto-rotate, battery)")
+    sub.add_argument("settings", nargs="*", metavar="key=value", help="e.g. screen.day=60 night.enabled=yes night.from=22:30")
+    sub.set_defaults(run=command_device)
+
+    commands.add_parser("restart", help="restart the device and wait until it is back").set_defaults(run=command_restart)
 
     sub = commands.add_parser("rm", help="remove a plugin and its cards")
     sub.add_argument("name")
