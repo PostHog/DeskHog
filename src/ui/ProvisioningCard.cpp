@@ -12,7 +12,7 @@ ProvisioningCard::ProvisioningCard(lv_obj_t* parent, WiFiInterface& wifiInterfac
     : _parent(parent), _wifiInterface(wifiInterface), _width(width), _height(height),
     _card(nullptr), _qrScreen(nullptr), _statusScreen(nullptr),
     _qrCode(nullptr), _ssidLabel(nullptr), _statusLabel(nullptr), _ipLabel(nullptr), _signalLabel(nullptr), _versionLabel(nullptr),
-    _topLeftVersionLabel(nullptr), _nightLabel(nullptr) {
+    _topLeftVersionLabel(nullptr), _nightLabel(nullptr), _batteryLabel(nullptr) {
     
     createCard();
     createQRScreen();
@@ -187,6 +187,12 @@ void ProvisioningCard::createStatusScreen() {
     lv_obj_set_style_text_color(_nightLabel, Style::valueColor(), 0);
     lv_label_set_text(_nightLabel, "");
     lv_obj_add_flag(_nightLabel, LV_OBJ_FLAG_HIDDEN);
+
+    _batteryLabel = lv_label_create(table);
+    lv_obj_set_style_text_font(_batteryLabel, Style::labelFont(), 0);
+    lv_obj_set_style_text_color(_batteryLabel, Style::valueColor(), 0);
+    lv_label_set_text(_batteryLabel, "");
+    lv_obj_add_flag(_batteryLabel, LV_OBJ_FLAG_HIDDEN);
     
     // Set initial values (some will be updated by handleSystemStateChange or other methods)
     lv_label_set_text(_statusLabel, "Initializing..."); 
@@ -295,6 +301,20 @@ void ProvisioningCard::setNightLine(const String& text) {
         lv_label_set_text(label, text.c_str());
         if (text.length() == 0) lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+    });
+}
+
+void ProvisioningCard::setBatteryLine(const String& text) {
+    lv_obj_t* label = _batteryLabel;
+    runOnUiTask([label, text]() {
+        if (!label || !lv_obj_is_valid(label)) return;
+        if (text.length() == 0) {
+            lv_label_set_text(label, "");
+            lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_label_set_text(label, ("Battery " + text).c_str());
+            lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
+        }
     });
 }
 

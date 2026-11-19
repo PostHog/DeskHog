@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "DeskRules.h"
+#include "PluginHost.h"
+#include "hardware/BatteryGauge.h"
 
 class CardController;
 class ConfigManager;
@@ -38,6 +40,8 @@ public:
     void begin();
     /** The card stack to rotate, and the status card's night switch. Call in setup(), after it is initialized. */
     void setCardController(CardController* cards);
+    /** The battery gauge, for the status card and for plugins. Call in setup(). */
+    void setBatteryGauge(BatteryGauge* gauge) { gauge_ = gauge; }
 
     // ---- UI task only -------------------------------------------------
 
@@ -59,11 +63,16 @@ public:
     void preview(bool night);
     struct Status { bool night; bool manual; };
     Status status();
+    /** The battery for plugins. False unless this device has a battery and the gauge was found. Never waits. */
+    bool battery(deskhog::BatteryStatus& status);
+    /** What the gauge reads, whether or not this device is set to have a battery. */
+    BatteryGauge::Reading gauge();
 
 private:
     static void fadeToward(int& milli, int target, int step);
     void rotate(bool screenOff, uint32_t now);
     void showNightLine(const deskhog::DeskRules::Levels& levels, bool settingsChanged);
+    void showBatteryLine(uint32_t now, bool settingsChanged);
 
     ConfigManager& config_;
     DisplayInterface& display_;
@@ -77,6 +86,8 @@ private:
     std::atomic<int> previewWanted_{0};     ///< 0 none, 1 day, 2 night
     std::atomic<bool> night_{false};
     std::atomic<bool> manual_{false};
+    std::atomic<bool> hasBattery_{false};   ///< settings_.battery, readable without the lock
+    BatteryGauge* gauge_ = nullptr;
 
     // UI task only
     deskhog::DeskRules rules_;
@@ -84,6 +95,9 @@ private:
     deskhog::DeviceSettings applied_;  ///< The settings the rules have
     CardController* cards_ = nullptr;
     int nightLineMode_ = 0;  ///< 0 no line, 1 day by hand, 2 night by hand
+    std::string batteryText_;  ///< What the status card shows now; "" is hidden
+    bool batteryShown_ = false;  ///< batteryText_ has been handed to the card at least once
+    uint32_t batteryAtMs_ = 0;
     std::string zone_;
     uint32_t zoneAtMs_ = 0;
     uint32_t lastTickMs_ = 0;

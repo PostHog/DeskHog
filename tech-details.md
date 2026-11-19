@@ -16,6 +16,7 @@ We've got two cores and multiple "tasks" assigned between them – task is [Free
 - Web portal server
 - Network requests for plugins
 - NeoPixel control
+- Battery gauge (reads the fuel gauge over I2C every 30 s and hands the reading over through an atomic)
 
 **Core 1 (Application CPU) tasks:**
 

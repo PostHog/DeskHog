@@ -93,6 +93,13 @@ public:
      * @param text What to say; "" hides the line. Thread-safe.
      */
     void setNightLine(const String& text);
+
+    /**
+     * @brief Shows the battery under the status rows
+     *
+     * @param text The charge, such as "82%"; "" hides the row. Thread-safe.
+     */
+    void setBatteryLine(const String& text);
     
 private:
     /**
@@ -199,6 +206,7 @@ private:
     lv_obj_t* _versionLabel;      ///< Firmware version text
     lv_obj_t* _topLeftVersionLabel; ///< Firmware version text (on card top-left)
     lv_obj_t* _nightLabel;        ///< Night mode by hand, hidden while there is none
+    lv_obj_t* _batteryLabel;      ///< The charge, hidden on a device without a battery
 
     std::function<void()> _onCenter;
 

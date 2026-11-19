@@ -35,6 +35,7 @@
 #include "esp_partition.h" // Include for partition functions
 #include "plugins/PluginManager.h"
 #include "DeskManners.h"
+#include "hardware/BatteryGauge.h"
 #include <esp_sleep.h> // Added for deep sleep functionality
 #include <esp_pm.h> // Added for power management
 
@@ -66,6 +67,7 @@ EventQueue* eventQueue; // Add global EventQueue
 NeoPixelController* neoPixelController;  // Renamed from neoPixelManager
 PluginManager* pluginManager;
 DeskManners* deskManners;  // Brightness and night hours
+BatteryGauge* batteryGauge;  // Fuel gauge, read on its own task
 
 // Task handles
 TaskHandle_t wifiTask;
@@ -294,6 +296,9 @@ void setup() {
     // Initialize with display interface directly
     cardController->setPluginManager(pluginManager);
     cardController->initialize(displayInterface);
+    batteryGauge = new BatteryGauge();
+    batteryGauge->begin();
+    deskManners->setBatteryGauge(batteryGauge);
     deskManners->setCardController(cardController);  // auto-rotate, and ● on the status card
 
     // Initialize captive portal

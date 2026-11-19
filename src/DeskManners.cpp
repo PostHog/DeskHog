@@ -21,6 +21,8 @@ int64_t epochNow() {
 
 // The time zone is looked up once a second rather than on every loop.
 constexpr uint32_t kZoneEveryMs = 1000;
+// The gauge is read every 30 s; looking at it more often than every 5 s gains nothing.
+constexpr uint32_t kBatteryEveryMs = 5000;
 
 }  // namespace
 
@@ -32,6 +34,7 @@ void DeskManners::begin() {
     lock_ = xSemaphoreCreateMutex();
     settings_ = config_.getDeviceSettings();
     applied_ = settings_;
+    hasBattery_ = settings_.battery;
     rules_.setSettings(applied_);
     rotation_.setSeconds(applied_.rotateSeconds);
 
@@ -89,6 +92,7 @@ void DeskManners::tick() {
     night_ = levels.night;
     manual_ = levels.manual;
     showNightLine(levels, settingsChanged);
+    showBatteryLine(now, settingsChanged);
     rotate(levels.screen == 0, now);
 
     for (uint8_t b = 0; b <= Input::BUTTON_UP; b++) {
@@ -145,6 +149,25 @@ void DeskManners::showNightLine(const deskhog::DeskRules::Levels& levels, bool s
     cards_->getProvisioningCard()->setNightLine(String(text.c_str()));
 }
 
+// The battery row of the status card. The text is only handed over when it
+// changes, as a handover queues work for the UI task.
+void DeskManners::showBatteryLine(uint32_t now, bool settingsChanged) {
+    if (!cards_ || !cards_->getProvisioningCard()) return;
+    if (batteryShown_ && !settingsChanged && now - batteryAtMs_ < kBatteryEveryMs) return;
+    batteryAtMs_ = now;
+
+    std::string text;
+    deskhog::BatteryStatus status;
+    if (battery(status)) {
+        text = std::to_string(status.percent) + "%";
+        if (status.charging) text += ", charging";
+    }
+    if (batteryShown_ && text == batteryText_) return;
+    batteryShown_ = true;
+    batteryText_ = text;
+    cards_->getProvisioningCard()->setBatteryLine(String(text.c_str()));
+}
+
 void DeskManners::fadeToward(int& milli, int target, int step) {
     if (milli < target) milli = milli + step < target ? milli + step : target;
     else if (milli > target) milli = milli - step > target ? milli - step : target;
@@ -181,6 +204,7 @@ bool DeskManners::change(const std::vector<std::pair<std::string, std::string>>&
     if (ok) {
         config_.saveDeviceSettings(next);
         settings_ = next;
+        hasBattery_ = next.battery;
         dirty_ = true;
     }
     xSemaphoreGive(lock_);
@@ -190,3 +214,15 @@ bool DeskManners::change(const std::vector<std::pair<std::string, std::string>>&
 void DeskManners::preview(bool night) { previewWanted_ = night ? 2 : 1; }
 
 DeskManners::Status DeskManners::status() { return Status{night_, manual_}; }
+
+bool DeskManners::battery(deskhog::BatteryStatus& status) {
+    if (!gauge_ || !hasBattery_) return false;
+    const BatteryGauge::Reading reading = gauge_->reading();
+    if (!reading.found) return false;
+    status.percent = reading.percent;
+    status.volts = reading.volts;
+    status.charging = reading.charging;
+    return true;
+}
+
+BatteryGauge::Reading DeskManners::gauge() { return gauge_ ? gauge_->reading() : BatteryGauge::Reading(); }
