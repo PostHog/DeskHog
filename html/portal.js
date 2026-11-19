@@ -168,6 +168,7 @@ async function refresh() {
     renderDirectory();
     renderAbout();
     renderTimeZone();
+    renderDevice();
     updateScreens();
     if (ui.page === 'plugins' && ui.openPlugin) showPluginStatus(ui.openPlugin, true);
 }
@@ -439,6 +440,152 @@ function renderTimeZone() {
         offer].filter(Boolean));
 }
 
+// ----------------------------------------------------------- device settings
+
+/** Brightness and the like read "off" at 0. */
+const level = value => (Number(value) === 0 ? 'off' : value + '%');
+
+/** What "every 30 s" and "every 2 min" are called on the rotation's dropdown. */
+const ROTATE_STEPS = [0, 15, 30, 60, 120, 300];
+const rotateLabel = seconds => (seconds === 0 ? 'Off' : seconds % 60 === 0 ? seconds / 60 + ' min' : seconds + ' s');
+
+/** The control values the page has put on the Device tab, to tell them from what someone is typing. */
+const shownValue = control => (control.type === 'checkbox' ? String(control.checked) : control.value);
+
+/**
+ * Put the device's value into a control, unless someone is working on it: a
+ * poll that lands in the middle of a drag or while typing must not undo it.
+ * A control is "worked on" while it is focused or holds something other than
+ * what was last put there. It catches up once the device says the same.
+ */
+function showValue(control, value) {
+    value = String(value);
+    const same = shownValue(control) === value;
+    const idle = (control.dataset.shown === undefined || shownValue(control) === control.dataset.shown) && (control.type === 'checkbox' || document.activeElement !== control);
+    if (same || idle) {
+        if (control.type === 'checkbox') control.checked = value === 'true';
+        else control.value = value;
+        control.dataset.shown = shownValue(control);
+    }
+}
+
+async function saveDevice(body, doneText) {
+    return attempt(async () => {
+        state.device = await api('POST', '/api/device', body);
+        renderDevice();
+        renderAbout();
+    }, doneText);
+}
+
+const nested = (path, value) => path.reduceRight((inner, key) => ({ [key]: inner }), value);
+
+/** A slider that saves where it is let go and, while it is dragged, at most every 150 ms (the night ones with a preview). */
+function slider(path, min, preview) {
+    const input = el('input', { type: 'range', min: String(min), max: '100', step: '1' });
+    const output = el('output');
+    let last = 0;
+    let timer = null;
+    const send = withPreview => {
+        clearTimeout(timer);
+        timer = null;
+        last = Date.now();
+        const body = nested(path, Number(input.value));
+        if (withPreview && preview) body.preview = preview;
+        saveDevice(body);
+    };
+    input.addEventListener('input', () => {
+        output.textContent = level(input.value);
+        const wait = 150 - (Date.now() - last);
+        if (wait <= 0) send(true);
+        else if (!timer) timer = setTimeout(() => send(true), wait);
+    });
+    input.addEventListener('change', () => send(false));
+    return { input, output, row: el('div', { class: 'slider' }, input, output) };
+}
+
+/** The panels' controls, built once: they are updated in place, so a slider is never rebuilt under a finger. */
+function buildDevice() {
+    const parts = {};
+    const levelField = (label, path, min, preview) => {
+        const made = slider(path, min, preview);
+        parts[path.join('.')] = made;
+        return el('label', { class: 'field' }, el('span', {}, label), made.row);
+    };
+    const enabled = el('input', { type: 'checkbox' });
+    const from = el('input', { type: 'time' });
+    const until = el('input', { type: 'time' });
+    enabled.addEventListener('change', () => saveDevice({ night: { enabled: enabled.checked } }));
+    from.addEventListener('change', () => from.value && saveDevice({ night: { from: from.value } }));
+    until.addEventListener('change', () => until.value && saveDevice({ night: { until: until.value } }));
+    const rotate = el('select', {});
+    rotate.addEventListener('change', () => saveDevice({ rotate: { seconds: Number(rotate.value) } }));
+    const battery = el('input', { type: 'checkbox' });
+    battery.addEventListener('change', () => saveDevice({ battery: battery.checked }));
+    const name = el('input', { type: 'text', maxlength: '24', autocapitalize: 'none', spellcheck: 'false' });
+    const address = el('small', {});
+    const hint = el('small', {});
+    name.addEventListener('input', () => { address.textContent = 'http://' + name.value + '.local'; });
+    const rename = async () => {
+        const wanted = name.value.trim();
+        if (await saveDevice({ name: wanted })) notify('Saved. This device is now at http://' + wanted + '.local');
+    };
+    name.addEventListener('keydown', event => { if (event.key === 'Enter') rename(); });
+
+    $('display-form').replaceChildren(
+        el('div', { class: 'levels' }, levelField('Screen', ['screen', 'day'], 5), levelField('Screen at night', ['screen', 'night'], 0, 'night')),
+        el('div', { class: 'levels' }, levelField('LED', ['led', 'day'], 0), levelField('LED at night', ['led', 'night'], 0, 'night')),
+        el('div', { class: 'field times' }, enabled, el('span', {}, 'Night hours from'), from, el('span', {}, 'until'), until,
+            el('small', {}, 'They follow the time zone above.')),
+        el('label', { class: 'field' }, el('span', {}, 'Rotate cards'), rotate,
+            el('small', {}, 'Moves on to the next card by itself. Games and cards you are on wait their turn.')));
+    $('name-form').replaceChildren(
+        el('label', { class: 'field' }, el('span', {}, 'Name on the network'),
+            el('div', { class: 'pick' }, name, el('button', { type: 'button', onclick: rename }, 'Save')), address));
+    $('battery-form').replaceChildren(
+        el('label', { class: 'field check' }, battery, el('span', {}, 'This device has a battery', hint)));
+    $('restart-btn').addEventListener('click', async () => {
+        if (!window.confirm('Restart the DeskHog?')) return;
+        await attempt(() => api('POST', '/api/restart', {}), 'Restarting. The page picks up again when the device is back.');
+    });
+    return { parts, enabled, from, until, rotate, battery, name, address, hint };
+}
+
+let deviceControls = null;
+
+/** The device's own settings, on the Device page. Not on older firmware, which has none. */
+function renderDevice() {
+    const settings = state && state.device;
+    for (const id of ['display-panel', 'name-panel', 'battery-panel']) $(id).hidden = !settings;
+    $('restart-btn').hidden = !settings;
+    if (!settings) return;
+    if (!deviceControls) deviceControls = buildDevice();
+    const c = deviceControls;
+    for (const path of ['screen.day', 'screen.night', 'led.day', 'led.night']) {
+        const [group, when] = path.split('.');
+        showValue(c.parts[path].input, settings[group][when]);
+        c.parts[path].output.textContent = level(c.parts[path].input.value);
+    }
+    showValue(c.enabled, settings.night.enabled);
+    showValue(c.from, settings.night.from);
+    showValue(c.until, settings.night.until);
+    // A value set through the API that the steps lack still has to show.
+    const seconds = settings.rotate.seconds;
+    const steps = ROTATE_STEPS.includes(seconds) ? ROTATE_STEPS : [...ROTATE_STEPS, seconds].sort((a, b) => a - b);
+    if (c.rotate.options.length !== steps.length || steps.some((step, i) => c.rotate.options[i].value !== String(step))) {
+        c.rotate.replaceChildren(...steps.map(step => el('option', { value: String(step) }, rotateLabel(step))));
+        c.rotate.value = String(seconds);
+        c.rotate.dataset.shown = c.rotate.value;
+    }
+    showValue(c.rotate, seconds);
+    showValue(c.battery, settings.battery);
+    showValue(c.name, settings.name);
+    c.address.textContent = 'http://' + c.name.value + '.local';
+    c.hint.textContent = settings.status.gauge ? 'A battery gauge was found. Leave this off on USB power alone: the gauge then reads about 100%.'
+        : 'No battery gauge was found.';
+    document.title = settings.name;
+    document.querySelector('[data-brand]').textContent = settings.name;
+}
+
 // ------------------------------------------------------------------ cards
 
 function renderCards() {
@@ -571,13 +718,18 @@ function cardPanel(card) {
     const frontInput = el('input', { type: 'checkbox', checked: card.front !== false });
     const front = el('label', { class: 'field check' }, frontInput, el('span', {}, 'May come to the front',
         el('small', {}, 'When its plugin has something to tell you. Off: the light flashes, and the card says it when you get there.')));
+    // Older firmware has no rotation, and no such setting.
+    const skipInput = el('input', { type: 'checkbox', checked: card.rotate === false });
+    const skip = state.device ? el('label', { class: 'field check' }, skipInput, el('span', {}, 'Skip in rotation',
+        el('small', {}, 'The rotation passes this card by, and stays on it when you go there yourself.'))) : null;
 
     const save = el('button', { type: 'button', class: 'primary' }, 'Save');
     save.addEventListener('click', async () => {
         save.disabled = true;
         const done = await attempt(async () => {
             await api('POST', '/api/cards/update?key=' + encode(card.config),
-                { name: nameInput.value.trim() || fallback, settings: readFields(cardFields), front: frontInput.checked });
+                { name: nameInput.value.trim() || fallback, settings: readFields(cardFields), front: frontInput.checked,
+                    rotate: state.device ? !skipInput.checked : undefined });
             const own = readFields(ownFields);
             if (Object.keys(own).length) {
                 await api('POST', '/api/connections/update?id=' + encode(connection.id), { settings: own });
@@ -597,7 +749,7 @@ function cardPanel(card) {
     };
 
     const form = el('div', { class: 'pane-form' },
-        el('label', { class: 'field' }, el('span', {}, 'Name'), nameInput), cardFields, ownFields, front);
+        el('label', { class: 'field' }, el('span', {}, 'Name'), nameInput), cardFields, ownFields, front, skip);
     if (plugin.multiCard && plugin.config.length) {
         const link = el('a', { href: '#connections', onclick: event => {
             event.preventDefault();
@@ -1491,6 +1643,8 @@ function renderAbout() {
         add('Cards', state.cards.length + ' of 12');
         add('Plugins', state.plugins.length);
         if (state.storage && state.storage.total) add('Plugin storage', kb(state.storage.used) + ' of ' + kb(state.storage.total) + ' used');
+        const battery = state.device && state.device.status.battery;
+        if (battery) add('Battery', battery.percent + '%' + (battery.charging ? ', charging' : ''));
         if (state.system) add('Memory free', kb(state.system.psram_free) + ' for plugins, ' + kb(state.system.heap_free) + ' internal');
     }
     $('about-list').replaceChildren(...rows);

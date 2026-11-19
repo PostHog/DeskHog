@@ -284,7 +284,7 @@ test('edits a card of a multi-card plugin', async () => {
     fieldNamed(pane, 'Name').value = 'Holiday';
     await click(window, buttonNamed(pane, 'Save'));
     equal(lastRequest(device, '/api/cards/update').url, '/api/cards/update?key=weather%3A1', 'url');
-    equal(lastRequest(device, '/api/cards/update').body, { name: 'Holiday', settings: { city: 'Porto' }, front: true }, 'body');
+    equal(lastRequest(device, '/api/cards/update').body, { name: 'Holiday', settings: { city: 'Porto' }, front: true, rotate: true }, 'body');
     check(!device.requests.some(r => r.url.startsWith('/api/connections/update')), 'the connection is left alone');
     equal(titles(document)[0], 'Holiday', 'new name shown');
     check(pane.hidden, 'on a phone saving goes back to the list');
@@ -314,7 +314,7 @@ test('edits a single-card plugin: secrets stay unless retyped', async () => {
     fieldNamed(pane, 'Button label').value = 'Ship';
     await click(window, buttonNamed(pane, 'Save'));
     equal(lastRequest(device, '/api/connections/update').body, { settings: { url: 'http://example.com/hook', label: 'Ship' } }, 'the untouched secret is not sent');
-    equal(lastRequest(device, '/api/cards/update').body, { name: 'Webhook', settings: {}, front: true }, 'card request');
+    equal(lastRequest(device, '/api/cards/update').body, { name: 'Webhook', settings: {}, front: true, rotate: true }, 'card request');
 });
 
 test('keeps what you typed while the page refreshes', async () => {
@@ -888,6 +888,217 @@ test('the pretend device takes pushed messages like the firmware', async () => {
     equal(device.handle('POST', '/api/connections/message?id=homey', 'one too many').status, 429, 'at most 8 wait at a time');
     equal(device.handle('GET', '/api/connections/choices?id=homey&field=url').status, 404, 'a setting without choices has no list');
     equal(device.handle('GET', '/api/connections/choices?id=nope&field=home').status, 404, 'nor does a connection that is not there');
+});
+
+// ---- the device's own settings
+
+const slidersOf = document => [...document.querySelectorAll('#display-form input[type="range"]')];
+const move = async (window, input, value, type) => { input.value = String(value); input.dispatchEvent(new window.Event(type, { bubbles: true })); await settle(window); };
+const rowOf = (document, label) => [...document.querySelectorAll('#about-list dt')].find(dt => dt.textContent === label);
+
+test('shows the device\'s settings', async () => {
+    const device = makeDevice();
+    const { document } = await openPage(device, { hash: '#device' });
+    equal(slidersOf(document).map(s => s.value), ['80', '10', '100', '0'], 'screen and LED, by day and at night');
+    equal([...document.querySelectorAll('#display-form output')].map(text), ['80%', '10%', '100%', 'off'], 'with their values beside them');
+    const [enabled, from, until] = document.querySelectorAll('#display-form .times input');
+    check(!enabled.checked, 'night hours are off');
+    equal([from.value, until.value], ['22:00', '07:00'], 'from 22:00 until 07:00');
+    equal(document.querySelector('#display-form select').selectedOptions[0].textContent, 'Off', 'the rotation is off');
+    equal(document.title, 'deskhog', 'the name is in the title');
+    equal(document.querySelector('[data-brand]').textContent, 'deskhog', 'and in the header');
+});
+
+test('an older device without settings has no such panels', async () => {
+    const device = makeDevice();
+    const original = device.state;
+    device.state = () => { const { device: gone, ...rest } = original(); return rest; };
+    const { document, errors } = await openPage(device, { hash: '#device' });
+    equal(errors, [], 'nothing breaks');
+    for (const id of ['display-panel', 'name-panel', 'battery-panel', 'restart-btn']) check(document.getElementById(id).hidden, id + ' is left out');
+    const { window } = await openPage(device);
+    await click(window, tile(window.document, 'PLUGIN|hello:1'));
+    check(!window.document.getElementById('card-pane').textContent.includes('Skip in rotation'), 'and cards have no rotation setting');
+    await click(window, buttonNamed(window.document.getElementById('card-pane'), 'Save'));
+    check(!('rotate' in lastRequest(device, '/api/cards/update').body), 'which is not sent');
+});
+
+test('a slider saves its level', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    await move(window, slidersOf(document)[0], 60, 'change');
+    equal(lastRequest(device, '/api/device').body, { screen: { day: 60 } }, 'only that level is sent');
+    equal(device.device.screen.day, 60, 'the device has it');
+    equal(document.querySelector('#display-form output').textContent, '60%', 'and the page shows it');
+});
+
+test('dragging a night slider previews it', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    await move(window, slidersOf(document)[1], 20, 'input');
+    equal(lastRequest(device, '/api/device').body, { screen: { night: 20 }, preview: 'night' }, 'the night level is shown');
+    await move(window, slidersOf(document)[3], 30, 'input');
+    equal(lastRequest(device, '/api/device').body, { led: { night: 30 }, preview: 'night' }, 'the LED too');
+    const count = device.requests.length;
+    await move(window, slidersOf(document)[2], 50, 'input');
+    equal(device.requests.length, count + 1, 'a day slider is applied while it is dragged');
+    equal(lastRequest(device, '/api/device').body, { led: { day: 50 } }, 'without a preview');
+    // Faster than every 150 ms, only the last value follows.
+    const before = device.requests.length;
+    for (const value of [51, 52, 53]) await move(window, slidersOf(document)[2], value, 'input');
+    equal(device.requests.length, before, 'a burst of moves is held back');
+    await new Promise(resolve => window.setTimeout(resolve, 200));
+    equal(lastRequest(device, '/api/device').body, { led: { day: 53 } }, 'and the last one is sent');
+});
+
+test('a poll does not undo a slider or a name that someone is working on', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const slide = slidersOf(document)[0];
+    slide.focus();
+    await move(window, slide, 33, 'input');
+    await move(window, slide, 34, 'input'); // held back for the next 150 ms
+    await window.refresh();
+    equal(slide.value, '34', 'a slider being dragged stays where it is, though the device has 33');
+    slide.blur();
+    await window.refresh();
+    equal(slide.value, '34', 'and so does one let go before the device has caught up');
+    await new Promise(resolve => window.setTimeout(resolve, 200));
+    device.device.screen.day = 90;
+    await window.refresh();
+    equal(slide.value, '90', 'once the device has it, the page follows the device again');
+    const name = document.querySelector('#name-form input');
+    name.value = 'kitch';
+    name.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await window.refresh();
+    equal(name.value, 'kitch', 'a half-typed name stays');
+    equal(document.querySelector('#name-form small').textContent, 'http://kitch.local', 'and the address follows it');
+    const other = slidersOf(document)[3];
+    device.device.led.night = 40;
+    await window.refresh();
+    equal(other.value, '40', 'what nobody touches follows the device');
+});
+
+test('night hours are saved', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const [enabled, from] = document.querySelectorAll('#display-form .times input');
+    enabled.checked = true;
+    enabled.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await settle(window);
+    equal(lastRequest(device, '/api/device').body, { night: { enabled: true } }, 'switched on');
+    await move(window, from, '23:15', 'change');
+    equal(lastRequest(device, '/api/device').body, { night: { from: '23:15' } }, 'a new start');
+    equal(device.device.night, { enabled: true, from: '23:15', until: '07:00' }, 'the device has both');
+});
+
+test('rotate offers fixed steps', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const select = document.querySelector('#display-form select');
+    equal([...select.options].map(text), ['Off', '15 s', '30 s', '1 min', '2 min', '5 min'], 'the steps');
+    await move(window, select, 60, 'change');
+    equal(lastRequest(device, '/api/device').body, { rotate: { seconds: 60 } }, 'one minute');
+    device.device.rotate.seconds = 45;
+    await window.refresh();
+    equal([...select.options].map(text), ['Off', '15 s', '30 s', '45 s', '1 min', '2 min', '5 min'], 'a value set through the API gets its own step');
+    equal(select.selectedOptions[0].textContent, '45 s', 'and shows');
+});
+
+test('renaming sends you to the new address', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const name = document.querySelector('#name-form input');
+    equal(document.querySelector('#name-form small').textContent, 'http://deskhog.local', 'the address is shown');
+    name.value = 'kitchen';
+    name.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await click(window, buttonNamed(document.getElementById('name-form'), 'Save'));
+    equal(lastRequest(device, '/api/device').body, { name: 'kitchen' }, 'the name is sent');
+    check(document.getElementById('notice').textContent.includes('http://kitchen.local'), 'and the notice gives the address');
+    equal(document.title, 'kitchen', 'the title shows it');
+    equal(document.querySelector('[data-brand]').textContent, 'kitchen', 'and so does the header');
+});
+
+test('a bad name shows the device\'s reason', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    const name = document.querySelector('#name-form input');
+    name.value = '-Kitchen';
+    name.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await click(window, buttonNamed(document.getElementById('name-form'), 'Save'));
+    equal(document.getElementById('notice').textContent, 'name is not valid', 'the device\'s words');
+    check(document.getElementById('notice').className.includes('error'), 'as an error');
+    await window.refresh();
+    equal(name.value, '-Kitchen', 'the field keeps what was typed, also through a refresh');
+    equal(device.device.name, 'deskhog', 'the device is unchanged');
+});
+
+test('battery line only with a battery', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    equal(rowOf(document, 'Battery'), undefined, 'no row without a battery');
+    check(document.querySelector('#battery-form small').textContent.includes('A battery gauge was found'), 'the panel says a gauge was found');
+    device.device.status.gauge = { percent: 82, volts: 3.98, charging: true };
+    const box = document.querySelector('#battery-form input');
+    box.checked = true;
+    box.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await settle(window);
+    equal(lastRequest(device, '/api/device').body, { battery: true }, 'ticked');
+    equal(text(rowOf(document, 'Battery').nextSibling), '82%, charging', 'About shows the reading');
+});
+
+test('no battery panel hint without a gauge', async () => {
+    const device = makeDevice();
+    device.device.status.gauge = null;
+    const { document } = await openPage(device, { hash: '#device' });
+    check(document.querySelector('#battery-form input[type="checkbox"]') !== null, 'the tick box is there');
+    check(document.querySelector('#battery-form small').textContent.includes('No battery gauge was found'), 'the hint says no gauge was found');
+});
+
+test('restart asks first', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    window.confirm = () => false;
+    await click(window, document.getElementById('restart-btn'));
+    check(!lastRequest(device, '/api/restart'), 'cancelled: nothing is sent');
+    window.confirm = () => true;
+    await click(window, document.getElementById('restart-btn'));
+    equal(lastRequest(device, '/api/restart').method, 'POST', 'confirmed: the device is asked');
+    equal(device.restarts, 1, 'once');
+});
+
+test('a card can be kept out of the rotation', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device);
+    await click(window, tile(document, 'PLUGIN|hello:1'));
+    const pane = document.getElementById('card-pane');
+    const skip = [...pane.querySelectorAll('label.field.check')].find(l => l.textContent.startsWith('Skip in rotation'));
+    check(!!skip && !skip.querySelector('input').checked, 'unticked to begin with');
+    check(skip.textContent.includes('stays on it when you go there yourself'), 'with its hint');
+    skip.querySelector('input').checked = true;
+    await click(window, buttonNamed(pane, 'Save'));
+    equal(lastRequest(device, '/api/cards/update?key=hello%3A1').body.rotate, false, 'saved with the card');
+    equal(device.cards.find(c => c.config === 'hello:1').rotate, false, 'the device has it');
+    await click(window, tile(document, 'PLUGIN|hello:1'));
+    const again = [...document.querySelectorAll('#card-pane label.field.check')].find(l => l.textContent.startsWith('Skip in rotation'));
+    check(again.querySelector('input').checked, 'and shows it as saved');
+});
+
+test('the pretend device is as strict as the firmware', async () => {
+    const device = makeDevice();
+    const post = body => device.handle('POST', '/api/device', body);
+    for (const bad of [{ screen: { day: 4 } }, { screen: { day: 60.5 } }, { screen: { day: '60' } }, { led: { night: 101 } }, { name: '-a' }, { name: 'a-' },
+        { name: 'A' }, { name: 5 }, { rotate: { seconds: 5 } }, { rotate: { seconds: 601 } }, { battery: 1 }, { night: { enabled: 'yes' } },
+        { night: { from: '25:00' } }, { night: { until: 2200 } }, { colour: 1 }, { screen: { dusk: 1 } }, { preview: 'dusk' }, { screen: 3 }]) {
+        const answer = post(bad);
+        equal([answer.status, JSON.parse(answer.body).ok], [400, false], 'refuses ' + JSON.stringify(bad));
+    }
+    equal(post({ screen: { day: 60 }, name: 'A' }).status, 400, 'one bad value refuses the lot');
+    equal(device.device.screen.day, 80, 'and nothing changed');
+    const good = post({ screen: { day: 5 }, rotate: { seconds: 0 }, preview: 'night', night: { from: '22:30' } });
+    equal(good.status, 200, 'a good body');
+    equal([JSON.parse(good.body).screen.day, JSON.parse(good.body).night.from], [5, '22:30'], 'answers with the whole object');
+    equal(JSON.parse(device.handle('GET', '/api/device').body), JSON.parse(good.body), 'which GET gives too');
 });
 
 test('errors from the device are shown', async () => {

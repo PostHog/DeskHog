@@ -80,6 +80,16 @@ function makeDevice() {
         choicePolls: {},     // how often each was asked for: the first answer is "pending", as on the device
         directory: { source: 'TimBroddin/DeskHog', default: 'TimBroddin/DeskHog' },
         timezone: { posix: 'UTC0', name: '' },   // as on a new device
+        restarts: 0,         // how often the page asked for a restart
+        device: {            // the device's own settings, as a new one has them; see POST /api/device
+            name: 'deskhog',
+            screen: { day: 80, night: 10 },
+            led: { day: 100, night: 0 },
+            night: { enabled: false, from: '22:00', until: '07:00' },
+            rotate: { seconds: 0 },
+            battery: false,
+            status: { night: false, manual: false, battery: null, gauge: { percent: 100, volts: 4.2, charging: false } },
+        },
         internet: makeDirectory(),   // what the browser finds at the directory's address; null for "no internet"
         wifiConnected: true,
         plugins: [
@@ -133,13 +143,55 @@ function makeDevice() {
     device.state = () => ({
         directory: device.directory,
         timezone: device.timezone,
+        device: deviceNow(),
         plugins: device.plugins.map(plugin => { const { source, ...rest } = plugin; return rest; }),
         connections: device.connections.map(c => Object.assign({ cards: device.cards.filter(card => card.connection === c.id).length }, c)),
-        cards: device.cards.map(c => Object.assign({ key: c.type + '|' + c.config, front: true }, c)),
+        cards: device.cards.map(c => Object.assign({ key: c.type + '|' + c.config, front: true, rotate: true }, c)),
         notifications: device.notifications,
         storage: { used: 45056, total: 1048576 },
         system: { plugin_cards: 5, heap_free: 80000, psram_free: 1400000 },
     });
+
+    // As the firmware does: the object as it is now, with the battery as the gauge reports it when there is one.
+    const deviceNow = () => {
+        const now = JSON.parse(JSON.stringify(device.device));
+        now.status.battery = now.battery && now.status.gauge ? now.status.gauge : null;
+        return now;
+    };
+    // As the firmware does: kinds are checked strictly, nothing is changed unless everything is right.
+    const wholeNumber = (value, low, high) => typeof value === 'number' && Number.isInteger(value) && value >= low && value <= high;
+    const clock = value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+    const checks = {
+        name: value => typeof value === 'string' && /^[a-z0-9]([a-z0-9-]{0,22}[a-z0-9])?$/.test(value),
+        screen: { day: value => wholeNumber(value, 5, 100), night: value => wholeNumber(value, 0, 100) },
+        led: { day: value => wholeNumber(value, 0, 100), night: value => wholeNumber(value, 0, 100) },
+        night: { enabled: value => typeof value === 'boolean', from: clock, until: clock },
+        rotate: { seconds: value => value === 0 || wholeNumber(value, 10, 600) },
+        battery: value => typeof value === 'boolean',
+        preview: value => value === 'night' || value === 'day',
+    };
+    const postDevice = body => {
+        const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
+        if (!isObject(body)) return json({ ok: false, error: 'send a JSON object' }, 400);
+        const changes = [];
+        for (const [key, value] of Object.entries(body)) {
+            const rule = checks[key];
+            if (!rule) return json({ ok: false, error: 'unknown setting: ' + key }, 400);
+            if (typeof rule === 'function') {
+                if (!rule(value)) return json({ ok: false, error: key + ' is not valid' }, 400);
+                if (key !== 'preview') changes.push([device.device, key, value]);
+                continue;
+            }
+            if (!isObject(value)) return json({ ok: false, error: key + ' must be an object' }, 400);
+            for (const [inner, innerValue] of Object.entries(value)) {
+                if (!rule[inner]) return json({ ok: false, error: 'unknown setting: ' + key + '.' + inner }, 400);
+                if (!rule[inner](innerValue)) return json({ ok: false, error: key + '.' + inner + ' is not valid' }, 400);
+                changes.push([device.device[key], inner, innerValue]);
+            }
+        }
+        for (const [where, key, value] of changes) where[key] = value;
+        return json(deviceNow());
+    };
 
     // A card's pixels (RGB565). The real thing is a picture; this is a stand-in
     // with one colour per card, so the page has something to show.
@@ -163,6 +215,9 @@ function makeDevice() {
         const [pathname, query] = url.split('?');
         const params = new URLSearchParams(query || '');
         if (method === 'GET' && pathname === '/api/state') return json(device.state());
+        if (method === 'GET' && pathname === '/api/device') return json(deviceNow());
+        if (method === 'POST' && pathname === '/api/device') return postDevice(body);
+        if (method === 'POST' && pathname === '/api/restart') { device.restarts++; return json({ ok: true }); }
         if (method === 'GET' && pathname === '/api/status') {
             return json({
                 firmware_version: '0.3.0',
@@ -205,7 +260,7 @@ function makeDevice() {
                 device.connections.push(connection);
             }
             const id = String(device.cards.filter(c => c.connection === connection.id).length + 1);
-            device.cards.push({ type: 'PLUGIN', config: connection.id + ':' + id, name: body.name || (plugin.multiCard ? plugin.kinds.find(k => k.key === body.kind).name : plugin.title), plugin: plugin.name, connection: connection.id, card: id, kind: body.kind, settings: body.settings || {}, front: body.front !== false, frames: 0, onScreen: false });
+            device.cards.push({ type: 'PLUGIN', config: connection.id + ':' + id, name: body.name || (plugin.multiCard ? plugin.kinds.find(k => k.key === body.kind).name : plugin.title), plugin: plugin.name, connection: connection.id, card: id, kind: body.kind, settings: body.settings || {}, front: body.front !== false, rotate: body.rotate !== false, frames: 0, onScreen: false });
             return json({ ok: true, key: connection.id + ':' + id });
         }
         if (method === 'POST' && pathname === '/api/cards/update') {
@@ -213,6 +268,7 @@ function makeDevice() {
             if (!card) return json({ ok: false, error: 'no such card' }, 404);
             if (body.name) card.name = body.name;
             if (typeof body.front === 'boolean') card.front = body.front;
+            if (typeof body.rotate === 'boolean') card.rotate = body.rotate;
             Object.assign(card.settings, body.settings || {});
             return json({ ok: true });
         }
