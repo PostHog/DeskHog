@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Attention.h"
+#include "DeskRules.h"
 #include "HttpRedirect.h"
 #include "LuaPlugin.h"
 #include "PixelRuns.h"
@@ -4235,6 +4236,286 @@ TEST(banner_is_drawn_over_the_card) {
     CHECK_EQ(clipUtf8("héllo", 3), "hé");
     CHECK_EQ(clipUtf8("hi", 10), "hi");
 }
+
+// ------------------------------------------------------------- desk rules
+
+namespace {
+
+typedef std::vector<std::pair<std::string, std::string>> Changes;
+
+/** The moment a UTC clock shows this date and time. */
+int64_t utcAt(int year, int month, int day, int hour, int minute) {
+    return TimeZone().fromCivil(year, month, day, hour, minute, 0);
+}
+
+/** Night hours 22:00-07:00 on, in UTC. */
+DeskRules nightRules() {
+    DeviceSettings settings;
+    settings.nightEnabled = true;
+    DeskRules rules;
+    rules.setSettings(settings);
+    return rules;
+}
+
+}  // namespace
+
+TEST(device_settings_defaults_change_nothing) {
+    DeskRules rules;
+    for (int hour : {0, 3, 12, 23}) {
+        const DeskRules::Levels levels = rules.tick(utcAt(2026, 3, 1, hour, 0), "UTC0", 1000);
+        CHECK_EQ(levels.screen, 80);
+        CHECK_EQ(levels.led, 100);
+        CHECK(!levels.night);
+        CHECK(!levels.manual);
+    }
+}
+
+TEST(device_settings_are_all_or_nothing) {
+    DeviceSettings settings;
+    std::string error;
+    CHECK(!applyDeviceSettings(settings, Changes{{"screen.day", "60"}, {"led.night", "300"}}, error));
+    CHECK(contains(error, "led.night"));
+    CHECK_EQ(settings.screenDay, 80);
+
+    CHECK(!applyDeviceSettings(settings, Changes{{"screen.day", "4"}}, error));
+    CHECK(applyDeviceSettings(settings, Changes{{"screen.day", "5"}}, error));
+    CHECK_EQ(settings.screenDay, 5);
+
+    CHECK(!applyDeviceSettings(settings, Changes{{"rotate.seconds", "5"}}, error));
+    for (const char* ok : {"0", "10", "600"}) CHECK(applyDeviceSettings(settings, Changes{{"rotate.seconds", ok}}, error));
+    CHECK_EQ(settings.rotateSeconds, 600);
+    CHECK(!applyDeviceSettings(settings, Changes{{"rotate.seconds", "601"}}, error));
+    CHECK(!applyDeviceSettings(settings, Changes{{"bogus", "1"}}, error));
+    CHECK(contains(error, "bogus"));
+
+    CHECK(applyDeviceSettings(settings, Changes{{"name", "kitchen"}, {"night.enabled", "yes"}, {"night.from", "21:30"},
+                                                {"night.until", "360"}, {"battery", "1"}, {"led.day", "0"}}, error));
+    CHECK_EQ(settings.name, "kitchen");
+    CHECK(settings.nightEnabled);
+    CHECK_EQ(settings.nightFrom, 1290);
+    CHECK_EQ(settings.nightUntil, 360);
+    CHECK(settings.battery);
+    CHECK_EQ(settings.ledDay, 0);
+    CHECK(!applyDeviceSettings(settings, Changes{{"night.enabled", "maybe"}}, error));
+    CHECK(!applyDeviceSettings(settings, Changes{{"name", "Desk"}}, error));
+}
+
+TEST(device_names) {
+    for (const char* ok : {"kitchen", "desk-2", "a"}) CHECK(isValidDeviceName(ok));
+    for (const char* bad : {"", "-a", "a-", "Desk", "a_b"}) CHECK(!isValidDeviceName(bad));
+    CHECK(isValidDeviceName(std::string(24, 'a')));
+    CHECK(!isValidDeviceName(std::string(25, 'a')));
+}
+
+TEST(clock_text) {
+    int minutes = 0;
+    CHECK(parseClock("22:30", minutes));
+    CHECK_EQ(minutes, 1350);
+    CHECK(parseClock("7:05", minutes));
+    CHECK_EQ(minutes, 425);
+    CHECK(parseClock("1350", minutes));
+    CHECK_EQ(minutes, 1350);
+    CHECK(!parseClock("24:00", minutes));
+    CHECK(!parseClock("12:60", minutes));
+    CHECK(!parseClock("x", minutes));
+    CHECK(!parseClock("", minutes));
+    CHECK(!parseClock("1440", minutes));
+    CHECK_EQ(formatClock(425), "07:05");
+}
+
+TEST(stored_settings_are_sanitized) {
+    DeviceSettings stored;
+    stored.screenDay = 0;
+    stored.ledNight = 999;
+    stored.name = "Bad Name";
+    stored.nightFrom = 5000;
+    stored.rotateSeconds = 3;
+    stored.screenNight = 25;
+    const DeviceSettings fixed = sanitized(stored);
+    CHECK_EQ(fixed.screenDay, 80);
+    CHECK_EQ(fixed.ledNight, 0);
+    CHECK_EQ(fixed.name, "deskhog");
+    CHECK_EQ(fixed.nightFrom, 1320);
+    CHECK_EQ(fixed.rotateSeconds, 0);
+    CHECK_EQ(fixed.screenNight, 25);  // in range: kept
+}
+
+TEST(night_crosses_midnight) {
+    DeskRules rules = nightRules();
+    CHECK(!rules.tick(utcAt(2026, 3, 1, 21, 59), "UTC0", 0).night);
+    CHECK(rules.tick(utcAt(2026, 3, 1, 22, 0), "UTC0", 0).night);
+    const DeskRules::Levels deep = rules.tick(utcAt(2026, 3, 2, 3, 0), "UTC0", 0);
+    CHECK(deep.night);
+    CHECK_EQ(deep.screen, 10);
+    CHECK_EQ(deep.led, 0);
+    CHECK(rules.tick(utcAt(2026, 3, 2, 6, 59), "UTC0", 0).night);
+    CHECK(!rules.tick(utcAt(2026, 3, 2, 7, 0), "UTC0", 0).night);
+
+    DeviceSettings same;
+    same.nightEnabled = true;
+    same.nightFrom = same.nightUntil = 600;
+    DeskRules never;
+    never.setSettings(same);
+    CHECK(!never.tick(utcAt(2026, 3, 1, 10, 0), "UTC0", 0).night);
+    CHECK(!never.tick(utcAt(2026, 3, 1, 3, 0), "UTC0", 0).night);
+}
+
+TEST(night_follows_the_time_zone_and_summer_time) {
+    DeskRules rules = nightRules();
+    const char* cet = "CET-1CEST,M3.5.0,M10.5.0/3";
+    CHECK(rules.tick(utcAt(2026, 7, 1, 20, 30), cet, 0).night);   // 22:30 local
+    CHECK(!rules.tick(utcAt(2026, 1, 1, 20, 30), cet, 0).night);  // 21:30 local
+    CHECK(!rules.tick(utcAt(2026, 7, 1, 20, 30), "", 0).night);   // empty is UTC: 20:30
+}
+
+TEST(no_night_until_the_clock_is_set) {
+    DeskRules rules = nightRules();
+    const DeskRules::Levels levels = rules.tick(0, "UTC0", 0);
+    CHECK(!levels.night);
+    CHECK_EQ(levels.screen, 80);
+    CHECK_EQ(levels.led, 100);
+}
+
+TEST(a_press_at_night_wakes_the_screen) {
+    DeskRules rules = nightRules();
+    const int64_t late = utcAt(2026, 3, 1, 23, 0);
+    rules.tick(late, "UTC0", 1000);
+    CHECK(!rules.press(1000));
+    DeskRules::Levels levels = rules.tick(late, "UTC0", 1000 + 29900);
+    CHECK_EQ(levels.screen, 80);
+    CHECK_EQ(levels.led, 0);
+    CHECK(levels.night);
+    levels = rules.tick(late, "UTC0", 1000 + 30000);
+    CHECK_EQ(levels.screen, 10);
+    CHECK_EQ(levels.led, 0);
+
+    DeviceSettings dark;
+    dark.nightEnabled = true;
+    dark.screenNight = 0;
+    DeskRules black;
+    black.setSettings(dark);
+    black.tick(late, "UTC0", 5000);
+    CHECK(black.press(5000));
+    CHECK_EQ(black.tick(late, "UTC0", 5100).screen, 80);
+    CHECK(!black.press(6000));
+    CHECK_EQ(black.tick(late, "UTC0", 6000 + DeskRules::kWakeMs).screen, 0);
+}
+
+TEST(press_by_day_is_just_a_press) {
+    DeskRules rules = nightRules();
+    const int64_t noon = utcAt(2026, 3, 1, 12, 0);
+    rules.tick(noon, "UTC0", 0);
+    CHECK(!rules.press(0));
+    const DeskRules::Levels levels = rules.tick(noon, "UTC0", 10);
+    CHECK_EQ(levels.screen, 80);
+    CHECK_EQ(levels.led, 100);
+    CHECK(!levels.night);
+}
+
+TEST(a_wake_raises_only_the_screen) {
+    DeskRules rules = nightRules();
+    const int64_t late = utcAt(2026, 3, 1, 23, 0);
+    rules.tick(late, "UTC0", 0);
+    rules.wake(0, 5000);
+    DeskRules::Levels levels = rules.tick(late, "UTC0", 4999);
+    CHECK_EQ(levels.screen, 80);
+    CHECK_EQ(levels.led, 0);
+    CHECK_EQ(rules.tick(late, "UTC0", 5000).screen, 10);
+    // A shorter wake does not cut a longer one short.
+    rules.wake(10000, 20000);
+    rules.wake(11000, 1000);
+    CHECK_EQ(rules.tick(late, "UTC0", 29000).screen, 80);
+}
+
+TEST(night_by_hand_holds_until_the_schedule_changes) {
+    DeskRules rules = nightRules();
+    rules.tick(utcAt(2026, 3, 1, 20, 0), "UTC0", 0);
+    rules.toggleNight();
+    DeskRules::Levels levels = rules.tick(utcAt(2026, 3, 1, 20, 0), "UTC0", 10);
+    CHECK(levels.night);
+    CHECK(levels.manual);
+    CHECK_EQ(levels.screen, 10);
+    levels = rules.tick(utcAt(2026, 3, 1, 21, 59), "UTC0", 20);
+    CHECK(levels.night);
+    CHECK(levels.manual);
+    levels = rules.tick(utcAt(2026, 3, 1, 22, 0), "UTC0", 30);
+    CHECK(levels.night);
+    CHECK(!levels.manual);
+    levels = rules.tick(utcAt(2026, 3, 2, 7, 0), "UTC0", 40);
+    CHECK(!levels.night);
+    CHECK(!levels.manual);
+
+    // Day by hand in the middle of the night: until 07:00, then the schedule again.
+    DeskRules other = nightRules();
+    other.tick(utcAt(2026, 3, 1, 23, 0), "UTC0", 0);
+    other.toggleNight();
+    levels = other.tick(utcAt(2026, 3, 1, 23, 0), "UTC0", 10);
+    CHECK(!levels.night);
+    CHECK(levels.manual);
+    CHECK_EQ(levels.led, 100);
+    CHECK(!other.tick(utcAt(2026, 3, 2, 6, 59), "UTC0", 20).night);
+    levels = other.tick(utcAt(2026, 3, 2, 7, 0), "UTC0", 30);
+    CHECK(!levels.night);
+    CHECK(!levels.manual);
+    CHECK(!other.tick(utcAt(2026, 3, 2, 21, 59), "UTC0", 40).night);
+    CHECK(other.tick(utcAt(2026, 3, 2, 22, 0), "UTC0", 50).night);
+}
+
+TEST(night_by_hand_without_night_hours) {
+    DeskRules rules;
+    const int64_t noon = utcAt(2026, 3, 1, 12, 0);
+    rules.tick(noon, "UTC0", 0);
+    rules.toggleNight();
+    CHECK(rules.tick(noon, "UTC0", 10).night);
+    CHECK(rules.tick(utcAt(2026, 3, 2, 3, 0), "UTC0", 20).night);
+    rules.toggleNight();
+    const DeskRules::Levels levels = rules.tick(utcAt(2026, 3, 2, 4, 0), "UTC0", 30);
+    CHECK(!levels.night);
+    CHECK(!levels.manual);
+}
+
+TEST(clock_set_or_zone_changed_mid_override) {
+    DeskRules rules = nightRules();
+    const int64_t when = utcAt(2026, 3, 1, 20, 0);  // day in UTC
+    rules.tick(when, "UTC0", 0);
+    rules.toggleNight();
+    CHECK(rules.tick(when, "UTC0", 10).night);
+    // In Tokyo it is 05:00 the next morning: scheduled night, so the schedule takes over.
+    DeskRules::Levels levels = rules.tick(when, "JST-9", 20);
+    CHECK(levels.night);
+    CHECK(!levels.manual);
+    // Back to a zone where it is day: day, and the old override is gone.
+    levels = rules.tick(when, "UTC0", 30);
+    CHECK(!levels.night);
+    CHECK(!levels.manual);
+}
+
+TEST(preview_shows_a_level_briefly) {
+    DeskRules rules = nightRules();
+    const int64_t noon = utcAt(2026, 3, 1, 12, 0);
+    rules.tick(noon, "UTC0", 1000);
+    rules.preview(true, 1000);
+    DeskRules::Levels levels = rules.tick(noon, "UTC0", 3999);
+    CHECK(levels.night);
+    CHECK_EQ(levels.screen, 10);
+    CHECK_EQ(levels.led, 0);
+    levels = rules.tick(noon, "UTC0", 4000);
+    CHECK(!levels.night);
+    CHECK_EQ(levels.screen, 80);
+}
+
+TEST(wake_timer_survives_millis_wrapping) {
+    DeskRules rules = nightRules();
+    const int64_t late = utcAt(2026, 3, 1, 23, 0);
+    rules.tick(late, "UTC0", 0xFFFFFFF0u);
+    rules.press(0xFFFFFFF0u);
+    CHECK_EQ(rules.tick(late, "UTC0", 0x00000010u).screen, 80);
+    CHECK_EQ(rules.tick(late, "UTC0", 0xFFFFFFF0u + DeskRules::kWakeMs).screen, 10);
+
+    rules.preview(true, 0xFFFFFFF0u);
+    CHECK_EQ(rules.tick(utcAt(2026, 3, 1, 12, 0), "UTC0", 0x00000010u).night, true);
+}
+
 
 // ----------------------------------------------------------------- messages
 
