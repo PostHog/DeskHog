@@ -14,7 +14,7 @@
     tools/deskhog show weather:2             bring a card to the front on the device
     tools/deskhog send doorbell "Pizza!"     push a message to a card's plugin: text, JSON, or @file
     tools/deskhog config timers:1 front=no   stop a card from coming to the front by itself (front=yes: let it)
-    tools/deskhog config timers:1 rotate=no  make auto-rotate stop at a card and stay (rotate=yes: let it move on)
+    tools/deskhog config timers:1 rotate=no  auto-rotate skips the card and stays on it once you are there (rotate=yes: no)
     tools/deskhog pull weather               print the source that is on the device
     tools/deskhog rm weather                 remove a plugin with its connections and cards
     tools/deskhog system                     memory and stack headroom on the device
@@ -321,7 +321,7 @@ def command_config(device, args):
     if front is not None:
         print("%-12s = %s    # %s" % ("front", "yes" if front else "no", "May come to the front (when its plugin calls notify)"))
     if rotate is not None:
-        print("%-12s = %s    # %s" % ("rotate", "yes" if rotate else "no", "Auto-rotate moves on from it (no: it stops there and stays)"))
+        print("%-12s = %s    # %s" % ("rotate", "yes" if rotate else "no", "Auto-rotate visits it (no: it skips the card, and stays on it once you go there yourself)"))
     return 0
 
 
@@ -609,7 +609,8 @@ def command_device(device, args):
         settings = device.json("GET", "/api/device")
     print_device(settings)
     if "name" in update:
-        print("The device is now at http://%s.local. Use --host %s.local to reach it from now on." % (update["name"], update["name"]))
+        name = settings["name"]
+        print("The device is now at http://%s.local. Use --host %s.local to reach it from now on." % (name, name))
     return 0
 
 

@@ -91,6 +91,10 @@ tools/deskhog press counter center        # press a button for it
 tools/deskhog config weather unit=F       # change a connection's shared settings
 tools/deskhog config weather:2 city=Oslo  # change one card's settings
 tools/deskhog config weather:2 front=no   # this card may not come to the front by itself (see notify)
+tools/deskhog config weather:2 rotate=no  # auto-rotate skips this card, and stays on it when you go there yourself
+tools/deskhog device                      # the device's own settings: name, brightness, night hours, auto-rotate, battery
+tools/deskhog device screen.night=5 night.enabled=yes   # change some of them
+tools/deskhog restart                     # restart the device and wait until it answers
 tools/deskhog send doorbell "Pizza's here" # push a message to a plugin: text, JSON or @file
 ```
 
@@ -674,7 +678,9 @@ Your plugin only asks. The device decides, by rules a plugin cannot change:
 
 The LED flashes three times: in the `led` colour if you gave one, otherwise in white,
 and then only when the card had to wait. After that it goes back to normal, also when
-you had set it with `led.set`. If your card is already on screen it just gets the
+you had set it with `led.set`. The flash follows the LED level of the device: with
+the default night level of 0 it stays dark at night, and a notify that brings its
+card to the front lights the screen for the time the bar shows. If your card is already on screen it just gets the
 bar. A press that your card uses takes the bar away.
 
 In a plugin with card kinds, use `card.notify`: plain `notify` cannot know which card
@@ -780,9 +786,11 @@ GET    /api/state                       plugins, connections, the card stack and
 POST   /api/directory                   {source}: where plugins are offered from; "" for the default
 POST   /api/timezone                    {posix, name}: the device's time zone as a POSIX string, and the place it
                                         was picked by (only shown back). "" for UTC. /api/state reports both
-POST   /api/cards/add                   {plugin, kind, name, settings, connection, front}
-POST   /api/cards/update?key=<c>:<n>    {name, settings, front}. front: may the card come to the front by itself
-                                        when its plugin calls notify() (true unless you say false)
+POST   /api/cards/add                   {plugin, kind, name, settings, connection, front, rotate}
+POST   /api/cards/update?key=<c>:<n>    {name, settings, front, rotate}. front: may the card come to the front by itself
+                                        when its plugin calls notify() (true unless you say false). rotate: does
+                                        auto-rotate visit the card (true unless you say false; when false it skips
+                                        the card, and stays on it once someone goes there)
 POST   /api/cards/layout                ["PLUGIN|weather:1", ...] in the new order; cards left out are removed
 GET    /api/cards/screen?key=<c>:<n>    the card's pixels, raw RGB565 (X-Width, X-Height, X-Frames say what it is).
                                         &packed=1: as runs of (count, pixel), 3 bytes each, if X-Packed says "runs".
@@ -790,6 +798,9 @@ GET    /api/cards/screen?key=<c>:<n>    the card's pixels, raw RGB565 (X-Width, 
 POST   /api/cards/press?key=..&button=  up, center or down
 POST   /api/cards/show?key=..           bring the card to the front
 POST   /api/cards/message?key=<c>:<n>   hand the body (text or JSON, 4 KB at most) to the card's message() function
+GET    /api/device                      the device's settings, and how it is doing (see below)
+POST   /api/device                      any of the settings; what you leave out stays as it is
+POST   /api/restart                     answers, then restarts the device a moment later
 POST   /api/connections/add             {plugin, name, settings}
 POST   /api/connections/update?id=<c>   {name, settings}
 POST   /api/connections/remove?id=<c>
@@ -800,6 +811,25 @@ GET    /api/connections/choices?id=<c>&field=<key>[&kind=<kind>][&settings=<JSON
                                         settings for what the form holds: {"advanced":"true"}, 1 KB at most.
                                         Answers 202 {pending: true} while the plugin is working on it: ask again
 ```
+
+`/api/device` takes and gives nested JSON:
+
+```json
+{"name": "deskhog", "screen": {"day": 80, "night": 10}, "led": {"day": 100, "night": 0},
+ "night": {"enabled": false, "from": "22:00", "until": "07:00"},
+ "rotate": {"seconds": 0}, "battery": false}
+```
+
+Send any part of it, for example `{"screen": {"day": 60}}`; the answer is the whole object
+with a `status` added: `{night, manual, battery, gauge}`. `battery` and `night.enabled` are
+true or false; the levels and `rotate.seconds` are whole numbers; `name`, `night.from` and
+`night.until` are text (`"22:30"`). The screen by day is 5 to 100, the other levels 0 to 100,
+`rotate.seconds` 0 (off) or 10 to 600, and a name is 1 to 24 of `a-z`, `0-9` and `-`, not
+starting or ending with `-`. A value the device does not accept answers 400
+`{"ok": false, "error": "..."}` and nothing is changed. `"preview": "night"` (or `"day"`)
+shows that level for three seconds without saving anything. In `status`, `battery` is what
+plugins see (`null` unless the owner said there is a battery) and `gauge` is what the chip
+reads either way. `/api/state` carries the same object as `device`.
 
 `/api/state` also lists, under `notifications`, what plugins said with `notify()` that
 nobody has seen yet: `{card, text, count, age}`, with `age` in seconds. Each card in

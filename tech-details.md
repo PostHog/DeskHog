@@ -67,7 +67,16 @@ It is three hand-written files in `html/` with no dependencies, inlined into one
 
 To work on it without flashing, run `node test/portal/serve.js` and open `http://localhost:8080`. It serves `html/` as it is on disk, against a pretend device, or against your real one with `--device <address>`. `test/portal/run.sh` runs its tests.
 
-**Web portal budget:** the page is about 87 KB before it is inlined. We allow up to **100KB**. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
+**Web portal budget:** the page is about 118 KB (120,797 bytes) before it is inlined. The budget was 100 KB, and the device settings took it past that; the limit that counts is the flash, where the firmware leaves room. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
+
+### Device settings
+
+How bright the screen and the LED are, night hours, rotation, the battery and the device's name are settings of the device, saved in NVS next to the time zone (`ConfigManager`).
+
+- `lib/plugin_core/src/DeskRules.h` has the rules without any hardware: `DeviceSettings` and their checks, `DeskRules` (is it night, which levels now, the wake on a press, night mode by hand until the next boundary) and `Rotation` (when to move on, and every reason to wait). It has no Arduino, LVGL or FreeRTOS in it, and `test/native` covers it.
+- `src/DeskManners` applies the rules. The UI task calls `tick()` every loop: it fades the backlight and hands the LED its level through atomics, rotates the cards, and gives the status card its night and battery lines. The web server (core 0) changes settings under a lock and sets a flag that `tick()` picks up; it never calls LVGL. The press that wakes a dark screen is swallowed in `buttonPressed()`.
+- `src/hardware/BatteryGauge` reads the MAX17048 on the I2C bus every 30 seconds on its own task (core 0), so a slow or missing chip cannot hold up the UI. It publishes one atomic word. The gauge cannot tell that no battery is connected, which is why plugins and the status card only get the reading when the `battery` setting is on.
+- `PluginApi` serves `/api/device` and `/api/restart`; a new name changes the mDNS name and the WiFi hostname at once, after the answer has gone out. Buttons are read every 10 ms.
 
 ### Card system
 
@@ -106,7 +115,7 @@ The plugin API is documented in [plugins/README.md](plugins/README.md).
 
 The 4 MB flash holds one firmware slot (2.9 MB) and a 1 MB LittleFS partition for plugins; see `partitions.csv`. There is no second firmware slot, so there are no over-the-air firmware updates: firmware goes over USB, plugins go over WiFi.
 
-Why not both: the usual way to update over the air needs two firmware slots, so that the running firmware can write the new one beside itself. The firmware is about 1.9 MB. Two slots for it take 3.8 MB of the 3.9 MB there is, which leaves nothing for plugins. Ways to get updates without a cable on this board, none of them built:
+Why not both: the usual way to update over the air needs two firmware slots, so that the running firmware can write the new one beside itself. The firmware is about 2.1 MB (2,117,728 bytes of the 3,014,656-byte slot). Two slots for it take 4.2 MB, more than the 3.9 MB there is, which leaves nothing for plugins. Ways to get updates without a cable on this board, none of them built:
 
 - A small second firmware that can only join WiFi and receive a file (well under 1 MB). To update, the device restarts into it, takes the new firmware and writes it over the main slot. That would fit as roughly 0.8 MB + 2.2 MB + 0.85 MB for plugins, and a failed update still leaves the small one to try again with.
 - Flashing over USB from a web page (Web Serial) is what the README's install steps use today, with a general-purpose flasher and a file from the release. A page of our own built on [ESP Web Tools](https://esphome.github.io/esp-web-tools/) could make that one button, and keep the settings when updating.

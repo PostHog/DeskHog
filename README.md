@@ -82,7 +82,7 @@ For new firmware, the device's web page (Device, About) says which version it ru
 ## Set it up
 
 1. **Connect it to WiFi.** The screen shows a QR code. Scan it with your phone, or join the network named under it (`DeskHog_…`) from a computer. The device's web page opens; pick your network and give its password.
-2. **Open the web page again**, now on your own network: `http://deskhog.local`, or the address on the device's status card (the first card in the stack).
+2. **Open the web page again**, now on your own network: `http://deskhog.local` (or `http://<name>.local` once you have renamed the device, see below), or the address on the device's status card (the first card in the stack).
 3. **Add cards.** Press **Add card** and choose what it should show. A freshly installed device has no plugins yet, so the choices come from the plugin directory: choosing one installs its plugin and adds the card. **Get plugins** shows everything there is.
 
 The web page is also where you rearrange and remove cards, change their settings and manage accounts that several cards share (Connections). It shows a live picture of each card, and the device's three buttons work from the page, so you can try a card without reaching for the device.
@@ -238,12 +238,27 @@ PostHog, Home Assistant and Homey Pro need an account or a hub of yours: you fil
 | **▲ / ▼** | The previous and the next card |
 | **●** | Whatever the card on screen does with it |
 | **● held, then ▲** | The previous card, always. Games and other cards may use all three buttons; this is the way out |
+| **●** on the status card | Switches night mode on or off by hand (see below) |
 | **● + ▼ held for two seconds** | Power off (deep sleep). Press the reset tab on the left to wake it |
 | **▼ held while pressing reset** | Bootloader mode, for when the board does not respond and has to be flashed |
 
 <img width="500" alt="The buttons of a DeskHog" src="https://github.com/user-attachments/assets/14ea2440-90d8-4540-bebb-045c18fbbc99" />
 
 The first card is the status card. It is part of the firmware and cannot be removed: it shows the QR code until WiFi is set up, and after that the WiFi status, the device's address, the signal strength and the firmware version.
+
+### Brightness, night hours and rotation
+
+The Device tab of the web page has a section "Display and light". The screen and the LED each have a slider for the day and one for the night; the screen cannot go below 5% by day, so you cannot lock yourself out. The sliders work while you drag them, and a night slider shows the night level for a few seconds. Tick "Night hours" and give a start and an end (it follows the time zone above, and crosses midnight if the start is later than the end). Until the time is known, or while night hours are off, it is never night.
+
+- **The LED is dark at night** by default (night level 0), notify flashes included. Raise its night level if you want them.
+- **A button press at night lights the screen** for 30 seconds after the last press. With the night level at 0 the press that wakes a dark screen does nothing else; the next one works as usual.
+- **● on the status card** switches night mode on or off right away. The status card says so, and the schedule takes over again at the next change. It is not kept across a restart.
+- **Rotate cards** moves to the next card by itself after 15 seconds up to 5 minutes. It skips the status card and any card whose "Skip in rotation" is ticked, and when you go to such a card yourself it stays there until you press a button, so the setting also pins a card, such as a timer. Rotation waits while someone is playing a card, while a notify message is up, for a minute after you changed cards by hand, and while the screen is off.
+- **Name** renames the device. It is the device's address (`<name>.local`), and shows in the page's title. The page tells you the new address and takes you there.
+- **This device has a battery.** The board can read a battery, but cannot tell that none is connected: on USB alone it reads about 100%. Tick this box when there is one; then the status card and About say "Battery 82%" (with "charging" while it charges) and plugins can read it. The page says whether a battery gauge was found, with what it reads.
+- **Restart** (in About) restarts the device and waits for it to come back.
+
+The same settings are available to scripts and `tools/deskhog device`, see the [plugin guide](plugins/README.md#the-devices-api).
 
 Plugins update over WiFi and the firmware over USB; see [Updating](#updating).
 
