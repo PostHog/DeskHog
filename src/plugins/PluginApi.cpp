@@ -191,46 +191,61 @@ bool isSettingsGroup(const char* key) {
     return !strcmp(key, "screen") || !strcmp(key, "led") || !strcmp(key, "night") || !strcmp(key, "rotate");
 }
 
-/** One value of a POST body as the text applyDeviceSettings reads. False for an array, an object or null. */
-bool settingText(JsonVariantConst value, std::string& text) {
-    if (value.is<bool>()) {
-        text = value.as<bool>() ? "true" : "false";
-    } else if (value.is<const char*>()) {
-        text = value.as<const char*>();
-    } else if (value.is<long>() || value.is<double>()) {
-        String number;
-        serializeJson(value, number);
-        text = number.c_str();
-    } else {
-        return false;
+/** One setting of a POST body as the text applyDeviceSettings reads. False, with `error` set, for a key that
+ *  does not exist or a value of the wrong JSON kind. */
+bool settingText(const std::string& key, JsonVariantConst value, std::string& text, std::string& error) {
+    switch (deskhog::deviceSettingKind(key)) {
+        case deskhog::SettingKind::Boolean:
+            if (value.is<bool>()) {
+                text = value.as<bool>() ? "true" : "false";
+                return true;
+            }
+            error = key + " must be true or false";
+            return false;
+        case deskhog::SettingKind::WholeNumber:
+            // A boolean is not a whole number, and neither is 80.0.
+            if (value.is<long>() && !value.is<bool>() && !value.is<double>()) {
+                text = std::to_string(value.as<long>());
+                return true;
+            }
+            error = key + " must be a whole number";
+            return false;
+        case deskhog::SettingKind::Text:
+            if (value.is<const char*>()) {
+                text = value.as<const char*>();
+                return true;
+            }
+            error = key + " must be text";
+            return false;
+        case deskhog::SettingKind::Unknown:
+            break;
     }
-    return true;
+    error = "unknown setting " + key;
+    return false;
 }
 
 /** A POST body's settings as dotted pairs. `preview` is left out; `status` is not a setting. */
 bool flattenSettings(JsonObjectConst body, std::vector<std::pair<std::string, std::string>>& out,
                      std::string& error) {
     for (JsonPairConst pair : body) {
-        const char* key = pair.key().c_str();
-        if (!strcmp(key, "preview")) continue;
-        if (isSettingsGroup(key) && pair.value().is<JsonObjectConst>()) {
+        const std::string key = pair.key().c_str();
+        if (key == "preview") continue;
+        std::string text;
+        if (isSettingsGroup(key.c_str()) && pair.value().is<JsonObjectConst>()) {
             for (JsonPairConst inner : pair.value().as<JsonObjectConst>()) {
-                const std::string name = std::string(key) + "." + inner.key().c_str();
-                std::string text;
-                if (!settingText(inner.value(), text)) {
-                    error = "unknown setting " + name;
-                    return false;
-                }
+                const std::string name = key + "." + inner.key().c_str();
+                if (!settingText(name, inner.value(), text, error)) return false;
                 out.emplace_back(name, text);
             }
-            continue;
+        } else {
+            // Only the plain keys are top-level settings: a dotted key or a group that is not an object is not.
+            if (key.find('.') != std::string::npos || isSettingsGroup(key.c_str())) {
+                error = "unknown setting " + key;
+                return false;
+            }
+            if (!settingText(key, pair.value(), text, error)) return false;
+            out.emplace_back(key, text);
         }
-        std::string text;
-        if (isSettingsGroup(key) || !strcmp(key, "status") || !settingText(pair.value(), text)) {
-            error = std::string("unknown setting ") + key;
-            return false;
-        }
-        out.emplace_back(key, text);
     }
     return true;
 }

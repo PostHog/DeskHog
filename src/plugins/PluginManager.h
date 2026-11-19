@@ -323,7 +323,7 @@ public:
     static bool splitKey(const std::string& key, std::string& connectionId, std::string& cardId);
 
     // The device itself, for plugins and the network
-    /** The device's name on the network, "deskhog" unless someone changed it. */
+    /** The device's name for plugins, "deskhog" unless someone changed it. UI task only; never waits. */
     std::string deviceName();
     /** The battery, for plugins. False unless the device is set to have one and the gauge answers. */
     bool battery(deskhog::BatteryStatus& status);
@@ -363,6 +363,8 @@ private:
     static void httpTaskEntry(void* arg);
     void httpLoop();
     void perform(const deskhog::HttpRequest& request, deskhog::HttpResponse& response);
+    /** The device's name for the network task, which may wait for the settings lock. */
+    std::string networkName();
     void startNetworkServices();
     void renameNetworkServices();
 

@@ -117,6 +117,16 @@ bool applyDeviceSettings(DeviceSettings& settings,
     return true;
 }
 
+SettingKind deviceSettingKind(const std::string& key) {
+    if (key == "name" || key == "night.from" || key == "night.until") return SettingKind::Text;
+    if (key == "battery" || key == "night.enabled") return SettingKind::Boolean;
+    if (key == "screen.day" || key == "screen.night" || key == "led.day" || key == "led.night" ||
+        key == "rotate.seconds") {
+        return SettingKind::WholeNumber;
+    }
+    return SettingKind::Unknown;
+}
+
 DeviceSettings sanitized(const DeviceSettings& stored) {
     DeviceSettings out = stored;
     if (!isValidDeviceName(out.name)) out.name = kDefaults.name;

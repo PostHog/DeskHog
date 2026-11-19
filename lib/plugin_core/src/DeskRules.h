@@ -37,6 +37,9 @@ std::string formatClock(int minutes);  // "07:00"
  *  All or nothing: on false, `settings` is untouched and `error` names the key and the rule. */
 bool applyDeviceSettings(DeviceSettings& settings,
                          const std::vector<std::pair<std::string, std::string>>& changes, std::string& error);
+enum class SettingKind { Unknown, Boolean, WholeNumber, Text };
+/** The kind of JSON value a setting takes, by its dotted key; Unknown for a key that does not exist. */
+SettingKind deviceSettingKind(const std::string& key);
 /** Whatever was stored: every field out of range goes back to its default. */
 DeviceSettings sanitized(const DeviceSettings& stored);
 

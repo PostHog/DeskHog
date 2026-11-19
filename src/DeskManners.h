@@ -53,6 +53,8 @@ public:
     bool swallowing(uint8_t button) const;
     /** Night mode on or off by hand. */
     void toggleNight();
+    /** The device name as of the last tick. Never waits for the lock, unlike settings(). */
+    const std::string& nameOnUiTask() const { return applied_.name; }
 
     // ---- Safe from any task -------------------------------------------
 

@@ -3444,6 +3444,23 @@ TEST(net_reports_the_connection) {
     CHECK(f.services.logged("true -61 Hedgehog 192.168.1.20"));
 }
 
+TEST(device_setting_kinds) {
+    using deskhog::SettingKind;
+    CHECK(deskhog::deviceSettingKind("name") == SettingKind::Text);
+    CHECK(deskhog::deviceSettingKind("night.from") == SettingKind::Text);
+    CHECK(deskhog::deviceSettingKind("night.until") == SettingKind::Text);
+    CHECK(deskhog::deviceSettingKind("battery") == SettingKind::Boolean);
+    CHECK(deskhog::deviceSettingKind("night.enabled") == SettingKind::Boolean);
+    CHECK(deskhog::deviceSettingKind("screen.day") == SettingKind::WholeNumber);
+    CHECK(deskhog::deviceSettingKind("screen.night") == SettingKind::WholeNumber);
+    CHECK(deskhog::deviceSettingKind("led.day") == SettingKind::WholeNumber);
+    CHECK(deskhog::deviceSettingKind("led.night") == SettingKind::WholeNumber);
+    CHECK(deskhog::deviceSettingKind("rotate.seconds") == SettingKind::WholeNumber);
+    for (const char* key : {"status", "preview", "screen", "screen.bogus", ""}) {
+        CHECK(deskhog::deviceSettingKind(key) == SettingKind::Unknown);
+    }
+}
+
 TEST(device_battery_is_nil_without_one) {
     Fixture f;
     CHECK(f.start("print(device.battery())"));

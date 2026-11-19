@@ -589,7 +589,7 @@ void PluginManager::startNetworkServices() {
     if (networkServicesStarted_) return;
     networkServicesStarted_ = true;
     // So tools can find the device as http://deskhog.local, or by the name it was given
-    const std::string name = deviceName();
+    const std::string name = networkName();
     if (MDNS.begin(name.c_str())) MDNS.addService("http", "tcp", 80);
     // The device's own clock stays on UTC. Plugins get local time from
     // time.date() and time.format(), which apply the time zone themselves.
@@ -599,7 +599,7 @@ void PluginManager::startNetworkServices() {
 // Network task. mDNS answers to the new name at once; the router learns it
 // the next time the device connects.
 void PluginManager::renameNetworkServices() {
-    const std::string name = deviceName();
+    const std::string name = networkName();
     WiFi.setHostname(name.c_str());
     WiFi.STA.setHostname(name.c_str());
     if (!networkServicesStarted_) return;  // starting them will use the new name
@@ -607,8 +607,12 @@ void PluginManager::renameNetworkServices() {
     if (MDNS.begin(name.c_str())) MDNS.addService("http", "tcp", 80);
 }
 
-std::string PluginManager::deviceName() {
+std::string PluginManager::networkName() {
     return manners_ ? manners_->settings().name : deskhog::DeviceSettings().name;
+}
+
+std::string PluginManager::deviceName() {
+    return manners_ ? manners_->nameOnUiTask() : deskhog::DeviceSettings().name;
 }
 
 bool PluginManager::battery(deskhog::BatteryStatus& status) { return manners_ && manners_->battery(status); }
