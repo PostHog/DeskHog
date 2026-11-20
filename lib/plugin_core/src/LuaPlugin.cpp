@@ -30,6 +30,8 @@ const uint32_t kGray = 0xAAAAAA;
 const uint32_t kRed = 0xE74C3C;
 const uint32_t kChartBlue = 0x3498DB;
 const int kPad = 8;
+const int kMaxPages = 99;     ///< More than this and the rest cannot be reached
+const int kMaxPageDots = 10;  ///< Up to this many pages show as dots, more as "3/12"
 
 struct NamedColor {
     const char* name;
@@ -466,6 +468,56 @@ int LuaPlugin::pushCardFunction(lua_State* L, const Card& card, const char* func
     return 1;
 }
 
+// Leaves what the plugin calls `name` on the stack: the global for a single-card
+// plugin, the field of the card's kind otherwise. Nil when there is none.
+void LuaPlugin::pushCardValue(lua_State* L, const Card& card, const char* name) {
+    if (card.ref == LUA_NOREF) {
+        lua_getglobal(L, name);
+        return;
+    }
+    if (lua_getglobal(L, "cards") != LUA_TTABLE) {
+        lua_pop(L, 1);
+        lua_pushnil(L);
+        return;
+    }
+    lua_pushstring(L, card.kind.c_str());
+    if (lua_rawget(L, -2) != LUA_TTABLE) {
+        lua_pop(L, 2);
+        lua_pushnil(L);
+        return;
+    }
+    lua_pushstring(L, name);
+    lua_rawget(L, -2);
+    lua_remove(L, -2);  // the kind table
+    lua_remove(L, -2);  // the cards table
+}
+
+// How many pages the card has right now: the length of its `pages` list, or
+// what its `pages` function answers. Keeps the page on show within that.
+int LuaPlugin::countPages(lua_State* L, Card& card) {
+    int count = 0;
+    pushCardValue(L, card, "pages");
+    if (lua_istable(L, -1)) {
+        count = (int)lua_rawlen(L, -1);
+    } else if (lua_isfunction(L, -1)) {
+        int args = 0;
+        if (card.ref != LUA_NOREF) {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, card.ref);
+            args = 1;
+        }
+        lua_call(L, args, 1);
+        if (!lua_isnumber(L, -1)) luaL_error(L, "pages() must return how many pages there are, a number");
+        const lua_Number answer = lua_tonumber(L, -1);
+        count = answer < 1 ? 0 : answer > kMaxPages ? kMaxPages : (int)answer;
+    }
+    lua_pop(L, 1);
+    if (count > kMaxPages) count = kMaxPages;
+    card.pageCount = count;
+    if (card.page > count) card.page = count;
+    if (card.page < 1) card.page = 1;
+    return count;
+}
+
 int LuaPlugin::trampoline(lua_State* L) {
     Call* call = static_cast<Call*>(lua_touserdata(L, 1));
     LuaPlugin* self = call->self;
@@ -495,10 +547,39 @@ int LuaPlugin::trampoline(lua_State* L) {
             break;
         }
         case CallKind::CardDraw: {
-            const int args = self->pushCardFunction(L, *call->card, "draw");
-            if (args >= 0) lua_call(L, args, 0);
+            Card& card = *call->card;
+            if (card.pages == PagesKind::None) {
+                const int args = self->pushCardFunction(L, card, "draw");
+                if (args >= 0) lua_call(L, args, 0);
+                break;
+            }
+            const int count = self->countPages(L, card);
+            if (card.pages == PagesKind::List) {
+                // Each entry of the list draws one page.
+                if (count == 0) break;
+                self->pushCardValue(L, card, "pages");
+                if (lua_rawgeti(L, -1, card.page) != LUA_TFUNCTION) {
+                    luaL_error(L, "pages[%d] is not a function", card.page);
+                }
+                int args = 0;
+                if (card.ref != LUA_NOREF) {
+                    lua_rawgeti(L, LUA_REGISTRYINDEX, card.ref);
+                    args = 1;
+                }
+                lua_call(L, args, 0);
+                break;
+            }
+            // pages() counts them and draw() is told which one to draw.
+            const int args = self->pushCardFunction(L, card, "draw");
+            if (args >= 0) {
+                lua_pushinteger(L, card.page);
+                lua_call(L, args + 1, 0);
+            }
             break;
         }
+        case CallKind::CardPages:
+            self->countPages(L, *call->card);
+            break;
         case CallKind::CardButton: {
             const int args = self->pushCardFunction(L, *call->card, "button");
             if (args >= 0) {
@@ -1014,7 +1095,9 @@ void LuaPlugin::doAddCard(lua_State* L, Call& call) {
         card.hasButton = lua_getglobal(L, "button") == LUA_TFUNCTION;
         card.buttonEvents = card.hasButton && takesArgument(L, 2);
         card.hasMessage = lua_getglobal(L, "message") == LUA_TFUNCTION;
-        lua_pop(L, 4);
+        const int pages = lua_getglobal(L, "pages");
+        card.pages = pages == LUA_TTABLE ? PagesKind::List : pages == LUA_TFUNCTION ? PagesKind::Count : PagesKind::None;
+        lua_pop(L, 5);
         return;
     }
 
@@ -1056,6 +1139,10 @@ void LuaPlugin::doAddCard(lua_State* L, Call& call) {
     lua_pushliteral(L, "message");
     card.hasMessage = lua_rawget(L, kindTable) == LUA_TFUNCTION;
     lua_pop(L, 1);
+    lua_pushliteral(L, "pages");
+    const int pages = lua_rawget(L, kindTable);
+    card.pages = pages == LUA_TTABLE ? PagesKind::List : pages == LUA_TFUNCTION ? PagesKind::Count : PagesKind::None;
+    lua_pop(L, 1);
 
     if (card.hasLoad && runLoad_) {
         lua_pushliteral(L, "load");
@@ -1071,6 +1158,7 @@ void LuaPlugin::detachCard(const std::string& id) {
     card->surface = nullptr;
     card->visible = false;
     card->frameClockValid = false;
+    card->page = 1;
 }
 
 bool LuaPlugin::attachCard(const std::string& id, Gfx& surface) {
@@ -1092,7 +1180,14 @@ void LuaPlugin::removeCard(const std::string& id) {
 
 void LuaPlugin::setVisible(const std::string& id, bool visible) {
     Card* card = findCard(id);
-    if (card) card->visible = visible && card->surface;
+    if (!card) return;
+    const bool now = visible && card->surface;
+    // A card with pages starts on its first one whenever it leaves or comes back.
+    if (now != card->visible && card->page != 1) {
+        card->page = 1;
+        card->dirty = true;
+    }
+    card->visible = now;
 }
 
 bool LuaPlugin::needsDraw(const std::string& id) const {
@@ -1173,7 +1268,7 @@ void LuaPlugin::draw(const std::string& id) {
     card->dirty = false;
     gfx.fillRect(0, 0, gfx.width(), gfx.height(), kBlack, 0);
 
-    if (!failed_ && L_ && card->hasDraw) {
+    if (!failed_ && L_ && (card->hasDraw || card->pages == PagesKind::List)) {
         ui_.clear();
         drawing_ = &gfx;
         Call call{this, CallKind::CardDraw};
@@ -1182,6 +1277,7 @@ void LuaPlugin::draw(const std::string& id) {
         drawing_ = nullptr;
         if (ok) flushUi(gfx);
         ui_.clear();
+        if (ok) drawPageDots(gfx, *card);
     }
 
     if (failed_) {
@@ -1193,17 +1289,51 @@ void LuaPlugin::draw(const std::string& id) {
 
 bool LuaPlugin::button(const std::string& id, Button button) {
     Card* card = findCard(id);
-    if (!card || failed_ || !L_ || !card->hasButton) return false;
+    if (!card || failed_ || !L_) return false;
     const int index = (int)button;
-    const bool used = sendButton(*card, button, ButtonEvent::Press);
-    if (failed_ || !L_) return false;
-    if (card->buttonEvents) {
-        // tick() watches the button from here on, for "long" and "release".
-        card->down[index] = true;
-        card->longSent[index] = false;
-        card->downAtMs[index] = services_.millis();
+    bool used = false;
+    if (card->hasButton) {
+        used = sendButton(*card, button, ButtonEvent::Press);
+        if (failed_ || !L_) return false;
+        if (card->buttonEvents) {
+            // tick() watches the button from here on, for "long" and "release".
+            card->down[index] = true;
+            card->longSent[index] = false;
+            card->downAtMs[index] = services_.millis();
+        }
+    }
+    // A centre press the plugin did not use goes to the next page, if there is one.
+    if (!used && button == Button::Center && card->pages != PagesKind::None) {
+        Call call{this, CallKind::CardPages};
+        call.card = card;
+        if (!run(call, limits_.callBudgetMs)) return false;
+        if (card->pageCount > 1) {
+            card->page = card->page % card->pageCount + 1;
+            card->dirty = true;
+            used = true;
+        }
     }
     return used;
+}
+
+// Which page is on show, along the bottom edge: a dot per page, or "3/12" when
+// the dots would not fit.
+void LuaPlugin::drawPageDots(Gfx& gfx, const Card& card) {
+    if (card.pages == PagesKind::None || card.pageCount < 2) return;
+    const uint32_t on = 0xFFFFFF, off = 0x555555;
+    if (card.pageCount > kMaxPageDots) {
+        char text[16];
+        snprintf(text, sizeof(text), "%d/%d", card.page, card.pageCount);
+        const int w = gfx.textWidth(text, Font::Tiny), h = gfx.textHeight(Font::Tiny);
+        gfx.fillRect(gfx.width() - kPad - w - 3, gfx.height() - h - 1, w + 6, h + 1, kBlack, 0);
+        gfx.text(gfx.width() - kPad, gfx.height() - h - 1, text, 0x999999, Font::Tiny, Align::Right);
+        return;
+    }
+    const int gap = 8;
+    int x = (gfx.width() - (card.pageCount - 1) * gap) / 2;
+    for (int i = 1; i <= card.pageCount; i++, x += gap) {
+        gfx.fillRect(x - 2, gfx.height() - 6, 4, 4, i == card.page ? on : off, 2);
+    }
 }
 
 bool LuaPlugin::sendButton(Card& card, Button button, ButtonEvent event) {

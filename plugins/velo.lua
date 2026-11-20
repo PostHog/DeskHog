@@ -1,6 +1,8 @@
--- Bikes and free docks at a Velo Antwerpen station, live. Add a card per
--- station: give its number (as on the pole, e.g. 1 or 001) or part of its
--- name. If you like, the LED turns amber when a station runs low on bikes.
+-- Bikes and free docks at a Velo Antwerpen station, live. Give a station's
+-- number (as on the pole, e.g. 1 or 001) or part of its name. A card can watch
+-- up to five stations, separated by commas: it then opens on a list of them all,
+-- and the centre button goes to each station in turn. If you like, the LED turns
+-- amber when a station runs low on bikes.
 --
 -- The numbers come from Velo's own GBFS feed (gbfs.smartbike.com/antwerp):
 -- GBFS is the open format bike share systems publish their stations in, free
@@ -23,9 +25,9 @@
 
 plugin = {
   name = "Velo",
-  description = "Bikes and free docks at your Velo Antwerpen station, or at another bike share's",
+  description = "Bikes and free docks at your Velo Antwerpen stations, or at another bike share's",
   author = "DeskHog",
-  version = "1.0",
+  version = "1.1",
   refresh = 300, -- the background check for cards that use the LED
   fps = 1,
 }
@@ -48,6 +50,7 @@ local SYSTEMS = {
 }
 
 local W = gfx.width
+local MOST = 5       -- stations on one card
 local EVERY = 90000 -- ms between questions while a card is on screen
 local SOON = 20000  -- ms: never ask again sooner than this
 local BIKE, DOCK, ELECTRIC = "#ff5a3c", "#3c8cff", "#f1c40f"
@@ -68,6 +71,15 @@ local function each(fn)
   for _, card in pairs(all) do fn(card) end
 end
 
+-- A card watches one or more stations. Each is a "spot": what was asked for
+-- (spot.wanted), the station that was found for it (id, name, number) and its
+-- counts (bikes, docks, ebikes, closed, at).
+local function eachSpot(fn)
+  each(function(card)
+    for _, spot in ipairs(card.spots) do fn(spot, card) end
+  end)
+end
+
 -- A station list takes a good part of the plugin's memory: let it go before the next one comes.
 local function tidy(res)
   res.json = nil
@@ -78,9 +90,9 @@ end
 
 local function showLed()
   local low = false
-  each(function(card)
+  eachSpot(function(spot, card)
     local limit = card.config.alert
-    if limit > 0 and card.bikes and not card.closed and card.bikes <= limit then low = true end
+    if limit > 0 and spot.bikes and not spot.closed and spot.bikes <= limit then low = true end
   end)
   if low then
     led.set("#ff9900")
@@ -97,9 +109,21 @@ local STATUS = { last_updated = true, data = { stations = { {
   is_renting = true,
 } } } }
 
+-- Station id -> the spots that show it: the same station may be on two cards.
+local function spotsById()
+  local byId, any = {}, false
+  eachSpot(function(spot)
+    if spot.id then
+      byId[spot.id] = byId[spot.id] or {}
+      table.insert(byId[spot.id], spot)
+      any = true
+    end
+  end)
+  return byId, any
+end
+
 local function counts()
-  local wanted = false
-  each(function(card) wanted = wanted or card.station ~= nil end)
+  local _, wanted = spotsById()
   if busy or not found or not wanted then return end
   if askedAt and time.ms() - askedAt < SOON then return end
   busy, askedAt = true, time.ms()
@@ -107,26 +131,26 @@ local function counts()
     busy = false
     local list = res.json and res.json.data and res.json.data.stations
     if not res.ok or type(list) ~= "table" then
-      each(function(card) if not card.bikes then card.problem = problemFrom(res) end end)
+      eachSpot(function(spot) if not spot.bikes then spot.problem = problemFrom(res) end end)
       return
     end
-    local byId = {}
-    each(function(card) if card.station then byId[card.station.id] = card end end)
+    local byId = spotsById()
     local at = tonumber(res.json.last_updated) or time.now()
     for _, item in ipairs(list) do
       local id = tostring(item.station_id)
-      local card = byId[id]
-      if card then
-        card.problem = nil
-        card.bikes = tonumber(item.num_bikes_available) or 0
-        card.docks = tonumber(item.num_docks_available)
-        card.ebikes = tonumber(item.num_ebikes_available)
-        card.closed = item.is_renting == false or item.is_renting == 0
-        card.at = at
-        byId[id] = nil
+      for _, spot in ipairs(byId[id] or {}) do
+        spot.problem = nil
+        spot.bikes = tonumber(item.num_bikes_available) or 0
+        spot.docks = tonumber(item.num_docks_available)
+        spot.ebikes = tonumber(item.num_ebikes_available)
+        spot.closed = item.is_renting == false or item.is_renting == 0
+        spot.at = at
       end
+      byId[id] = nil
     end
-    for _, card in pairs(byId) do card.problem = system .. " no longer lists this station" end
+    for _, spots in pairs(byId) do
+      for _, spot in ipairs(spots) do spot.problem = system .. " no longer lists this station" end
+    end
     list = nil
     tidy(res)
     showLed()
@@ -136,8 +160,7 @@ end
 -- ------------------------------------------------------------ the stations
 
 -- A number matches the station's number; text matches (part of) its name.
-local function match(card, stations)
-  local wanted = card.config.station:match("^%s*(.-)%s*$")
+local function match(wanted, stations)
   local number = wanted:match("^%d+$") and tonumber(wanted)
   local lower, partial = wanted:lower(), nil
   for _, item in ipairs(stations) do
@@ -155,16 +178,20 @@ local function match(card, stations)
 end
 
 local function place(card, stations)
-  local id, name = match(card, stations)
-  if not id then
-    card.problem = system .. " has no station " .. card.config.station
-    return
+  local names = {}
+  for _, spot in ipairs(card.spots) do
+    local id, name = match(spot.wanted, stations)
+    if id then
+      -- Velo puts the number in front of the name: "001- Centraal Station - Astrid".
+      local number, rest = name:match("^(%d+)%s*%-%s*(.+)$")
+      spot.id, spot.name, spot.number, spot.problem = id, rest or name, number, nil
+      names[#names + 1] = #card.spots == 1 and name or spot.name
+    else
+      spot.problem = system .. " has no station " .. spot.wanted
+    end
   end
-  -- Velo puts the number in front of the name: "001- Centraal Station - Astrid".
-  local number, rest = name:match("^(%d+)%s*%-%s*(.+)$")
-  card.station = { id = id, name = rest or name, number = number }
-  card.title = name
   card.problem = nil
+  if #names > 0 then card.title = table.concat(names, ", ") end
 end
 
 local function stations()
@@ -226,9 +253,12 @@ local function start()
     system, feedUrl = known and known[1] or "The feed", known and known[2] or choice
   end
   if busy then return end
+  -- A card that was added after the station list was read still has to find its stations.
+  local unplaced = false
+  eachSpot(function(spot) unplaced = unplaced or not (spot.id or spot.problem) end)
   if not feeds then
     discover()
-  elseif not found then
+  elseif not found or unplaced then
     stations()
   else
     counts()
@@ -288,17 +318,100 @@ local function message(text, color)
   end
 end
 
+-- One station, large: the page of a card with one station, and the pages after
+-- the list on a card with several.
+local function drawStation(card, spot, paged)
+  local right = spot.number and gfx.textWidth(spot.number, "small") + 12 or 8
+  gfx.text(8, 4, fit(spot.name or spot.wanted, "small", W - 8 - right), "gray", "small")
+  if spot.number then gfx.text(W - 8, 4, spot.number, "gray", "small", "right") end
+
+  local problem = spot.problem or card.problem
+  if problem and not spot.bikes then return message(problem, "orange") end
+  if not spot.bikes then
+    return message(spot.id and "Counting the bikes..." or "Finding the station...", "gray")
+  end
+
+  local limit = card.config.alert
+  local low = limit > 0 and spot.bikes <= limit
+  local dim = spot.closed
+
+  bike(10, 44, dim and "gray" or BIKE)
+  number(46, 32, spot.bikes, dim and "gray" or (low and "orange" or "white"))
+  gfx.text(46, 72, spot.bikes == 1 and "bike" or "bikes", "gray", "small")
+  if spot.ebikes and spot.ebikes > 0 and not dim then
+    gfx.text(46, 89, spot.ebikes .. " electric", ELECTRIC, "small")
+  end
+
+  if spot.docks then
+    dock(130, 43, dim and "gray" or DOCK)
+    number(158, 32, spot.docks, dim and "gray" or "white")
+    gfx.text(158, 72, spot.docks == 1 and "free dock" or "free docks", "gray", "small")
+  end
+
+  -- With pages the bottom edge belongs to the dots.
+  local lift = paged and 6 or 0
+  if spot.closed then
+    gfx.text(8, 94 - lift, "Out of service", "red", "medium")
+  elseif problem then
+    gfx.text(8, 96 - lift, fit(problem, "small", W - 16), "orange", "small")
+  end
+  local age = ago(spot.at)
+  if age then gfx.text(8, 114 - lift, age, "gray", "small") end
+end
+
+-- All of a card's stations, a line each: bikes and free docks.
+local function drawList(card)
+  local docksAt, bikesAt = W - 8, W - 62
+  gfx.text(8, 4, system or "", "gray", "small")
+  gfx.text(bikesAt, 4, "bikes", BIKE, "small", "right")
+  gfx.text(docksAt, 4, "docks", DOCK, "small", "right")
+
+  local limit = card.config.alert
+  for i, spot in ipairs(card.spots) do
+    local y = 26 + (i - 1) * 20
+    local problem = spot.problem or card.problem
+    if spot.bikes then
+      local low = limit > 0 and spot.bikes <= limit
+      gfx.text(8, y, fit(spot.name, "small", bikesAt - 44), spot.closed and "gray" or "white", "small")
+      if spot.closed then
+        gfx.text(docksAt, y, "closed", "red", "small", "right")
+      else
+        gfx.text(bikesAt, y, tostring(spot.bikes), low and "orange" or "white", "small", "right")
+        gfx.text(docksAt, y, spot.docks and tostring(spot.docks) or "-", "white", "small", "right")
+      end
+    elseif problem and not spot.id then
+      gfx.text(8, y, fit(found and spot.wanted .. ": not found" or problem, "small", W - 16), "orange", "small")
+    else
+      gfx.text(8, y, fit(spot.name or spot.wanted, "small", bikesAt - 44), "gray", "small")
+      gfx.text(docksAt, y, problem and "no answer" or "...", problem and "orange" or "gray", "small", "right")
+    end
+  end
+end
+
 cards = {
   station = {
     name = "Station",
     config = {
-      station = { label = "Station number or (part of the) name", default = "1", order = 1 },
+      station = {
+        label = "Station number or (part of the) name. Several, up to five: separate them with commas",
+        default = "1",
+        order = 1,
+      },
       alert = { label = "LED amber at this many bikes or fewer (0: never)", default = 0, order = 2 },
     },
 
     load = function(card)
       all[card.id] = card
-      if not card.station or card.config.alert > 0 or not card.bikes then start() end
+      if not card.spots then
+        card.spots = {}
+        for wanted in (card.config.station .. ","):gmatch("%s*(.-)%s*,") do
+          if wanted ~= "" and #card.spots < MOST then card.spots[#card.spots + 1] = { wanted = wanted } end
+        end
+        if #card.spots == 0 then card.spots[1] = { wanted = "" } end
+      end
+      local waiting = false
+      for _, spot in ipairs(card.spots) do waiting = waiting or not spot.bikes end
+      if waiting or card.config.alert > 0 then start() end
     end,
 
     -- Only while the card is on screen: ask again when the counts are old, and
@@ -310,41 +423,18 @@ cards = {
       card.minute = minute
     end,
 
-    draw = function(card)
-      local station = card.station
-      local right = station and station.number and gfx.textWidth(station.number, "small") + 12 or 8
-      gfx.text(8, 4, fit(station and station.name or card.config.station, "small", W - 8 - right), "gray", "small")
-      if station and station.number then gfx.text(W - 8, 4, station.number, "gray", "small", "right") end
+    -- A card with several stations has the list first, then a page per station.
+    pages = function(card)
+      local stations = card.spots and #card.spots or 1
+      return stations > 1 and stations + 1 or 1
+    end,
 
-      if card.problem and not card.bikes then return message(card.problem, "orange") end
-      if not card.bikes then
-        return message(station and "Counting the bikes..." or "Finding the station...", "gray")
-      end
-
-      local limit = card.config.alert
-      local low = limit > 0 and card.bikes <= limit
-      local dim = card.closed
-
-      bike(10, 44, dim and "gray" or BIKE)
-      number(46, 32, card.bikes, dim and "gray" or (low and "orange" or "white"))
-      gfx.text(46, 72, card.bikes == 1 and "bike" or "bikes", "gray", "small")
-      if card.ebikes and card.ebikes > 0 and not dim then
-        gfx.text(46, 89, card.ebikes .. " electric", ELECTRIC, "small")
-      end
-
-      if card.docks then
-        dock(130, 43, dim and "gray" or DOCK)
-        number(158, 32, card.docks, dim and "gray" or "white")
-        gfx.text(158, 72, card.docks == 1 and "free dock" or "free docks", "gray", "small")
-      end
-
-      if card.closed then
-        gfx.text(8, 94, "Out of service", "red", "medium")
-      elseif card.problem then
-        gfx.text(8, 96, fit(card.problem, "small", W - 16), "orange", "small")
-      end
-      local age = ago(card.at)
-      if age then gfx.text(8, 114, age, "gray", "small") end
+    draw = function(card, page)
+      local spots = card.spots
+      if not spots then return end
+      if #spots == 1 then return drawStation(card, spots[1], false) end
+      if page == 1 then return drawList(card) end
+      drawStation(card, spots[page - 1], true)
     end,
   },
 }

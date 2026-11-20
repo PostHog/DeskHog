@@ -1406,6 +1406,165 @@ TEST(sample_hello) {
     CHECK(!f.plugin.failed());
 }
 
+TEST(pages_as_a_list_of_draw_functions) {
+    Fixture f;
+    CHECK(f.start(R"(
+        pages = {
+          function() ui.big("one") end,
+          function() ui.big("two") end,
+        }
+    )"));
+    f.tick(f.services.now, true);
+    f.draw();
+    CHECK(f.gfx.drew("center one"));
+    CHECK(f.gfx.drew("rect 110,129 4x4 #ffffff r2"));  // a dot per page, the first one lit
+    CHECK(f.gfx.drew("rect 118,129 4x4 #555555 r2"));
+
+    CHECK_EQ(f.button(Button::Up), false);
+    CHECK_EQ(f.button(Button::Down), false);
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK(f.needsDraw());
+    f.draw();
+    CHECK(f.gfx.drew("center two"));
+    CHECK(!f.gfx.drew("center one"));
+    CHECK(f.gfx.drew("rect 118,129 4x4 #ffffff r2"));
+
+    CHECK_EQ(f.button(Button::Center), true);  // round to the first
+    f.draw();
+    CHECK(f.gfx.drew("center one"));
+
+    // Leaving the card puts it back on its first page.
+    CHECK_EQ(f.button(Button::Center), true);
+    f.tick(f.services.now, false);
+    CHECK(f.needsDraw());
+    f.draw();
+    CHECK(f.gfx.drew("center one"));
+    CHECK(!f.plugin.failed());
+}
+
+TEST(pages_counted_by_a_function) {
+    Fixture f;
+    CHECK(f.start(R"(
+        count = 1
+        function pages() return count end
+        function draw(page) ui.big("page " .. page) end
+        function message(msg) count = tonumber(msg.body) end
+    )"));
+    f.tick(f.services.now, true);
+    f.draw();
+    CHECK(f.gfx.drew("center page 1"));
+    CHECK(!f.gfx.drew("4x4"));                    // one page: no dots
+    CHECK_EQ(f.button(Button::Center), false);   // and nothing for the button to do
+
+    f.plugin.message("1", "3");
+    CHECK_EQ(f.button(Button::Center), true);
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("center page 3"));
+
+    // Fewer pages than the one on show: the last one that is left.
+    f.plugin.message("1", "2");
+    f.draw();
+    CHECK(f.gfx.drew("center page 2"));
+
+    // Too many for dots: a number instead.
+    f.plugin.message("1", "40");
+    f.draw();
+    CHECK(f.gfx.drew("tiny right 2/40"));
+    CHECK(!f.gfx.drew("4x4"));
+    CHECK(!f.plugin.failed());
+}
+
+TEST(pages_leave_the_button_to_a_plugin_that_uses_it) {
+    Fixture f;
+    CHECK(f.start(R"(
+        mine = true
+        pages = { function() ui.big("one") end, function() ui.big("two") end }
+        function button(name) return mine end
+    )"));
+    f.tick(f.services.now, true);
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("center one"));  // the plugin used the press, so the page stays
+
+    Fixture g;
+    CHECK(g.start(R"(
+        pages = { function() ui.big("one") end, function() ui.big("two") end }
+        function button(name) return false end
+    )"));
+    g.tick(g.services.now, true);
+    CHECK_EQ(g.button(Button::Center), true);
+    g.draw();
+    CHECK(g.gfx.drew("center two"));
+}
+
+TEST(pages_must_be_what_they_say) {
+    Fixture f;
+    f.start(R"(
+        function pages() return "many" end
+        function draw(page) end
+    )");
+    f.draw();
+    CHECK(f.plugin.failed());
+
+    Fixture g;
+    g.start(R"(pages = { function() end, "not a function" })");
+    g.tick(g.services.now, true);
+    g.draw();
+    CHECK(!g.plugin.failed());
+    g.button(Button::Center);
+    g.draw();
+    CHECK(g.plugin.failed());
+}
+
+TEST(sample_velo_several_stations_on_one_card) {
+    Fixture f;
+    CHECK(f.startFile("velo", {}, {{"station", "122, centraal, 999"}}));
+    f.respond(0, 200, R"({"version":"1.0","data":{"nl":{"feeds":[
+        {"name":"station_information","url":"https://example.com/info.json"},
+        {"name":"station_status","url":"https://example.com/status.json"}]}}})");
+    CHECK_EQ(f.services.requests[1].request.url, "https://example.com/info.json");
+    f.respond(1, 200, R"({"data":{"stations":[
+        {"station_id":"1","name":"001- Centraal Station - Astrid"},
+        {"station_id":"122","name":"122- Schijnpoort"}]}})");
+    CHECK_EQ(f.plugin.cardTitle("1"), "Schijnpoort, Centraal Station - Astrid");
+    CHECK_EQ(f.services.requests[2].request.url, "https://example.com/status.json");
+    f.respond(2, 200, R"({"last_updated":0,"data":{"stations":[
+        {"station_id":"1","num_bikes_available":0,"num_docks_available":31,"is_renting":true},
+        {"station_id":"122","num_bikes_available":9,"num_docks_available":12,"is_renting":true}]}})");
+
+    // The first page lists them all.
+    f.tick(f.services.now, true);
+    f.draw();
+    CHECK(f.gfx.drew("small left Schijnpoort"));
+    CHECK(f.gfx.drew("small right 9"));
+    CHECK(f.gfx.drew("small right 31"));
+    CHECK(f.gfx.drew("999: not found"));
+    CHECK(!f.gfx.drew("large"));
+
+    // Then a page per station, in the order they were given.
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("small right 122"));
+    CHECK(f.gfx.drew("large left 9"));
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("large left 0"));
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("Velo has no station 999"));
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("small right 31"));  // the list again
+    CHECK(!f.plugin.failed());
+
+    // One station: the card as it always was, and the button is not used.
+    Fixture g;
+    CHECK(g.startFile("velo", {}, {{"station", "122"}}));
+    g.tick(g.services.now, true);
+    CHECK_EQ(g.button(Button::Center), false);
+}
+
 TEST(sample_weather) {
     Fixture f;
     CHECK(f.startFile("weather", {}, {{"city", "Sint-Niklaas"}}));
@@ -1423,7 +1582,11 @@ TEST(sample_weather) {
     CHECK_EQ(f.services.requests.size(), (size_t)2);
     CHECK_EQ(f.services.requests[1].request.url,
              "https://api.open-meteo.com/v1/forecast?latitude=51.1651&longitude=4.1437"
-             "&current=temperature_2m,weather_code&hourly=temperature_2m&forecast_days=1");
+             "&current=temperature_2m,weather_code,apparent_temperature,wind_speed_10m,wind_direction_10m"
+             "&hourly=temperature_2m"
+             "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,"
+             "precipitation_probability_max,sunrise,sunset"
+             "&forecast_days=6&timezone=auto");
     f.respond(1, 200,
               R"({"current":{"temperature_2m":8.6,"weather_code":61},"hourly":{"temperature_2m":[5,6,7.5,9,8,6]}})");
     f.draw();
@@ -1437,6 +1600,56 @@ TEST(sample_weather) {
     f.tick(f.services.now, false);
     CHECK_EQ(f.services.requests.size(), (size_t)3);
     CHECK(contains(f.services.requests[2].request.url, "api.open-meteo.com/v1/forecast"));
+}
+
+TEST(sample_weather_centre_steps_through_the_pages) {
+    Fixture f;
+    CHECK(f.startFile("weather", {}, {{"city", "Antwerp"}}));
+    CHECK_EQ(f.button(Button::Center), false);  // nothing to page through yet
+    f.respond(0, 200, R"({"results":[{"name":"Antwerp","latitude":51.22,"longitude":4.4}]})");
+    f.respond(1, 200, R"({"current":{"temperature_2m":8.6,"weather_code":61,"apparent_temperature":6.4,
+        "wind_speed_10m":17.6,"wind_direction_10m":230},
+        "hourly":{"temperature_2m":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27]},
+        "daily":{"time":["2026-11-20","2026-11-21","2026-11-22"],"weather_code":[61,3,0],
+        "temperature_2m_max":[10.2,7.4,-0.6],"temperature_2m_min":[5.1,2.2,-3.4],
+        "precipitation_sum":[7.8,0,0],"precipitation_probability_max":[100,20,0],
+        "sunrise":["2026-11-20T08:07","2026-11-21T08:09","2026-11-22T08:10"],
+        "sunset":["2026-11-20T16:47","2026-11-21T16:46","2026-11-22T16:45"]}})");
+    f.tick(f.services.now, true);
+    f.draw();
+    CHECK(f.gfx.drew("large center 9°"));
+
+    CHECK_EQ(f.button(Button::Up), false);  // up and down still switch cards
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("small left Antwerp  today"));
+    CHECK(f.gfx.drew("small right 10° / 5°"));
+    CHECK(f.gfx.drew("small right 6°"));
+    CHECK(f.gfx.drew("small right 100%  7.8 mm"));
+    CHECK(f.gfx.drew("small right 18 km/h SW"));
+    CHECK(f.gfx.drew("small right 08:07 - 16:47"));
+    CHECK(!f.gfx.drew("large center 9°"));
+
+    CHECK_EQ(f.button(Button::Center), true);
+    f.draw();
+    CHECK(f.gfx.drew("small left Sat"));
+    CHECK(f.gfx.drew("small left Cloudy"));
+    CHECK(f.gfx.drew("small right 7° / 2°"));
+    CHECK(f.gfx.drew("small left Sun"));
+    CHECK(f.gfx.drew("small right -1° / -3°"));
+    CHECK(!f.gfx.drew("small left Fri"));  // today is on the page before
+
+    CHECK_EQ(f.button(Button::Center), true);  // and round to the first page
+    f.draw();
+    CHECK(f.gfx.drew("large center 9°"));
+
+    // Left on the second page, it is back on the first after being away.
+    CHECK_EQ(f.button(Button::Center), true);
+    f.tick(f.services.now, false);
+    f.tick(f.services.now, true);
+    f.draw();
+    CHECK(f.gfx.drew("large center 9°"));
+    CHECK(!f.plugin.failed());
 }
 
 TEST(sample_weather_handles_bad_answers) {

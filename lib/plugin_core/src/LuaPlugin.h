@@ -213,7 +213,10 @@ public:
     size_t imageBytesUsed() const { return imageBytes_; }
 
 private:
-    enum class CallKind { Start, Load, AddCard, CardLoad, CardUpdate, CardDraw, CardButton, CardTitle, Http, Image, Timer, Message, Choices };
+    enum class CallKind { Start, Load, AddCard, CardLoad, CardUpdate, CardDraw, CardPages, CardButton, CardTitle, Http, Image, Timer, Message, Choices };
+
+    /** How a card says it has pages: not, as a list of draw functions, or as a function that counts them. */
+    enum class PagesKind { None, List, Count };
 
     struct Card {
         std::string id;
@@ -233,6 +236,9 @@ private:
         uint32_t downAtMs[3] = {0, 0, 0};
         bool frameClockValid = false;
         uint32_t lastFrameMs = 0;
+        PagesKind pages = PagesKind::None;
+        int page = 1;       ///< The page on show, from 1
+        int pageCount = 0;  ///< As counted the last time the card was drawn or its centre button pressed
     };
 
     struct Call {
@@ -301,6 +307,9 @@ private:
                             int target);
     /** Push a card callback and its `card` argument. @return the number of arguments pushed, or -1 if there is no such function. */
     int pushCardFunction(lua_State* L, const Card& card, const char* function);
+    void pushCardValue(lua_State* L, const Card& card, const char* name);
+    int countPages(lua_State* L, Card& card);
+    void drawPageDots(Gfx& gfx, const Card& card);
 
     static int trampoline(lua_State* L);
     static void hook(lua_State* L, lua_Debug* ar);

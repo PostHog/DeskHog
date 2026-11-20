@@ -8,7 +8,7 @@ folder is also the plugin directory: what the device's web page offers under
 | Example | Shows |
 |---|---|
 | [hello.lua](hello.lua) | The smallest useful plugin |
-| [weather.lua](weather.lua) | Several cards from one plugin, shared settings, fetching JSON, a chart |
+| [weather.lua](weather.lua) | Several cards from one plugin, shared settings, fetching JSON, a chart, pages |
 | [posthog.lua](posthog.lua) | A real service: one account, a card per insight, an API key, large answers |
 | [flappy.lua](flappy.lua) | A game: per-frame updates, free drawing, saved high score |
 | [webhook.lua](webhook.lua) | A button that calls a URL and lights the LED |
@@ -109,6 +109,7 @@ you defined. All of them are optional.
 | `update(dt)` | Every frame while the card is on screen. `dt` is the seconds since the last call. Return `false` when nothing you draw has changed, and the card is not repainted |
 | `draw()` | When the card needs repainting: after any of the other functions ran |
 | `button(name, event)` | On a press. `name` is `"up"`, `"center"` or `"down"`. See [Buttons](#buttons-and-moving-between-cards) for `event` |
+| `pages` | Not called like the others: it gives the card several pages that the centre button steps through. See [Pages](#pages) |
 | `message(msg)` | When something on your network sends the plugin a message. See [Messages](#messages-pushed-to-your-plugin) |
 
 Two tables at the top of the file describe the plugin:
@@ -250,6 +251,7 @@ cards = {
     update = function(card, dt) ... end,     -- every frame while this card is on screen
     draw = function(card) ... end,
     button = function(card, name) ... end,
+    pages = function(card) ... end,          -- or a list of draw functions; see Pages
     message = function(card, msg) ... end,   -- a message sent to this card
   },
 }
@@ -311,6 +313,50 @@ What you return for `"long"` and `"release"` changes nothing: only a press can s
 cards. A `button` function with one parameter is called for presses only, exactly as
 before there were events. A press from the web page or `tools/deskhog press` is
 released at once.
+
+### Pages
+
+A card that has more to show than fits gets pages. You say what the pages are; the
+device turns to the next one on the centre button, goes round to the first after the
+last, draws a dot per page along the bottom edge, and puts the card back on its first
+page when it leaves the screen.
+
+The short way is a list of draw functions, one per page, instead of `draw`:
+
+```lua
+pages = {
+  function() ui.big("21°") ui.label("Now") end,
+  function() ui.big("24° / 15°") ui.label("Today") end,
+}
+```
+
+When the number of pages is not fixed (a page per story, or one page until the data
+has arrived), make `pages` a function that counts them. `draw` is then told which page
+to draw, starting at 1:
+
+```lua
+function pages() return #stories end      -- for a kind of card: pages = function(card) ... end
+
+function draw(page)                       -- for a kind of card: draw = function(card, page) ... end
+  local story = stories[page]
+  if not story then ui.label("Loading...") return end
+  ui.title(page .. " of " .. #stories)
+  ui.label(story.title)
+end
+```
+
+- With one page or none there are no dots and the centre button does nothing, so
+  `pages` can answer 1 while a card is loading.
+- More than 10 pages show as `3/12` in the bottom right instead of dots. Pages past
+  the 99th cannot be reached.
+- Leave the bottom 8 pixels free for the dots. `ui.chart` reaches down to just above
+  them.
+- Your `button` function still sees every press first. Paging only happens when it
+  does not use the centre press, so a card can keep the button for itself in some
+  states and give it to the pages in others.
+- A plugin cannot turn the page itself.
+
+[weather.lua](weather.lua) and [daylight.lua](daylight.lua) work this way.
 
 ## Drawing
 
@@ -803,6 +849,8 @@ POST   /api/cards/message?key=<c>:<n>   hand the body (text or JSON, 4 KB at mos
 GET    /api/device                      the device's settings, and how it is doing (see below)
 POST   /api/device                      any of the settings; what you leave out stays as it is
 POST   /api/restart                     answers, then restarts the device a moment later
+POST   /api/update/start                answers, then restarts into the updater, which takes new firmware.
+                                        409 on a device with the older flash layout. See tech-details.md
 POST   /api/connections/add             {plugin, name, settings}
 POST   /api/connections/update?id=<c>   {name, settings}
 POST   /api/connections/remove?id=<c>
@@ -814,7 +862,7 @@ GET    /api/connections/choices?id=<c>&field=<key>[&kind=<kind>][&settings=<JSON
                                         Answers 202 {pending: true} while the plugin is working on it: ask again
 ```
 
-`POST /api/device` and `POST /api/restart` answer 403 to a request that comes from the device itself, so a plugin cannot change the device's settings or restart it.
+`POST /api/device`, `POST /api/restart` and `POST /api/update/start` answer 403 to a request that comes from the device itself, so a plugin cannot change the device's settings, restart it or start a firmware update.
 
 `/api/device` takes and gives nested JSON:
 

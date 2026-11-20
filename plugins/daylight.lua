@@ -14,7 +14,7 @@ plugin = {
   name = "Daylight",
   description = "Sunrise, sunset and the length of the day, how it changed since yesterday, and the moon",
   author = "DeskHog",
-  version = "1.0",
+  version = "1.1",
   refresh = 10800, -- ask for the UTC offset again every three hours, to follow summer time
   fps = 1,         -- look at the time once a second; it is only repainted when the minute changes
 }
@@ -28,7 +28,7 @@ local RAD, DEG = math.pi / 180, 180 / math.pi
 local SUN, SUN_LOW, ARC, NIGHT = "#ffc83d", "#8a6a2a", "#6b5a2a", "#4a4a60"
 
 local place -- { city, name, latitude, longitude, offset }, saved once looked up
-local problem, view, shown, today
+local problem, shown, today
 
 local function urlencode(text)
   return (text:gsub("[^%w%-_%.~]", function(c)
@@ -203,18 +203,15 @@ end
 
 function update()
   local utc = time.now()
-  local key = (utc // 60) .. (view or "") .. tostring(place and place.offset)
+  local key = (utc // 60) .. tostring(place and place.offset)
   if key == shown then return false end
   shown = key
   today = work()
 end
 
-function button(name)
-  if name ~= "center" then return end
-  view = view == nil and "times" or nil
-  shown = nil
-  return true
-end
+-- Two pages once there is something to show: the arc, and the times as a list.
+-- The device turns the page on the centre button.
+function pages() return today and not problem and 2 or 1 end
 
 -- ----------------------------------------------------------------- drawing
 
@@ -287,7 +284,7 @@ local function drawTimes(d)
   end
 end
 
-function draw()
+function draw(page)
   local name = place and place.name or config.city
   if problem or not today then
     gfx.text(8, 4, name, "gray", "small")
@@ -299,7 +296,7 @@ function draw()
   local moon = today.moon
   local phase = PHASES[math.floor(moon * 8 + 0.5) % 8 + 1]
   drawMoon(W - 14, 12, 9, moon, place.latitude < 0)
-  if not view then
+  if page == 1 then
     gfx.text(W - 29, 4, phase, "gray", "small", "right")
     gfx.text(8, 4, fit(name, W - 45 - gfx.textWidth(phase, "small")), "gray", "small")
     drawArc(today)
