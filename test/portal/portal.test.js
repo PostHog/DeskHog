@@ -1104,6 +1104,111 @@ test('restart asks first', async () => {
     equal(device.restarts, 1, 'once');
 });
 
+test('a newer firmware is offered and installed through the updater', async () => {
+    const device = makeDevice();
+    const { window, document } = await openPage(device, { hash: '#device' });
+    window.firmwarePause = 0;
+    check(device.outside.includes('https://raw.githubusercontent.com/TimBroddin/DeskHog/firmware/latest.json'), 'the browser asks GitHub for the newest release');
+    check(text(document.getElementById('firmware-box')).includes('Firmware 0.5.0 is available'), 'the newer version is offered');
+    equal(document.querySelector('#firmware-box a').href, 'https://example.com/notes', 'with a link to what is new');
+
+    window.confirm = () => false;
+    await click(window, document.getElementById('firmware-update'));
+    check(!lastRequest(device, '/api/update/start'), 'cancelled: nothing happens');
+
+    window.confirm = () => true;
+    await click(window, document.getElementById('firmware-update'));
+    for (let i = 0; i < 6; i++) await settle(window);
+    equal(lastRequest(device, '/api/update/start').method, 'POST', 'the device is asked to restart into its updater');
+    equal(device.firmware.installed, [{ size: '12', sha256: 'abc123' }], 'the updater gets the file, with its size and hash');
+    equal(device.firmware.version, '0.5.0', 'the device runs the new firmware');
+    check(text(document.getElementById('notice')).includes('now runs firmware 0.5.0'), 'the page says so');
+    check(text(document.getElementById('firmware-box')).includes('This is the newest firmware'), 'and no longer offers it');
+    check(!document.getElementById('firmware-update'), 'the button is gone');
+});
+
+test('the newest firmware can be installed again', async () => {
+    const device = makeDevice();
+    device.release.version = '0.4.0';
+    const { window, document } = await openPage(device, { hash: '#device' });
+    window.firmwarePause = 0;
+    const button = document.getElementById('firmware-reinstall');
+    equal(text(button), 'Reinstall firmware', 'up to date: the release can be installed again');
+    let asked = '';
+    window.confirm = question => { asked = question; return false; };
+    await click(window, button);
+    check(asked.includes('Install firmware 0.4.0 again?'), 'after a question that names the version');
+    check(!lastRequest(device, '/api/update/start'), 'cancelled: nothing happens');
+
+    window.confirm = () => true;
+    await click(window, document.getElementById('firmware-reinstall'));
+    for (let i = 0; i < 6; i++) await settle(window);
+    equal(device.firmware.installed, [{ size: '12', sha256: 'abc123' }], 'the updater gets the release, with its size and hash');
+    equal(device.firmware.version, '0.4.0', 'and the device runs it');
+    check(document.getElementById('firmware-reinstall') !== null, 'the button stays');
+
+    const own = makeDevice();
+    own.release.version = '0.3.0';
+    const second = await openPage(own, { hash: '#device' });
+    equal(text(second.document.getElementById('firmware-reinstall')), 'Install release 0.3.0', 'a build newer than the release: the button names what it installs');
+    check(text(second.document.getElementById('firmware-box')).includes('newer than the latest release'), 'and the page says which is newer');
+
+    const offline = makeDevice();
+    offline.release = null;
+    const third = await openPage(offline, { hash: '#device' });
+    check(!third.document.getElementById('firmware-reinstall'), 'no release found: no button');
+});
+
+test('no firmware offer when the device is up to date, offline, or on another layout', async () => {
+    const current = makeDevice();
+    current.release.version = '0.4.0';
+    const first = await openPage(current, { hash: '#device' });
+    check(!first.document.getElementById('firmware-update'), 'up to date: no button');
+    check(first.document.getElementById('firmware-choose') !== null, 'a file can still be installed');
+
+    const offline = makeDevice();
+    offline.internet = null;
+    const second = await openPage(offline, { hash: '#device' });
+    check(!second.document.getElementById('firmware-update'), 'no internet: no button');
+    check(!text(second.document.getElementById('firmware-box')).includes('newest'), 'and no claim about being the newest');
+
+    const other = makeDevice();
+    other.release.layout = 3;
+    const third = await openPage(other, { hash: '#device' });
+    check(!third.document.getElementById('firmware-update'), 'a release for another flash layout is not offered');
+});
+
+test('a device on the old flash layout is told about the one-time move', async () => {
+    const device = makeDevice();
+    device.firmware.layout = 1;
+    const { document } = await openPage(device, { hash: '#device' });
+    check(text(document.getElementById('firmware-box')).includes('tools/deskhog migrate'), 'the move is explained');
+    check(!document.getElementById('firmware-update') && !document.getElementById('firmware-choose'), 'and nothing is offered');
+    check(!device.outside.some(url => url.includes('/firmware/')), 'nor looked up');
+
+    const older = makeDevice();
+    older.firmware = null;
+    const second = await openPage(older, { hash: '#device' });
+    check(text(second.document.getElementById('firmware-box')).includes('installed over USB'), 'older firmware keeps the note about USB');
+});
+
+test('a failed firmware upload can be tried again', async () => {
+    const device = makeDevice();
+    device.firmware.failUploads = 1;
+    const { window, document } = await openPage(device, { hash: '#device' });
+    window.firmwarePause = 0;
+    await click(window, document.getElementById('firmware-update'));
+    for (let i = 0; i < 6; i++) await settle(window);
+    check(text(document.getElementById('firmware-error')).includes('The connection was lost'), 'the page says what went wrong');
+    check(device.firmware.inUpdater, 'the device is still in its updater');
+
+    await click(window, document.getElementById('firmware-retry'));
+    for (let i = 0; i < 6; i++) await settle(window);
+    equal(device.requests.filter(r => r.url === '/api/update/start').length, 1, 'the retry does not restart it again');
+    equal(device.firmware.version, '0.5.0', 'and the second attempt installs it');
+    check(!document.getElementById('firmware-error'), 'the error is gone');
+});
+
 test('a card can be kept out of the rotation', async () => {
     const device = makeDevice();
     const { window, document } = await openPage(device);

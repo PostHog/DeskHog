@@ -488,3 +488,4 @@ button:disabled { opacity: 0.5; cursor: default; }
 @media (prefers-reduced-motion: no-preference) {
     .item, .tabs a, button { transition: border-color 0.12s, background-color 0.12s, box-shadow 0.12s; }
 }
+.hint.error { color: var(--bad); }

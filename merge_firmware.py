@@ -1,7 +1,8 @@
 """Make one file that holds everything a board needs: deskhog-full.bin.
 
-A normal upload writes four pieces to four places: the bootloader, the
-partition table, the "boot the first slot" data and the firmware itself.
+A normal upload writes five pieces to five places: the bootloader, the
+partition table, the "boot the main firmware" data, the updater and the
+firmware itself.
 Someone installing from a browser should not have to know that. This script
 joins the same pieces, at the same offsets the upload uses, into one image
 that is written at offset 0.
@@ -9,7 +10,8 @@ that is written at offset 0.
 It runs after every build and leaves the result next to firmware.bin:
 
     .pio/build/<env>/deskhog-full.bin    a board that has not run this firmware yet (write at 0x0)
-    .pio/build/<env>/firmware.bin        an update for a board that has (write at the app offset, 0x20000)
+    .pio/build/<env>/firmware.bin        an update for a board that has: what the updater installs over WiFi
+                                         (over USB it goes at the main firmware's offset, 0x120000)
 
 Writing the full image also blanks the settings area, which lies between the
 pieces, so WiFi and the list of cards are forgotten. The update file leaves

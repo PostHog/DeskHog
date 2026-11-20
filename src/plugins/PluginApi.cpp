@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <WiFi.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 
 #include <atomic>
 #include <cmath>
@@ -146,6 +148,17 @@ void storageToJson(JsonObject storage, PluginManager& manager) {
 
 // ------------------------------------------------------------------ device
 
+// Where the page asks for the newest release: <owner>/<repository> on GitHub,
+// whose `firmware` branch holds latest.json. The release workflow sets it.
+#ifndef UPDATE_REPO
+#define UPDATE_REPO "TimBroddin/DeskHog"
+#endif
+
+// The updater's slot, or null on a device that still has the flash layout without one.
+const esp_partition_t* updaterSlot() {
+    return esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
+}
+
 void batteryToJson(JsonObject target, int percent, float volts, bool charging) {
     target["percent"] = percent;
     target["volts"] = std::round(volts * 100) / 100.0;  // 4.2, not 4.19999981
@@ -185,6 +198,13 @@ void deviceToJson(JsonObject device, DeskManners& manners) {
     } else {
         status["gauge"] = nullptr;
     }
+
+    // What the page needs to offer a firmware update: see handleUpdateStart.
+    status["firmware"] = CURRENT_FIRMWARE_VERSION;
+    status["layout"] = updaterSlot() ? 2 : 1;
+    status["update_repo"] = UPDATE_REPO;
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    status["firmware_room"] = running ? running->size : 0;
 }
 
 // The groups a POST body may nest settings in: {"screen": {"day": 80}} is "screen.day".
@@ -316,6 +336,34 @@ void handleRestart(AsyncWebServerRequest* request, PluginManager&) {
             ESP.restart();
         },
         "restart", 4096, nullptr, 1, nullptr);
+}
+
+// Updating the firmware over WiFi. The flash has no room for the firmware
+// twice, so a small second firmware, the updater, has a slot of its own
+// (partitions.csv, updater/). This selects it and restarts; the page that asked
+// then sends the new firmware to the updater, which writes it over this one.
+// A device still on the old flash layout has no updater and answers 409.
+void handleUpdateStart(AsyncWebServerRequest* request, PluginManager&) {
+    if (answerPreflight(request)) return;
+    if (request->method() != HTTP_POST) return sendError(request, 405, "POST /api/update/start");
+    if (refusedFromDevice(request)) return;
+    const esp_partition_t* updater = updaterSlot();
+    if (!updater) {
+        return sendError(request, 409, "This device has the old flash layout, without an updater. Move it over once with tools/deskhog migrate");
+    }
+    static std::atomic<bool> restarting{false};
+    if (restarting.exchange(true)) return sendOk(request);
+    if (esp_ota_set_boot_partition(updater) != ESP_OK) {
+        restarting = false;
+        return sendError(request, 500, "The updater on this device is damaged. Install it again over USB");
+    }
+    sendOk(request);
+    xTaskCreate(
+        [](void*) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            ESP.restart();
+        },
+        "update", 4096, nullptr, 1, nullptr);
 }
 
 // ------------------------------------------------------------------- state
@@ -851,6 +899,7 @@ void registerPluginRoutes(AsyncWebServer& server, PluginManager& manager) {
     route("/api/timezone", handleTimeZone);
     route("/api/device", handleDevice);
     route("/api/restart", handleRestart);
+    route("/api/update/start", handleUpdateStart);
     route("/api/cards/add", handleAddCard);
     route("/api/cards/update", handleUpdateCard);
     route("/api/cards/layout", handleLayout);

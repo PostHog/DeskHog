@@ -2,8 +2,14 @@ name: Build Firmware Release
 
 # Builds the firmware and attaches it to a release:
 #
-#   deskhog-<version>-full.bin    for a board that does not run this firmware yet (write at 0x0)
-#   deskhog-<version>-update.bin  for one that does; keeps WiFi, cards and plugins (write at 0x20000)
+#   deskhog-<version>-full.bin     for a board that does not run this firmware yet (write at 0x0)
+#   deskhog-<version>-update.bin   for one that does: what the device installs over WiFi
+#   deskhog-<version>-updater.bin  the small firmware that does the installing (inside full.bin too)
+#
+# A release also puts the update file and latest.json, which describes it, on
+# the `firmware` branch. That is where a device's web page looks for a newer
+# version: browsers may not download a release's files directly, but they may
+# read a branch through raw.githubusercontent.com.
 #
 # Runs when a release is created, with the release's tag as the version. Run it
 # by hand to only build: the files are then kept with the run, not with a release.
@@ -61,6 +67,8 @@ jobs:
       run: |
         sed -i "s/-DCURRENT_FIRMWARE_VERSION=\"\\\\\"[^\"]*\\\\\"\"/-DCURRENT_FIRMWARE_VERSION=\"\\\\\"${VERSION}\\\\\"\"/g" platformio.ini
         grep "CURRENT_FIRMWARE_VERSION=\"\\\\\"${VERSION}\\\\\"\"" platformio.ini
+        # Devices built here look for updates in this repository.
+        echo "PLATFORMIO_BUILD_FLAGS=-DUPDATE_REPO='\"${GITHUB_REPOSITORY}\"'" >> "$GITHUB_ENV"
 
     - name: Build firmware
       run: |
@@ -68,6 +76,7 @@ jobs:
         ls -l .pio/build/adafruit_feather_esp32s3_reversetft/*.bin
         test -f .pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin
         test -f .pio/build/adafruit_feather_esp32s3_reversetft/deskhog-full.bin
+        test -f .pio/build/updater/firmware.bin
 
     - name: Name the files
       env:
@@ -76,8 +85,34 @@ jobs:
         mkdir -p release
         cp .pio/build/adafruit_feather_esp32s3_reversetft/deskhog-full.bin "release/deskhog-${VERSION}-full.bin"
         cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.bin "release/deskhog-${VERSION}-update.bin"
+        cp .pio/build/updater/firmware.bin "release/deskhog-${VERSION}-updater.bin"
         cp .pio/build/adafruit_feather_esp32s3_reversetft/firmware.elf "release/deskhog-${VERSION}.elf"
         (cd release && sha256sum *.bin > sha256.txt && cat sha256.txt)
+
+    # What a device's web page reads to offer this release. `layout` is the flash
+    # layout the file is for (the comment at the top of partitions.csv names it).
+    - name: Describe the update
+      env:
+        VERSION: ${{ steps.get_version.outputs.VERSION }}
+        TAG: ${{ github.event.release.tag_name }}
+      run: |
+        mkdir -p channel
+        cp "release/deskhog-${VERSION}-update.bin" channel/deskhog-update.bin
+        LAYOUT=$(grep -m1 -o 'layout [0-9]*' partitions.csv | grep -o '[0-9]*')
+        python3 - <<PY
+        import hashlib, json, os
+        data = open("channel/deskhog-update.bin", "rb").read()
+        tag = "${TAG}" or "v${VERSION}"
+        json.dump({
+            "version": "${VERSION}",
+            "layout": int("${LAYOUT}"),
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "file": "deskhog-update.bin",
+            "notes": "https://github.com/%s/releases/tag/%s" % (os.environ["GITHUB_REPOSITORY"], tag),
+        }, open("channel/latest.json", "w"), indent=2)
+        PY
+        cat channel/latest.json
 
     - name: Keep the files with this run
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -91,3 +126,21 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ github.event.release.tag_name }}
       run: gh release upload "$TAG" release/*.bin release/sha256.txt --clobber --repo "$GITHUB_REPOSITORY"
+
+    - name: Offer the update to devices
+      if: github.event_name == 'release' && !github.event.release.prerelease
+      env:
+        VERSION: ${{ steps.get_version.outputs.VERSION }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git fetch origin firmware:firmware 2>/dev/null || true
+        git worktree add --detach ../firmware-branch
+        cd ../firmware-branch
+        # One commit, always: the branch holds the newest firmware and no history of 2 MB files.
+        git checkout --orphan firmware-new
+        git rm -rf --quiet . || true
+        cp "$GITHUB_WORKSPACE"/channel/* .
+        git add latest.json deskhog-update.bin
+        git commit --quiet -m "Firmware ${VERSION}"
+        git push --force origin firmware-new:firmware

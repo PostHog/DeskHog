@@ -196,6 +196,7 @@ function showPage(name, remember) {
         renderCards();
     }
     ui.page = name;
+    if (name === 'device') checkFirmware();
     for (const page of PAGES) $('page-' + page).hidden = page !== name;
     document.querySelectorAll('.tabs a').forEach(link => {
         if (link.dataset.page === name) link.setAttribute('aria-current', 'page');
@@ -1622,6 +1623,180 @@ function renderAbout() {
         if (state.system) add('Memory free', kb(state.system.psram_free) + ' for plugins, ' + kb(state.system.heap_free) + ' internal');
     }
     $('about-list').replaceChildren(...rows);
+    renderFirmware();
+    checkFirmware();
+}
+
+// ------------------------------------------------------------------ firmware
+//
+// Updating the firmware over WiFi. The device has no room for its firmware
+// twice, so it has a small second one, the updater. This page fetches the new
+// firmware (the device itself never goes looking), asks the device to restart
+// into its updater, and hands the file over. The updater writes it and
+// restarts. When that fails the device stays in its updater, where it can be
+// tried again; opened there, the device's address shows the updater's own page.
+
+const firmware = { latest: null, checked: false, busy: false, text: '', failed: null, pending: null, drawn: null };
+var firmwarePause = 2000; // ms between looks while the device restarts
+
+/** What the device says about its firmware, or null on firmware that cannot be updated this way. */
+function firmwareInfo() {
+    const status = state && state.device && state.device.status;
+    return status && status.firmware ? status : null;
+}
+
+function newerVersion(a, b) {
+    const parts = v => String(v).split(/[.-]/).map(Number);
+    const x = parts(a), y = parts(b);
+    for (let i = 0; i < 3; i++) {
+        if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+    }
+    return false;
+}
+
+const firmwareAddress = file => 'https://raw.githubusercontent.com/' + firmwareInfo().update_repo + '/firmware/' + file;
+
+/** Once per visit: ask what the newest release is. Without internet there is simply no offer. */
+async function checkFirmware() {
+    const info = firmwareInfo();
+    // Only when someone is on the Device page: nothing is fetched while nobody looks.
+    if (ui.page !== 'device' || !info || firmware.checked || info.layout !== 2 || !info.update_repo) return;
+    firmware.checked = true;
+    try {
+        const response = await fetch(firmwareAddress('latest.json'), { cache: 'no-store' });
+        if (response.ok) firmware.latest = JSON.parse(await response.text());
+    } catch (error) {
+        firmware.latest = null;
+    }
+    renderFirmware();
+}
+
+function renderFirmware() {
+    const info = firmwareInfo();
+    const latest = firmware.latest;
+    const fits = info && latest && latest.layout === info.layout;
+    const offer = fits && newerVersion(latest.version, info.firmware) ? latest : null;
+    // The newest release once more, over what is there: the same version, or a build of your own.
+    const again = fits && !offer ? latest : null;
+    // Only redraw when something changed: a file dialog may be open.
+    const drawn = JSON.stringify([info && [info.firmware, info.layout], offer && offer.version, again && again.version, !!latest, firmware.busy, firmware.text, firmware.failed]);
+    if (drawn === firmware.drawn) return;
+    firmware.drawn = drawn;
+    const box = $('firmware-box');
+    const hint = (...parts) => el('p', { class: 'hint' }, ...parts);
+    if (!info) {
+        box.replaceChildren(hint('Plugins update over WiFi, from this page. Firmware updates are installed over USB: ',
+            el('a', { href: 'https://github.com/TimBroddin/DeskHog/releases/latest', target: '_blank', rel: 'noopener' }, 'see the latest release'), ' for the file and how to install it.'));
+        return;
+    }
+    if (info.layout !== 2) {
+        box.replaceChildren(hint('Firmware updates over WiFi need the newer flash layout. Moving this device to it is done once, over USB, and keeps your plugins and cards: run ',
+            el('code', {}, 'tools/deskhog migrate'), ' from the DeskHog source.'));
+        return;
+    }
+    if (firmware.busy) {
+        box.replaceChildren(el('p', { class: 'hint', role: 'status', id: 'firmware-progress' }, firmware.text));
+        return;
+    }
+    const picker = el('input', { type: 'file', accept: '.bin', hidden: true, id: 'firmware-file' });
+    picker.addEventListener('change', () => {
+        const file = picker.files[0];
+        if (file && window.confirm('Install ' + file.name + ' as the firmware of this DeskHog? It restarts and is back in about two minutes.')) installFirmware(file, '', '');
+    });
+    const parts = [];
+    if (firmware.failed) {
+        parts.push(el('p', { class: 'hint error', id: 'firmware-error' }, 'The update did not work: ' + firmware.failed));
+        if (firmware.pending) parts.push(el('div', { class: 'row-buttons' }, el('button', { type: 'button', id: 'firmware-retry', onclick: () => installFirmware(firmware.pending.file, firmware.pending.sha256, firmware.pending.version) }, 'Try again')));
+    } else if (offer) {
+        parts.push(hint('Firmware ' + offer.version + ' is available. ',
+            offer.notes ? el('a', { href: offer.notes, target: '_blank', rel: 'noopener' }, 'What is new') : null));
+    } else if (again) {
+        parts.push(hint(again.version === info.firmware ? 'This is the newest firmware.' : 'This firmware is newer than the latest release, ' + again.version + '.'));
+    }
+    parts.push(el('div', { class: 'row-buttons' },
+        offer && !firmware.failed ? el('button', { type: 'button', class: 'primary', id: 'firmware-update', onclick: () => updateToLatest('Update this DeskHog to firmware ' + offer.version + '?') }, 'Update to ' + offer.version) : null,
+        again && !firmware.failed ? el('button', { type: 'button', id: 'firmware-reinstall', onclick: () => updateToLatest(again.version === info.firmware
+            ? 'Install firmware ' + again.version + ' again?'
+            : 'Replace firmware ' + info.firmware + ' with the newest release, ' + again.version + '?') }, again.version === info.firmware ? 'Reinstall firmware' : 'Install release ' + again.version) : null,
+        el('button', { type: 'button', id: 'firmware-choose', onclick: () => picker.click() }, 'Install a firmware file...'), picker));
+    box.replaceChildren(...parts);
+}
+
+function firmwareSay(text) {
+    firmware.busy = true;
+    firmware.text = text;
+    renderFirmware();
+}
+
+function firmwareFailed(error) {
+    firmware.busy = false;
+    firmware.failed = error.message;
+    renderFirmware();
+}
+
+/** GET /api/status, from the firmware or from the updater; null while the device is away. */
+async function firmwareStatus() {
+    try {
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        return response.ok ? JSON.parse(await response.text()) : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function waitForFirmware(wanted, tries) {
+    for (let i = 0; i < tries; i++) {
+        await new Promise(resolve => setTimeout(resolve, firmwarePause));
+        const status = await firmwareStatus();
+        if (status && wanted(status)) return status;
+    }
+    return null;
+}
+
+async function updateToLatest(question) {
+    const latest = firmware.latest;
+    if (!window.confirm(question + ' It restarts and is back in about two minutes. Plugins, cards and settings stay.')) return;
+    firmware.failed = null;
+    firmwareSay('Downloading firmware ' + latest.version + '...');
+    try {
+        const response = await fetch(firmwareAddress(latest.file), { cache: 'no-store' });
+        if (!response.ok) throw new Error('The firmware could not be downloaded (' + response.status + ').');
+        const data = new Uint8Array(await response.arrayBuffer());
+        if (latest.size && data.length !== latest.size) throw new Error('The download is incomplete. Try again.');
+        await installFirmware(new Blob([data]), latest.sha256 || '', latest.version);
+    } catch (error) {
+        firmwareFailed(error.message === 'Failed to fetch' ? new Error('The firmware could not be downloaded.') : error);
+    }
+}
+
+async function installFirmware(file, sha256, version) {
+    firmware.failed = null;
+    firmware.pending = { file, sha256, version };
+    try {
+        let status = await firmwareStatus();
+        if (!status || !status.updater) {
+            firmwareSay('Restarting the DeskHog into its updater...');
+            await api('POST', '/api/update/start', {});
+            status = await waitForFirmware(s => s.updater, 45);
+            if (!status) throw new Error('The DeskHog did not come back in its updater. Reload this page in a moment.');
+        }
+        if (status.slot_size && file.size > status.slot_size) throw new Error('That file is too large to be firmware for this device.');
+        firmwareSay('Installing' + (version ? ' firmware ' + version : '') + '. This takes about a minute. Do not unplug the DeskHog.');
+        const body = new FormData();
+        body.append('firmware', file, 'firmware.bin');
+        await api('POST', '/api/firmware?size=' + file.size + (sha256 ? '&sha256=' + sha256 : ''), body);
+        firmwareSay('Installed. The DeskHog is restarting...');
+        const back = await waitForFirmware(s => !s.updater, 60);
+        firmware.busy = false;
+        firmware.pending = null;
+        if (!back) throw new Error('The firmware was installed, but the DeskHog has not come back yet. Reload this page in a moment.');
+        await refresh();
+        const now = firmwareInfo();
+        notify('The DeskHog now runs firmware ' + (now ? now.firmware : version) + '.');
+        renderFirmware();
+    } catch (error) {
+        firmwareFailed(error);
+    }
 }
 
 // ------------------------------------------------------------------ start

@@ -81,6 +81,10 @@ function makeDevice() {
         directory: { source: 'TimBroddin/DeskHog', default: 'TimBroddin/DeskHog' },
         timezone: { posix: 'UTC0', name: '' },   // as on a new device
         restarts: 0,         // how often the page asked for a restart
+        // The firmware and its updater. `inUpdater` is the device after POST /api/update/start;
+        // `failUploads` makes that many uploads fail, as a broken connection would.
+        firmware: { version: '0.4.0', layout: 2, repo: 'TimBroddin/DeskHog', inUpdater: false, failUploads: 0, installed: [] },
+        release: { version: '0.5.0', layout: 2, size: 12, sha256: 'abc123', file: 'deskhog-update.bin', notes: 'https://example.com/notes' },
         device: {            // the device's own settings, as a new one has them; see POST /api/device
             name: 'deskhog',
             screen: { day: 80, night: 10 },
@@ -156,6 +160,9 @@ function makeDevice() {
     const deviceNow = () => {
         const now = JSON.parse(JSON.stringify(device.device));
         now.status.battery = now.battery && now.status.gauge ? now.status.gauge : null;
+        if (device.firmware) {
+            Object.assign(now.status, { firmware: device.firmware.version, layout: device.firmware.layout, update_repo: device.firmware.repo, firmware_room: 2228224 });
+        }
         return now;
     };
     // As the firmware does: kinds are checked strictly, nothing is changed unless everything is right.
@@ -214,6 +221,27 @@ function makeDevice() {
     device.handle = (method, url, body) => {
         const [pathname, query] = url.split('?');
         const params = new URLSearchParams(query || '');
+        if (device.firmware && device.firmware.inUpdater) {
+            // The updater answers only this much.
+            const updater = { updater: true, version: '1', main_intact: true, slot_size: 2228224, error: '' };
+            if (method === 'GET' && pathname === '/api/status') return json(updater);
+            if (method === 'POST' && pathname === '/api/firmware') {
+                if (device.firmware.failUploads > 0) {
+                    device.firmware.failUploads--;
+                    return json(Object.assign(updater, { main_intact: false, error: 'The connection was lost.' }), 400);
+                }
+                device.firmware.installed.push({ size: params.get('size'), sha256: params.get('sha256') });
+                device.firmware.version = params.get('sha256') === device.release.sha256 ? device.release.version : 'custom';
+                device.firmware.inUpdater = false;
+                return json(updater);
+            }
+            return { status: 404, body: 'The updater has no such page.' };
+        }
+        if (method === 'POST' && pathname === '/api/update/start') {
+            if (device.firmware.layout !== 2) return json({ ok: false, error: 'This device has the old flash layout' }, 409);
+            device.firmware.inUpdater = true;
+            return json({ ok: true });
+        }
         if (method === 'GET' && pathname === '/api/state') return json(device.state());
         if (method === 'GET' && pathname === '/api/device') return json(deviceNow());
         if (method === 'POST' && pathname === '/api/device') return postDevice(body);
@@ -393,6 +421,9 @@ function makeDevice() {
     device.fetchOutside = url => {
         device.outside.push(url);
         if (!device.internet) return null; // no connection
+        const firmwareBase = 'https://raw.githubusercontent.com/TimBroddin/DeskHog/firmware/';
+        if (url === firmwareBase + 'latest.json') return device.release ? { status: 200, body: JSON.stringify(device.release) } : { status: 404, body: 'Not found' };
+        if (url === firmwareBase + 'deskhog-update.bin') return { status: 200, body: 'the firmware' };
         const base = 'https://raw.githubusercontent.com/TimBroddin/DeskHog/HEAD/plugins/';
         const path = url.startsWith(base) ? url.slice(base.length) : url.startsWith('https://plugins.example/') ? url.slice('https://plugins.example/'.length) : null;
         if (path === 'index.json') return { status: 200, body: JSON.stringify(device.internet.index) };

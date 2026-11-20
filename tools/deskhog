@@ -23,6 +23,10 @@
     tools/deskhog device                     the device's own settings: name, brightness, night hours, auto-rotate, battery
     tools/deskhog device screen.night=5 night.enabled=yes   change some of them (keys as `device` prints them)
     tools/deskhog restart                    restart the device and wait until it answers again
+    tools/deskhog update                     install the newest firmware release, over WiFi
+    tools/deskhog update firmware.bin        install this firmware file (e.g. .pio/build/<env>/firmware.bin)
+    tools/deskhog migrate --port /dev/...    once per device, over USB: move it to the flash layout that
+                                             can update over WiFi, keeping its plugins, cards and settings
     tools/deskhog sim weather.lua            run a plugin on this computer and save a screenshot
     tools/deskhog image walk1.png walk2.png  turn PNG files into gfx.image() source for a plugin
 
@@ -631,6 +635,215 @@ def command_restart(device, args):
     raise DeviceError("the device did not answer within 30 seconds. Check it, or its new address if you renamed it.")
 
 
+# ------------------------------------------------------------------ firmware
+#
+# The device cannot hold its firmware twice, so it has a small second firmware,
+# the updater, in a slot of its own (partitions.csv, updater/). An update goes:
+# ask the device to restart into the updater, send the file to the updater,
+# wait for the device to come back. A failed update leaves the device in its
+# updater, where `deskhog update` can simply be run again.
+
+def version_key(text):
+    return [int(part) if part.isdigit() else 0 for part in re.split(r"[.-]", str(text))[:3]]
+
+
+def updater_status(device):
+    """The updater's status, or None when the device runs its firmware (or is away)."""
+    try:
+        status = json.loads(device.request("GET", "/api/status"))
+    except (DeviceError, ValueError):
+        return None
+    return status if status.get("updater") else None
+
+
+def wait_for(what, seconds, check):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        found = check()
+        if found:
+            return found
+        time.sleep(1)
+    raise DeviceError("%s within %d seconds. Run `deskhog update` again in a moment." % (what, seconds))
+
+
+def multipart(name, filename, data):
+    boundary = "deskhog" + hashlib.sha256(data).hexdigest()[:24]
+    head = ('--%s\r\nContent-Disposition: form-data; name="%s"; filename="%s"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n' % (boundary, name, filename)).encode("ascii")
+    return head + data + ("\r\n--%s--\r\n" % boundary).encode("ascii"), "multipart/form-data; boundary=" + boundary
+
+
+def install_firmware(device, data, label):
+    if len(data) < 1024 or data[0] != 0xE9:
+        raise DeviceError("%s is not a firmware file" % label)
+    digest = hashlib.sha256(data).hexdigest()
+    status = updater_status(device)
+    if not status:
+        device.json("POST", "/api/update/start")
+        print("Restarting into the updater.", flush=True)
+        time.sleep(2)
+        status = wait_for("the device did not come back in its updater", 60, lambda: updater_status(device))
+    if status.get("slot_size") and len(data) > status["slot_size"]:
+        raise DeviceError("%s is %d bytes, more than the %d this device has room for" % (label, len(data), status["slot_size"]))
+    print("Installing %s (%d KB). Do not unplug the device." % (label, len(data) // 1024), flush=True)
+    body, content_type = multipart("firmware", "firmware.bin", data)
+    request = urllib.request.Request(
+        "%s/api/firmware?size=%d&sha256=%s" % (device.base, len(data), digest), data=body, method="POST")
+    request.add_header("Content-Type", content_type)
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            response.read()
+    except urllib.error.HTTPError as error:
+        try:
+            reason = json.loads(error.read().decode("utf-8", "replace")).get("error")
+        except ValueError:
+            reason = None
+        raise DeviceError("the update failed: %s The device is still in its updater: run this again."
+                          % (reason or "the updater refused the file."))
+    except (urllib.error.URLError, OSError) as error:
+        raise DeviceError("the connection broke while installing (%s). The device stays in its updater: run this again."
+                          % getattr(error, "reason", error))
+
+    def firmware_back():
+        try:
+            return device.json("GET", "/api/device").get("status", {}).get("firmware")
+        except DeviceError:
+            return None
+    time.sleep(2)
+    version = wait_for("the firmware was installed, but the device did not come back", 90, firmware_back)
+    print("The device is back, on firmware %s." % version)
+    return 0
+
+
+def command_update(device, args):
+    if args.file:
+        with open(args.file, "rb") as handle:
+            return install_firmware(device, handle.read(), os.path.basename(args.file))
+    if updater_status(device):
+        raise DeviceError("the device is in its updater and cannot say which release it wants. Give the firmware file: deskhog update <file>")
+    try:
+        status = device.json("GET", "/api/device").get("status", {})
+    except DeviceError as error:
+        if error.status == 404:
+            raise DeviceError("this device's firmware is too old to update over WiFi. Install the new one over USB once.")
+        raise
+    if status.get("layout") != 2:
+        raise DeviceError("this device has the old flash layout. Move it over once, over USB: deskhog migrate --port <port>")
+    base = "https://raw.githubusercontent.com/%s/firmware/" % (args.repo or status.get("update_repo"))
+    try:
+        latest = json.loads(fetch(base + "latest.json").decode("utf-8"))
+    except ValueError:
+        raise DeviceError("%slatest.json is not a release description" % base)
+    if latest.get("layout") != status.get("layout"):
+        raise DeviceError("release %s is for another flash layout than this device has" % latest.get("version"))
+    if version_key(latest["version"]) <= version_key(status.get("firmware")) and not args.force:
+        print("The device runs firmware %s, which is the newest." % status.get("firmware"))
+        return 0
+    print("Firmware %s is available (the device runs %s). Downloading." % (latest["version"], status.get("firmware")), flush=True)
+    data = fetch(base + latest["file"])
+    if hashlib.sha256(data).hexdigest() != latest.get("sha256"):
+        raise DeviceError("the download does not match the release's fingerprint. Try again.")
+    return install_firmware(device, data, "firmware " + latest["version"])
+
+
+# Moving a device to the flash layout with an updater. The partition table
+# changes, and plugin storage moves and shrinks, so this goes over USB, once.
+# The storage is read from the device, copied file by file into an image of the
+# new size (tools/repack_storage.py) and written back with everything else. Settings in NVS (WiFi,
+# brightness, time zone) do not move and are not touched.
+
+def platformio_tool(*parts):
+    path = os.path.join(os.path.expanduser("~/.platformio"), *parts)
+    if not os.path.exists(path):
+        raise DeviceError("%s is missing. Build the firmware once with PlatformIO (`pio run`) and try again." % path)
+    return path
+
+
+def partition_csv(root):
+    table = {}
+    with open(os.path.join(root, "partitions.csv")) as handle:
+        for line in handle:
+            columns = [column.strip() for column in line.split("#")[0].split(",")]
+            if len(columns) >= 5:
+                table[columns[0]] = (int(columns[3], 16), int(columns[4], 16))
+    return table
+
+
+def partition_table(data):
+    """The entries of a partition table as it sits in flash: {label: (type, subtype, offset, size)}."""
+    table = {}
+    for at in range(0, len(data) - 31, 32):
+        magic, kind, subtype, offset, size = struct.unpack_from("<HBBII", data, at)
+        if magic != 0x50AA:
+            break
+        label = data[at + 12:at + 28].split(b"\0")[0].decode("ascii", "replace")
+        table[label] = (kind, subtype, offset, size)
+    return table
+
+
+def command_migrate(device, args):
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    build = os.path.join(root, ".pio", "build")
+    python = platformio_tool("penv", "bin", "python")
+    esptool = platformio_tool("packages", "tool-esptoolpy", "esptool.py")
+    boot_app0 = platformio_tool("packages", "framework-arduinoespressif32", "tools", "partitions", "boot_app0.bin")
+    main_env = "adafruit_feather_esp32s3_reversetft"
+    pieces = {name: os.path.join(build, env, name + ".bin") for name, env in
+              (("bootloader", main_env), ("partitions", main_env), ("firmware", main_env))}
+    pieces["updater"] = os.path.join(build, "updater", "firmware.bin")
+    for path in pieces.values():
+        if not os.path.exists(path):
+            raise DeviceError("%s is missing. Build the firmware first: pio run" % path)
+    new = partition_csv(root)
+    for name in ("otadata", "updater", "ota_0", "spiffs"):
+        if name not in new:
+            raise DeviceError("partitions.csv has no %s: this source has no updater to move to" % name)
+
+    def run_esptool(*command):
+        full = [python, esptool, "--chip", "esp32s3", "--port", args.port, "--baud", "460800"] + list(command)
+        if subprocess.call(full) != 0:
+            raise DeviceError("esptool failed. Nothing further was done.")
+
+    work = args.keep or ("deskhog-migrate-" + time.strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(work, exist_ok=True)
+    table_file = os.path.join(work, "old-partitions.bin")
+    print("Reading the device's flash layout.", flush=True)
+    run_esptool("read_flash", "0x8000", "0xC00", table_file)
+    with open(table_file, "rb") as handle:
+        old = partition_table(handle.read())
+    if "spiffs" not in old:
+        raise DeviceError("the device has no plugin storage where DeskHog keeps it. Is this a DeskHog?")
+    if any(kind == 0 and subtype == 0 for kind, subtype, _, _ in old.values()):
+        print("This device already has the layout with an updater. Nothing to move.")
+        return 0
+    _, _, old_offset, old_size = old["spiffs"]
+
+    image = os.path.join(work, "old-storage.bin")
+    print("Reading plugin storage (%d KB). This takes a minute or two." % (old_size // 1024), flush=True)
+    run_esptool("read_flash", hex(old_offset), hex(old_size), image)
+    new_offset, new_size = new["spiffs"]
+    packed = os.path.join(work, "new-storage.bin")
+    if os.path.exists(packed):
+        os.remove(packed)
+    repack = os.path.join(os.path.dirname(os.path.abspath(__file__)), "repack_storage.py")
+    result = subprocess.run([python, repack, image, packed, str(new_size)], capture_output=True, text=True)
+    if result.returncode != 0 or not os.path.exists(packed) or os.path.getsize(packed) != new_size:
+        raise DeviceError("%s. The device was not changed; a copy of its storage is in %s."
+                          % ((result.stderr.strip() or "could not repack the plugin storage").splitlines()[-1], work))
+    print("Plugin storage: %s, copied to its new size (%d KB) and checked. The old storage is kept in %s."
+          % (result.stdout.strip(), new_size // 1024, work))
+    if args.dry_run:
+        print("Dry run: the device was not changed.")
+        return 0
+
+    print("Writing the new layout, the updater, the firmware and the plugin storage.", flush=True)
+    run_esptool("write_flash", "0x0", pieces["bootloader"], "0x8000", pieces["partitions"],
+                hex(new["otadata"][0]), boot_app0, hex(new["updater"][0]), pieces["updater"],
+                hex(new["ota_0"][0]), pieces["firmware"], hex(new_offset), packed)
+    print("Done. The device restarts with its plugins, cards and settings, and can now update over WiFi.")
+    return 0
+
+
 def command_timezone(device, args):
     if args.zone is None:
         zone = device.state().get("timezone") or {}
@@ -952,6 +1165,18 @@ def main():
     sub.set_defaults(run=command_device)
 
     commands.add_parser("restart", help="restart the device and wait until it is back").set_defaults(run=command_restart)
+
+    sub = commands.add_parser("update", help="install new firmware over WiFi: the newest release, or a file")
+    sub.add_argument("file", nargs="?", help="a firmware file; leave out for the newest release")
+    sub.add_argument("--repo", help="owner/repository to take the release from (default: the one the device names)")
+    sub.add_argument("--force", action="store_true", help="install the release even when the device already runs it")
+    sub.set_defaults(run=command_update)
+
+    sub = commands.add_parser("migrate", help="once, over USB: move a device to the flash layout that updates over WiFi")
+    sub.add_argument("--port", required=True, help="the device's serial port, e.g. /dev/cu.usbmodem101")
+    sub.add_argument("--dry-run", action="store_true", help="read and repack the plugin storage, but do not write to the device")
+    sub.add_argument("--keep", help="folder for the copy of the old storage (default: deskhog-migrate-<time>)")
+    sub.set_defaults(run=command_migrate)
 
     sub = commands.add_parser("rm", help="remove a plugin and its cards")
     sub.add_argument("name")

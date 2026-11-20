@@ -67,7 +67,7 @@ You need a computer with Chrome or Edge, and a USB cable that carries data.
 4. In the first row, leave the offset at `0x0`, choose the file you downloaded, and press **Program**.
 5. When it says it is done, press the reset tab. The screen shows a QR code: carry on with [Set it up](#set-it-up).
 
-This is a fresh start: the board forgets its WiFi network and its cards. (Plugins that were installed stay; press **Erase** before Program for a completely empty board.) To keep everything on a board that already runs this firmware, see [Updating](#updating). [Espressif's web flasher](https://espressif.github.io/esptool-js/) does the same job, with the same file and "Flash Address" `0x0`.
+This is a fresh start: the board forgets its WiFi network, its cards and its plugins. To keep everything on a board that already runs this firmware, see [Updating](#updating). [Espressif's web flasher](https://espressif.github.io/esptool-js/) does the same job, with the same file and "Flash Address" `0x0`.
 
 ### From source
 
@@ -77,7 +77,22 @@ Open this folder in [Visual Studio Code](https://code.visualstudio.com/) with th
 
 Plugins update over WiFi: when the directory has a newer version of one you have, the web page offers it.
 
-For new firmware, the device's web page (Device, About) says which version it runs and links to the latest release. Take `deskhog-<version>-update.bin` from it and follow the steps above with one difference: the offset is `0x20000` instead of `0x0`. WiFi, cards and plugins stay as they are. From source, **Upload** does the same.
+Firmware updates over WiFi too. On the device's web page, **Device**, **About** says which version it runs. When a newer release exists it offers **Update to ...**: the browser downloads it, the device restarts into its updater, takes the file, and restarts with the new firmware. It takes about two minutes, and WiFi, cards and plugins stay as they are. The screen shows the progress.
+
+- **Your own build:** **Install a firmware file...** on the same page takes `firmware.bin` from `.pio/build/`, and so does `tools/deskhog update <file>`. `tools/deskhog update` without a file installs the newest release.
+- **When an update fails,** by a lost connection or a pulled plug, the device comes back in its updater and says so on its screen. Press **Try again** on the page, run `tools/deskhog update` again, or open the device's address: the updater has a small page of its own that takes a file. Left alone for five minutes with its firmware still whole, it goes back to that.
+- **Nothing updates by itself,** and the device never looks for updates: your browser does, when you open the Device page.
+- **Anyone on your network can do this,** as they can install plugins and restart the device. There is no login, and firmware files are not signed. Plugins cannot start an update.
+
+**Once, over USB: moving to the layout with an updater.** Firmware up to 0.4.0 has no updater: the flash is laid out differently. The Device page says so when that is the case. To move such a device over with its plugins, cards and settings, build this source (`pio run`) and run:
+
+```
+tools/deskhog migrate --port /dev/cu.usbmodem101     # your board's serial port
+```
+
+It reads the plugin storage from the device, copies it to its new, smaller size (768 KB instead of 1 MB), checks the copy, and only then writes the new layout, the updater, the firmware and the storage. It stops before writing anything when the files do not fit, and keeps what it read in a folder `deskhog-migrate-<time>`. `--dry-run` does everything except the writing.
+
+Over USB without that script, **Upload** from source or `deskhog-<version>-full.bin` at `0x0` both install everything, but the plugins and cards are then gone.
 
 ## Set it up
 
@@ -214,8 +229,8 @@ These are in the directory now. On the device's web page, Get plugins shows them
 <td width="33%" valign="top"><a href="plugins/uptime.lua"><img src="plugins/screenshots/uptime.png" width="233" alt="Uptime"></a><br><b><a href="plugins/uptime.lua">Uptime</a></b><br>Checks up to five web addresses every two minutes. Red LED when one is down</td>
 </tr>
 <tr>
-<td width="33%" valign="top"><a href="plugins/velo.lua"><img src="plugins/screenshots/velo.png" width="233" alt="Velo"></a><br><b><a href="plugins/velo.lua">Velo</a></b><br>Bikes and free docks at your Velo Antwerpen station, or at another bike share&#x27;s</td>
-<td width="33%" valign="top"><a href="plugins/weather.lua"><img src="plugins/screenshots/weather.png" width="233" alt="Weather"></a><br><b><a href="plugins/weather.lua">Weather</a></b><br>The temperature now and today&#x27;s curve, for any number of cities</td>
+<td width="33%" valign="top"><a href="plugins/velo.lua"><img src="plugins/screenshots/velo.png" width="233" alt="Velo"></a><br><b><a href="plugins/velo.lua">Velo</a></b><br>Bikes and free docks at your Velo Antwerpen stations, or at another bike share&#x27;s</td>
+<td width="33%" valign="top"><a href="plugins/weather.lua"><img src="plugins/screenshots/weather.png" width="233" alt="Weather"></a><br><b><a href="plugins/weather.lua">Weather</a></b><br>The temperature now, today in numbers and the coming days, for any number of cities</td>
 <td width="33%" valign="top"><a href="plugins/webhook.lua"><img src="plugins/screenshots/webhook.png" width="233" alt="Webhook"></a><br><b><a href="plugins/webhook.lua">Webhook</a></b><br>A button that calls a web address and lights the LED</td>
 </tr>
 <tr>
@@ -264,10 +279,10 @@ Plugins update over WiFi and the firmware over USB; see [Updating](#updating).
 
 ## Moving from PostHog's firmware
 
-This firmware uses a different flash layout: one firmware slot plus about 1 MB of storage for plugins, where PostHog's has two firmware slots for over-the-air updates. Because of that:
+This firmware uses a different flash layout: one firmware slot, a small updater and 768 KB of storage for plugins, where PostHog's has two firmware slots for over-the-air updates. Because of that:
 
 - **The first install has to go over USB.** To keep your WiFi and card settings, install [from source](#from-source): in PlatformIO, choose **Upload** as usual. Installing [from your browser](#from-your-browser) works too, but starts afresh. (Older firmware lost the newest settings on every USB upload, because one boot file was written into the settings area. That is fixed here; see `fix_otadata_offset.py`.)
-- **Firmware updates are over USB from now on.** Plugins are what updates over WiFi.
+- **Firmware updates go over WiFi again,** through a small updater instead of a second copy of the firmware; see [Updating](#updating). Plugins update over WiFi as well.
 - **Your cards are kept, and ask for their plugin.** The cards that used to be compiled into the firmware (PostHog insights, Max, the question card, Flappy Hog, Paddle, hello world) are plugins now. Cards of those kinds stay in the stack with their settings; until its plugin is installed, a card says so on its screen, and the web page offers to install it with one press.
 - **PostHog settings move to a connection.** The project ID and API key that were device-wide settings become the settings of one PostHog connection, which all your insight cards share. Big numbers, line charts and funnels are supported; other kinds of insight are not yet.
 - The first boot takes a few seconds longer while the plugin storage is set up.

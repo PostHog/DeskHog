@@ -1,15 +1,24 @@
-# DeskHog flash layout (4 MB).
+# DeskHog flash layout (4 MB), layout 2.
 #
-# One firmware slot and a filesystem for Lua plugins. There is no second slot,
-# so firmware updates go over USB rather than over the air; plugins update
-# over WiFi without touching the firmware.
+# Two firmwares and a filesystem for Lua plugins:
 #
-# nvs keeps its old offset and size, so WiFi and card settings survive the
-# move from the previous two-slot layout.
+#   updater  a small firmware that can only join WiFi and write a new main
+#            firmware (updater/). The bootloader starts it whenever otadata
+#            selects nothing, so also when an update was cut short.
+#   ota_0    the main firmware.
+#   spiffs   LittleFS, for plugins and cards.
+#
+# There is no room for the main firmware twice, which is why updates over WiFi
+# go through the updater. See "Flash layout" in tech-details.md.
+#
+# nvs keeps its old offset and size, so WiFi and settings survive a move from
+# an older layout. Plugin storage moved and shrank: `tools/deskhog migrate`
+# carries it over.
 #
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x6000,
 otadata,  data, ota,     0xf000,   0x2000,
 phy_init, data, phy,     0x11000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x2E0000,
-spiffs,   data, spiffs,  0x300000, 0x100000,
+updater,  app,  factory, 0x20000,  0x100000,
+ota_0,    app,  ota_0,   0x120000, 0x220000,
+spiffs,   data, spiffs,  0x340000, 0xC0000,

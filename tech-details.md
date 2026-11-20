@@ -113,14 +113,25 @@ The plugin API is documented in [plugins/README.md](plugins/README.md).
 
 ### Flash layout
 
-The 4 MB flash holds one firmware slot (2.9 MB) and a 1 MB LittleFS partition for plugins; see `partitions.csv`. There is no second firmware slot, so there are no over-the-air firmware updates: firmware goes over USB, plugins go over WiFi.
+The 4 MB flash holds two firmwares and a filesystem; see `partitions.csv`, which calls this layout 2:
 
-Why not both: the usual way to update over the air needs two firmware slots, so that the running firmware can write the new one beside itself. The firmware is about 2.1 MB (2,117,728 bytes of the 3,014,656-byte slot). Two slots for it take 4.2 MB, more than the 3.9 MB there is, which leaves nothing for plugins. Ways to get updates without a cable on this board, none of them built:
+| Slot | Size | Holds |
+|---|---|---|
+| `updater` | 1,024 KB | A small firmware that can only join WiFi and write a new main firmware (`updater/main.cpp`). 965 KB today |
+| `ota_0` | 2,176 KB | The main firmware. 2,079 KB today, so about 97 KB is left to grow; the build fails when it no longer fits |
+| `spiffs` | 768 KB | LittleFS, for plugins and cards |
 
-- A small second firmware that can only join WiFi and receive a file (well under 1 MB). To update, the device restarts into it, takes the new firmware and writes it over the main slot. That would fit as roughly 0.8 MB + 2.2 MB + 0.85 MB for plugins, and a failed update still leaves the small one to try again with.
-- Flashing over USB from a web page (Web Serial) is what the README's install steps use today, with a general-purpose flasher and a file from the release. A page of our own built on [ESP Web Tools](https://esphome.github.io/esp-web-tools/) could make that one button, and keep the settings when updating.
+Why an updater: the usual way to update over the air needs two slots for the firmware, so that the running one can write the new one beside itself. Two times 2.1 MB is more than the 3.9 MB there is. So the firmware is written over itself, by something that is not the firmware.
 
-Every build leaves two files in `.pio/build/<env>/`: `firmware.bin`, the firmware alone, which goes at 0x20000, and `deskhog-full.bin`, made by `merge_firmware.py`, which also holds the bootloader, the partition table and the boot-selection data and goes at 0x0. The full file blanks the settings area on the way, because that lies between its pieces. `.github/workflows/build-release.yml` builds both when a release is created and attaches them to it.
+- **Which one starts.** The bootloader starts `ota_0` when the boot-selection data (`otadata`) names it, and the `updater` slot when that data is blank. `POST /api/update/start` selects the updater and restarts. The updater selects `ota_0` only after a whole file has arrived, the image checks out and the SHA-256 the sender gave matches. An update that is cut short therefore lands in the updater again.
+- **Who brings the file.** The browser (or `tools/deskhog update`) downloads the release and posts it to the updater: `POST /api/firmware?size=<bytes>&sha256=<hex>`, as a form upload. The updater has no TLS, which is what keeps it small. The page is served over plain HTTP, where browsers have no hashing, so the page passes on the hash from the release and the updater does the check.
+- **Where releases are found.** A browser may not download a release's files (no CORS header), so the release workflow also commits `deskhog-update.bin` and `latest.json` to the `firmware` branch, which `raw.githubusercontent.com` serves to any page. `latest.json` is `{version, layout, size, sha256, file, notes}`. The repository is a build setting, `UPDATE_REPO`, which the workflow sets to the repository it runs in; `/api/device` reports it as `status.update_repo`, with `status.firmware` and `status.layout`.
+- **The updater's own API.** `GET /api/status` (`{updater: true, main_intact, writing, written, done, slot_size, error}`), `POST /api/firmware`, `POST /api/restart` (back to the firmware, when that is whole) and `GET /` for its small page. It gives up after five minutes without an upload if the firmware is whole.
+- **Building.** `pio run` builds the main firmware; `updater/include_updater.py` builds the updater when it is missing or stale (`pio run -e updater`) and adds it to what **Upload** flashes and to `deskhog-full.bin`. `pio run -e updater -t upload` flashes the updater alone.
+- **Changing the layout** means every device has to be moved over USB, with `tools/deskhog migrate` (and `tools/repack_storage.py`) changed to match. Raise the layout number in `partitions.csv` when you do: a release is only offered to devices with the same number.
+- **Not done:** the main firmware could rewrite the updater's slot, so the updater could be updated over WiFi too. Today a new updater needs USB. Releases are not signed.
+
+Every build leaves two files in `.pio/build/<env>/`: `firmware.bin`, the firmware alone, which is what an update over WiFi installs (over USB it goes at 0x120000), and `deskhog-full.bin`, made by `merge_firmware.py`, which also holds the bootloader, the partition table and the boot-selection data and goes at 0x0. The full file blanks the settings area on the way, because that lies between its pieces. `.github/workflows/build-release.yml` builds both when a release is created and attaches them to it.
 
 ### LVGL
 
