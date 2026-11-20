@@ -1,9 +1,11 @@
 #pragma once
 
-#include <lvgl.h>  // LVGL core library
+#include <lvgl.h>
+#include <functional>  // LVGL core library
 #include <string>  // For String class (or could be Arduino's String)
 #include "hardware/WifiInterface.h"  // Custom WiFi interface class
-#include "SystemController.h" // Added for ApiState, ControllerState
+#include "SystemController.h" // For ControllerState
+#include "ui/InputHandler.h"
 
 /**
  * @class ProvisioningCard
@@ -14,8 +16,9 @@
  * - Thread-safe label updates using LVGL timers
  * - WiFi status table with custom fonts and styling
  * - QR code generation for WiFi network connection
+ * - ● switches night mode by hand; a line on the status screen says while it applies
  */
-class ProvisioningCard {
+class ProvisioningCard : public InputHandler {
 public:
     /**
      * @brief Construct a new WiFi provisioning card UI component
@@ -79,6 +82,24 @@ public:
      * Thread-safe screen transition.
      */
     void showWiFiStatus();
+
+    /** ● went down on this card (DeskManners decides on its release what it did); ▲ and ▼ move between cards as on any card. UI task. */
+    void setOnCenter(std::function<void()> callback) { _onCenter = std::move(callback); }
+    bool handleButtonPress(uint8_t button_index) override;
+
+    /**
+     * @brief Shows a line about night mode under the status rows
+     *
+     * @param text What to say; "" hides the line. Thread-safe.
+     */
+    void setNightLine(const String& text);
+
+    /**
+     * @brief Shows the battery under the status rows
+     *
+     * @param text The charge, such as "82%"; "" hides the row. Thread-safe.
+     */
+    void setBatteryLine(const String& text);
     
 private:
     /**
@@ -144,6 +165,9 @@ private:
      */
     String escapeString(const String& input);
     
+    /** Run LVGL work on the UI task, holding the LVGL mutex. Safe to call from any task. */
+    static void runOnUiTask(std::function<void()> work);
+
     /**
      * @brief Safely updates a label's text from any thread
      * 
@@ -181,9 +205,11 @@ private:
     lv_obj_t* _signalLabel;       ///< Signal strength text
     lv_obj_t* _versionLabel;      ///< Firmware version text
     lv_obj_t* _topLeftVersionLabel; ///< Firmware version text (on card top-left)
-    lv_obj_t* _apiStatusLabel = nullptr; ///< API Status text label
+    lv_obj_t* _nightLabel;        ///< Night mode by hand, hidden while there is none
+    lv_obj_t* _batteryLabel;      ///< The charge, hidden on a device without a battery
+
+    std::function<void()> _onCenter;
 
     // Helper methods for SystemController integration
     void handleSystemStateChange(const ControllerState& newState);
-    String apiStateToString(ApiState state);
 };

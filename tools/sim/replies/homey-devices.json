@@ -1,0 +1,4 @@
+{"lamp-1":{"id":"lamp-1","name":"Desk lamp","zoneName":"Office","class":"light"},
+ "abc-123":{"id":"abc-123","name":"Thermostat","zoneName":"Living room","class":"thermostat"},
+ "plug-7":{"id":"plug-7","name":"Coffee machine","zoneName":"Kitchen","class":"socket"},
+ "sens-2":{"id":"sens-2","name":"Front door","zoneName":"Hallway","class":"sensor"}}

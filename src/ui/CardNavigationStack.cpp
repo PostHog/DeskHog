@@ -206,9 +206,11 @@ void CardNavigationStack::handleButtonPress(uint8_t button_index) {
     if (!handled) {
         if (button_index == Input::BUTTON_DOWN) {
             nextCard();
+            if (_on_moved_by_hand) _on_moved_by_hand();
         }
         else if (button_index == Input::BUTTON_UP) {
             prevCard();
+            if (_on_moved_by_hand) _on_moved_by_hand();
         }
     }
     

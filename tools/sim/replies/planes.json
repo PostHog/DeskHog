@@ -1,0 +1,11 @@
+{"ac":[
+{"hex":"44d1f3","type":"adsb_icao","flight":"BEL7PC  ","r":"OO-SSR","t":"A319","alt_baro":11475,"gs":251.6,"track":118.6,"lat":51.2521,"lon":4.3412,"dst":2.7,"dir":310.4},
+{"hex":"4ca9b6","type":"adsb_icao","flight":"RYR4KM  ","r":"EI-EKP","t":"B738","alt_baro":36000,"gs":452.1,"track":251.2,"lat":51.1712,"lon":4.5194,"dst":5.0,"dir":122.9},
+{"hex":"485a2c","type":"adsb_icao","flight":"KLM1729 ","r":"PH-EXK","t":"E295","alt_baro":24350,"gs":421.8,"track":201.5,"lat":51.3009,"lon":4.4741,"dst":5.6,"dir":29.6},
+{"hex":"3c66b1","type":"adsb_icao","flight":"DLH4YU  ","r":"D-AIZW","t":"A320","alt_baro":38025,"gs":470.0,"track":276.3,"lat":51.1502,"lon":4.2503,"dst":6.6,"dir":234.2},
+{"hex":"4b19ea","type":"adsb_icao","flight":"EZS17VR ","r":"HB-JXQ","t":"A20N","alt_baro":35000,"gs":441.6,"track":336.9,"lat":51.3002,"lon":4.3220,"dst":8.1,"dir":330.1},
+{"hex":"44a836","type":"adsb_icao","flight":"OOPKB   ","r":"OO-PKB","t":"C172","alt_baro":1975,"gs":96.3,"track":71.0,"lat":51.1921,"lon":4.5972,"dst":7.4,"dir":102.0},
+{"hex":"406a93","type":"adsb_icao","flight":"BAW389  ","r":"G-EUPJ","t":"A319","alt_baro":29600,"gs":402.7,"track":104.4,"lat":51.1318,"lon":4.5689,"dst":7.6,"dir":129.8},
+{"hex":"44cd71","type":"adsb_icao","r":"OO-NSD","t":"EC35","alt_baro":1200,"gs":110.0,"track":12.0,"lat":51.2590,"lon":4.4750,"dst":1.1,"dir":96.0},
+{"hex":"448c1d","type":"adsb_icao","flight":"TUI3BK  ","r":"OO-TUP","t":"B38M","alt_baro":"ground","gs":0.0,"lat":51.1801,"lon":4.4002,"dst":2.4,"dir":180.0}
+],"msg":"No error","now":1794840078.123,"total":9,"ctime":1794840078123,"ptime":0}

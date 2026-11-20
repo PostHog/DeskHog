@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Rebuild the list of time zones in html/portal.js.
+
+The device keeps its time zone as a POSIX TZ string ("CET-1CEST,M3.5.0,M10.5.0/3")
+and has no time zone database. The web page lets people pick a place instead
+("Europe/Brussels") and looks the string up in a table. This writes that table,
+from the time zone database of the computer it runs on (/usr/share/zoneinfo):
+every compiled zone file ends with its POSIX string.
+
+    tools/timezones            rewrite the table in html/portal.js
+    tools/timezones --check    say whether it is up to date, change nothing
+
+Run it when a country changes its clocks, on a computer with a current tz database.
+"""
+
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PORTAL = os.path.join(ROOT, "html", "portal.js")
+ZONEINFO = os.environ.get("ZONEINFO", "/usr/share/zoneinfo")
+START = "// <timezones>"
+END = "// </timezones>"
+
+
+def names():
+    found = set()
+    for table in ("zone1970.tab", "zone.tab"):
+        path = os.path.join(ZONEINFO, table)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as lines:
+            for line in lines:
+                if line.startswith("#") or not line.strip():
+                    continue
+                found.add(line.split("\t")[2].strip())
+    return sorted(found)
+
+
+def posix(name):
+    with open(os.path.join(ZONEINFO, name), "rb") as file:
+        data = file.read()
+    if data[:4] != b"TZif" or data[4:5] == b"\0":
+        return None  # version 1 files have no POSIX string
+    return data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii")
+
+
+def table():
+    lines = [START + " Written by tools/timezones from the tz database. Do not edit by hand.", "const TIME_ZONES = {",
+             '"UTC":"UTC0",']
+    count = 0
+    for name in names():
+        rule = posix(name)
+        if not rule or '"' in rule or "\\" in rule:
+            continue
+        lines.append('"%s":"%s",' % (name, rule))
+        count += 1
+    lines += ["};", END]
+    return "\n".join(lines), count
+
+
+def main():
+    with open(PORTAL, encoding="utf-8") as file:
+        source = file.read()
+    start, end = source.find(START), source.find(END)
+    if start < 0 or end < 0:
+        sys.exit("html/portal.js has no %s ... %s block" % (START, END))
+    text, count = table()
+    if count < 300:
+        sys.exit("only %d zones found in %s: is that a complete tz database?" % (count, ZONEINFO))
+    updated = source[:start] + text + source[end + len(END):]
+    if "--check" in sys.argv:
+        print("up to date" if updated == source else "html/portal.js differs from this computer's tz database")
+        return
+    with open(PORTAL, "w", encoding="utf-8") as file:
+        file.write(updated)
+    print("%d time zones written to html/portal.js" % count)
+
+
+if __name__ == "__main__":
+    main()

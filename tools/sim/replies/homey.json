@@ -1,0 +1,1 @@
+{"id":"abc-123","name":"Thermostat","capabilitiesObj":{"measure_temperature":{"value":20.5,"units":"°C","title":"Temperature"},"onoff":{"value":true,"title":"On"}}}

@@ -1,977 +1,2290 @@
-function showScreen(screenId) {
-    const screens = ['config-screen'];
-    screens.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.add('hidden');
-    });
-    const screenToShow = document.getElementById(screenId);
-    if (screenToShow) screenToShow.classList.remove('hidden');
-    
-    let title = "DeskHog configuration";
-    document.getElementById('page-title').textContent = title;
+'use strict';
+
+// The DeskHog web page. One file, no dependencies: it is served by the device
+// itself and has to work without internet.
+//
+// Three levels, as on the device:
+//   plugin      the code                                   "Weather"
+//   connection  a plugin plus settings its cards share     "PostHog, Work"
+//   card        one screen                                 "Lisbon"
+//
+// Four pages (Cards, Connections, Plugins, Device). Each page with things to
+// change has a list and a pane for the one thing you picked. The pane sits
+// beside the list on a wide screen and covers it on a phone; the CSS decides.
+
+// ---------------------------------------------------------------- helpers
+
+const $ = id => document.getElementById(id);
+
+/** Create an element: el('button', {class: 'primary', onclick: fn}, 'Save') */
+function el(tag, props, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props || {})) {
+        if (value === null || value === undefined || value === false) continue;
+        if (key === 'class') node.className = value;
+        else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+        else if (key === 'hidden' || key === 'disabled' || key === 'checked' || key === 'selected') node[key] = true;
+        else node.setAttribute(key, value);
+    }
+    for (const child of children.flat()) {
+        if (child === null || child === undefined || child === false) continue;
+        node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    }
+    return node;
 }
 
-// Handle WiFi form submission
-function saveWifiConfig() {
-    const form = document.getElementById('wifi-form');
-    const formData = new FormData(form);
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    
-    fetch('/api/actions/save-wifi', { 
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data && data.status === 'queued') {
-            console.log("Save WiFi action successfully queued.", data.message);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = data.message || "Save WiFi initiated. Device will attempt to connect.";
-                globalActionStatusEl.className = 'status-message info';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.textContent === (data.message || "Save WiFi initiated. Device will attempt to connect.")) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 5000);
-            }
-        } else {
-            const errorMessage = (data && data.message) ? data.message : "Failed to initiate WiFi save.";
-            console.error("Failed to initiate WiFi save:", errorMessage);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = errorMessage;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.className.includes('error')) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 7000);
-            }
-        }
-    })
-    .catch(() => {
-        console.error("Communication error trying to save WiFi.");
-        if (globalActionStatusEl) {
-            globalActionStatusEl.textContent = "Communication error trying to save WiFi.";
-            globalActionStatusEl.className = 'status-message error';
-            globalActionStatusEl.style.display = 'block';
-            setTimeout(() => {
-                if (globalActionStatusEl.className.includes('error')) {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }
-            }, 7000);
-        }
-    });
-    
-    return false; 
-}
-
-// Handle device config form submission
-function saveDeviceConfig() {
-    const form = document.getElementById('device-form');
-    const formData = new FormData(form);
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    
-    fetch('/api/actions/save-device-config', { 
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data && data.status === 'queued') {
-            console.log("Save device config action successfully queued.", data.message);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = data.message || "Device configuration save initiated.";
-                globalActionStatusEl.className = 'status-message info';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                     if (globalActionStatusEl.textContent === (data.message || "Device configuration save initiated.")) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 5000);
-            }
-        } else {
-            const errorMessage = (data && data.message) ? data.message : "Failed to initiate device config save.";
-            console.error("Failed to initiate device config save:", errorMessage);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = errorMessage;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    if (globalActionStatusEl.className.includes('error')) {
-                        globalActionStatusEl.style.display = 'none';
-                        globalActionStatusEl.textContent = '';
-                        globalActionStatusEl.className = 'status-message';
-                    }
-                }, 7000);
-            }
-        }
-    })
-    .catch(() => {
-        console.error("Communication error saving device config.");
-        if (globalActionStatusEl) {
-            globalActionStatusEl.textContent = "Communication error saving device config.";
-            globalActionStatusEl.className = 'status-message error';
-            globalActionStatusEl.style.display = 'block';
-            setTimeout(() => {
-                if (globalActionStatusEl.className.includes('error')) {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }
-            }, 7000);
-        }
-    });
-    
-    return false;
-}
-
-// Toggle API key visibility
-function toggleApiKeyVisibility() {
-    const apiKeyInput = document.getElementById('apiKey');
-    apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
-}
-
-// Global variables for card management
-let availableCardTypes = [];
-let configuredCards = [];
-
-// Load card definitions from the device
-async function loadCardDefinitions() {
+async function api(method, url, body, contentType) {
+    const options = { method };
+    if (body !== undefined) {
+        const asIs = typeof body === 'string' || body instanceof FormData || body instanceof Uint8Array;
+        options.body = asIs ? body : JSON.stringify(body);
+        if (!(body instanceof FormData)) options.headers = { 'Content-Type': contentType || 'application/json' };
+    }
+    let response;
     try {
-        const response = await fetch('/api/cards/definitions');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const definitions = await response.json();
-        availableCardTypes = definitions;
-        updateAvailableCardsList();
-        console.log('Loaded', definitions.length, 'card definitions');
+        response = await fetch(url, options);
     } catch (error) {
-        console.error('Failed to load card definitions:', error);
-        // Set empty array as fallback
-        availableCardTypes = [];
+        throw new Error('Could not reach the device.');
     }
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (error) { data = null; }
+    if (!response.ok || (data && (data.ok === false || data.success === false))) {
+        throw new Error((data && (data.error || data.message)) || 'The device answered with an error (' + response.status + ').');
+    }
+    return data === null ? text : data;
 }
 
-// Load configured cards from the device
-async function loadConfiguredCards() {
+let noticeTimer = null;
+function notify(text, isError) {
+    const box = $('notice');
+    box.textContent = text;
+    box.className = 'notice' + (isError ? ' error' : '');
+    box.hidden = false;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { box.hidden = true; }, isError ? 8000 : 4000);
+}
+
+/** Run an action, show what went wrong if it fails. */
+async function attempt(action, doneText) {
     try {
-        const response = await fetch('/api/cards/configured');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        const cards = await response.json();
-        configuredCards = cards;
-        updateCardsListUI();
-        updateAvailableCardsList(); // Update availability status
-        console.log('Loaded', cards.length, 'configured cards');
+        await action();
+        if (doneText) notify(doneText);
+        return true;
     } catch (error) {
-        console.error('Failed to load configured cards:', error);
-        // Set empty array as fallback
-        configuredCards = [];
-        updateCardsListUI();
-        updateAvailableCardsList(); // Update availability status
+        notify(error.message, true);
+        return false;
     }
 }
 
-// Update the available cards list
-function updateAvailableCardsList() {
-    const container = document.getElementById('available-cards-list');
-    if (!container) return;
-    
-    // Handle empty state
-    if (!availableCardTypes || availableCardTypes.length === 0) {
-        if (container.innerHTML !== '<p>No card types available</p>') {
-            container.innerHTML = '<p>No card types available</p>';
-        }
-        return;
-    }
-    
-    // Update existing items or create new ones
-    availableCardTypes.forEach(cardDef => {
-        let cardItem = container.querySelector(`[data-card-type="${cardDef.id}"]`);
-        
-        // Check if this card type is already configured and if it allows multiple instances
-        const existingCount = configuredCards.filter(card => card.type === cardDef.id).length;
-        const canAdd = cardDef.allowMultiple || existingCount === 0;
-        
-        let statusText = '';
-        if (!cardDef.allowMultiple && existingCount > 0) {
-            statusText = 'Already added (single instance)';
-        } else if (existingCount > 0) {
-            statusText = `${existingCount} instance${existingCount > 1 ? 's' : ''} configured`;
-        }
-        
-        if (!cardItem) {
-            // Create new item only if it doesn't exist
-            cardItem = document.createElement('div');
-            cardItem.className = 'available-card-item';
-            cardItem.setAttribute('data-card-type', cardDef.id);
-            
-            cardItem.innerHTML = `
-                <div class="available-card-info">
-                    <div class="available-card-name">${cardDef.name}</div>
-                    <div class="available-card-description">${cardDef.description || cardDef.uiDescription || ''}</div>
-                    <div class="available-card-status"></div>
-                </div>
-                <div class="available-card-actions">
-                    ${cardDef.needsConfigInput ? `
-                        <input type="text" class="config-input" placeholder="${cardDef.configInputLabel}" id="config-${cardDef.id}">
-                    ` : ''}
-                    <button class="add-card-btn" onclick="addCardFromList('${cardDef.id}')" ${!canAdd ? 'style="display:none"' : ''}>
-                        + Add card
-                    </button>
-                </div>
-            `;
-            
-            container.appendChild(cardItem);
-        } else {
-            // Update existing item without destroying input values
-            const statusEl = cardItem.querySelector('.available-card-status');
-            if (statusEl) {
-                statusEl.textContent = statusText;
-            }
-            
-            const addBtn = cardItem.querySelector('.add-card-btn');
-            if (addBtn) {
-                addBtn.style.display = canAdd ? '' : 'none';
-            }
-        }
-    });
-    
-    // Remove any cards that no longer exist in availableCardTypes
-    const existingItems = container.querySelectorAll('[data-card-type]');
-    existingItems.forEach(item => {
-        const cardType = item.getAttribute('data-card-type');
-        if (!availableCardTypes.find(def => def.id === cardType)) {
-            item.remove();
-        }
-    });
-}
+const encode = encodeURIComponent;
 
-// Save card configuration to device
-async function saveCardConfiguration() {
-    try {
-        const response = await fetch('/api/cards/configured', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(configuredCards)
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-            console.log('Card configuration saved successfully');
-            // Reload to reflect changes
-            await loadConfiguredCards();
-        } else {
-            console.error('Failed to save card configuration:', result.message);
-        }
-    } catch (error) {
-        console.error('Error saving card configuration:', error);
-    }
-}
+/** Wide enough for the pane to sit beside the list. */
+const isWide = () => typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 900px)').matches;
 
-// Add new card from the list interface
-function addCardFromList(cardTypeId) {
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    
-    // Find the card definition
-    const cardDef = availableCardTypes.find(def => def.id === cardTypeId);
-    if (!cardDef) {
-        console.error('Card definition not found for type:', cardTypeId);
-        return;
-    }
-    
-    // Get config value if needed
-    let cardConfig = '';
-    if (cardDef.needsConfigInput) {
-        const configInput = document.getElementById(`config-${cardTypeId}`);
-        if (!configInput || !configInput.value.trim()) {
-            // Show error
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = `Please enter a value for ${cardDef.configInputLabel}`;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-                setTimeout(() => {
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                }, 3000);
-            }
-            return;
-        }
-        cardConfig = configInput.value.trim();
-    }
-    
-    // Create new card configuration
-    const newCard = {
-        type: cardTypeId,
-        config: cardConfig,
-        name: cardDef.name,
-        order: configuredCards.length // Add to end
-    };
-    
-    // Add to current configuration
-    configuredCards.push(newCard);
-    
-    // Save to device
-    saveCardConfiguration();
-    
-    // Clear the config input if it exists
-    if (cardDef.needsConfigInput) {
-        const configInput = document.getElementById(`config-${cardTypeId}`);
-        if (configInput) {
-            configInput.value = '';
-        }
-    }
-    
-    // Update the available cards list to reflect new state
-    updateAvailableCardsList();
-    
-    if (globalActionStatusEl) {
-        globalActionStatusEl.textContent = "Card added successfully";
-        globalActionStatusEl.className = 'status-message info';
-        globalActionStatusEl.style.display = 'block';
-        setTimeout(() => {
-            globalActionStatusEl.style.display = 'none';
-            globalActionStatusEl.textContent = '';
-            globalActionStatusEl.className = 'status-message';
-        }, 3000);
-    }
-}
+// ------------------------------------------------------------------ state
 
-// Update the cards list UI with drag-and-drop functionality
-function updateCardsListUI() {
-    const container = document.getElementById('cards-list');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    if (!configuredCards || configuredCards.length === 0) {
-        container.innerHTML = '<p>No cards configured</p>';
-        return;
-    }
-    
-    // Sort cards by order
-    const sortedCards = [...configuredCards].sort((a, b) => a.order - b.order);
-    
-    const list = document.createElement('div');
-    list.className = 'cards-list';
-    
-    sortedCards.forEach((card, index) => {
-        const item = document.createElement('div');
-        item.className = 'card-item';
-        item.draggable = true;
-        item.dataset.cardIndex = index;
-        
-        item.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center;">
-                    <span class="drag-handle">⋮⋮</span>
-                    <div>
-                        <strong>${card.name}</strong>
-                        <br>
-                        <small>Type: ${card.type}${card.config ? ` • Config: ${card.config}` : ''}</small>
-                    </div>
-                </div>
-                <div>
-                    <button onclick="deleteCard(${index})" class="delete-card-btn">Delete</button>
-                </div>
-            </div>
-        `;
-        
-        // Add drag event listeners
-        item.addEventListener('dragstart', handleDragStart);
-        item.addEventListener('dragover', handleDragOver);
-        item.addEventListener('drop', handleDrop);
-        item.addEventListener('dragend', handleDragEnd);
-        item.addEventListener('dragenter', handleDragEnter);
-        item.addEventListener('dragleave', handleDragLeave);
-        
-        list.appendChild(item);
-    });
-    
-    container.appendChild(list);
-}
-
-// Drag and drop variables
-let draggedElement = null;
-let draggedIndex = null;
-
-// Drag event handlers
-function handleDragStart(e) {
-    draggedElement = e.target;
-    draggedIndex = parseInt(e.target.dataset.cardIndex);
-    e.target.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', e.target.outerHTML);
-}
-
-function handleDragOver(e) {
-    if (e.preventDefault) {
-        e.preventDefault();
-    }
-    e.dataTransfer.dropEffect = 'move';
-    return false;
-}
-
-function handleDragEnter(e) {
-    if (e.target !== draggedElement) {
-        e.target.classList.add('drag-over');
-    }
-}
-
-function handleDragLeave(e) {
-    e.target.classList.remove('drag-over');
-}
-
-function handleDrop(e) {
-    if (e.stopPropagation) {
-        e.stopPropagation();
-    }
-    
-    const dropIndex = parseInt(e.target.closest('.card-item').dataset.cardIndex);
-    
-    if (draggedIndex !== dropIndex) {
-        // Reorder the cards
-        const sortedCards = [...configuredCards].sort((a, b) => a.order - b.order);
-        const draggedCard = sortedCards[draggedIndex];
-        
-        // Remove the dragged card from its current position
-        sortedCards.splice(draggedIndex, 1);
-        
-        // Insert it at the new position
-        sortedCards.splice(dropIndex, 0, draggedCard);
-        
-        // Update order values
-        sortedCards.forEach((card, index) => {
-            card.order = index;
-        });
-        
-        // Update the global array
-        configuredCards = sortedCards;
-        
-        // Save and update UI
-        saveCardConfiguration();
-    }
-    
-    return false;
-}
-
-function handleDragEnd(e) {
-    e.target.classList.remove('dragging');
-    
-    // Clean up drag-over classes from all items
-    document.querySelectorAll('.card-item').forEach(item => {
-        item.classList.remove('drag-over');
-    });
-    
-    draggedElement = null;
-    draggedIndex = null;
-}
-
-// Delete a card
-function deleteCard(index) {
-    const sortedCards = [...configuredCards].sort((a, b) => a.order - b.order);
-    const cardToDelete = sortedCards[index];
-    
-    if (!confirm(`Are you sure you want to delete "${cardToDelete.name}"?`)) {
-        return;
-    }
-    
-    // Remove the card from the array
-    configuredCards = configuredCards.filter(card => 
-        card.type !== cardToDelete.type || 
-        card.config !== cardToDelete.config || 
-        card.order !== cardToDelete.order
-    );
-    
-    // Reorder remaining cards
-    configuredCards.forEach((card, idx) => {
-        card.order = idx;
-    });
-    
-    // Save and update UI
-    saveCardConfiguration();
-    
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    if (globalActionStatusEl) {
-        globalActionStatusEl.textContent = "Card deleted successfully";
-        globalActionStatusEl.className = 'status-message info';
-        globalActionStatusEl.style.display = 'block';
-        setTimeout(() => {
-            globalActionStatusEl.style.display = 'none';
-            globalActionStatusEl.textContent = '';
-            globalActionStatusEl.className = 'status-message';
-        }, 3000);
-    }
-}
-
-
-// Refresh network list - UI update part will be in pollApiStatus
-function _updateNetworksListUI(networks) {
-    const select = document.getElementById('ssid');
-    const currentVal = select.value;
-    select.innerHTML = '<option value="">Select a network</option>';
-    
-    if (!networks || networks.length === 0) {
-        select.innerHTML += '<option disabled>No networks found</option>';
-        return;
-    }
-    
-    networks.forEach(network => {
-        const option = document.createElement('option');
-        option.value = network.ssid;
-        
-        let label = network.ssid;
-        if (network.rssi >= -50) label += ' (Excellent)';
-        else if (network.rssi >= -60) label += ' (Good)';
-        else if (network.rssi >= -70) label += ' (Fair)';
-        else label += ' (Poor)';
-        if (network.encrypted) label += ' 🔒';
-        
-        option.textContent = label;
-        if (network.ssid === currentVal) {
-            option.selected = true;
-        }
-        select.appendChild(option);
-    });
-}
-
-function requestScanNetworks() {
-    const globalActionStatusEl = document.getElementById('global-action-status');
-    fetch('/api/actions/start-wifi-scan', { method: 'POST' })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(errData => {
-                    throw new Error(errData.message || `HTTP error ${response.status}`);
-                }).catch(() => {
-                    throw new Error(`HTTP error ${response.status}`);
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.status === 'queued') {
-                console.log("WiFi scan action successfully queued:", data.message);
-                const ssidSelect = document.getElementById('ssid');
-                if (globalActionStatusEl) {
-                    globalActionStatusEl.textContent = data.message || "WiFi scan requested. List will update shortly.";
-                    globalActionStatusEl.className = 'status-message info';
-                    globalActionStatusEl.style.display = 'block';
-                    setTimeout(() => {
-                        if (globalActionStatusEl.textContent === (data.message || "WiFi scan requested. List will update shortly.")) {
-                            globalActionStatusEl.style.display = 'none';
-                            globalActionStatusEl.textContent = '';
-                            globalActionStatusEl.className = 'status-message';
-                        }
-                    }, 5000);
-                }
-                if (ssidSelect && (ssidSelect.options.length <= 1 || ssidSelect.firstChild.value === "")) {
-                     ssidSelect.innerHTML = '<option>Scan requested, list updating...</option>';
-                }
-
-            } else {
-                const errorMessage = `Failed to queue WiFi scan: ${data.message || 'Unexpected server response.'}`;
-                console.error(errorMessage);
-                if (globalActionStatusEl) {
-                    globalActionStatusEl.textContent = errorMessage;
-                    globalActionStatusEl.className = 'status-message error';
-                    globalActionStatusEl.style.display = 'block';
-                }
-                document.getElementById('ssid').innerHTML = '<option>Scan request issue.</option>';
-            }
-        })
-        .catch(error => {
-            console.error('Error requesting network scan:', error.message);
-            if (globalActionStatusEl) {
-                globalActionStatusEl.textContent = `Error requesting scan: ${error.message}`;
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-            }
-            document.getElementById('ssid').innerHTML = '<option value="">Error starting scan</option>';
-        });
-}
-
-// Main function to poll /api/status and update UI
-let lastProcessedAction = null;
-let lastProcessedActionMessage = "";
-let initialDeviceConfigLoaded = false;
-let lastWifiUpdateTime = 0;
-const WIFI_UPDATE_INTERVAL = 10000; // Update WiFi list every 10 seconds
-
-function pollApiStatus() {
-    fetch('/api/status')
-        .then(response => response.json())
-        .then(data => {
-            const portalStatus = data.portal;
-            const globalActionStatusEl = document.getElementById('global-action-status');
-
-            if (portalStatus && globalActionStatusEl) {
-                if (portalStatus.action_in_progress && portalStatus.action_in_progress !== 'NONE') {
-                    globalActionStatusEl.textContent = `Processing: ${portalStatus.action_in_progress.replace(/_/g, ' ').toLowerCase()}...`;
-                    globalActionStatusEl.className = 'status-message info'; 
-                    globalActionStatusEl.style.display = 'block';
-                    lastProcessedAction = null; 
-                }
-                else if (portalStatus.last_action_completed && portalStatus.last_action_completed !== 'NONE') {
-                    const completedActionKey = portalStatus.last_action_completed + '-' + (portalStatus.last_action_status || 'UNKNOWN') + '-' + (portalStatus.last_action_message || 'NO_MSG');
-
-                    if (lastProcessedAction !== completedActionKey) {
-                        console.log(`Action completed: ${portalStatus.last_action_completed}, Status: ${portalStatus.last_action_status}, Msg: ${portalStatus.last_action_message}`);
-
-                        if (portalStatus.last_action_status === 'SUCCESS') {
-                            let successMsg = portalStatus.last_action_message || `${portalStatus.last_action_completed.replace(/_/g, ' ')} successful.`;
-                            if (!portalStatus.last_action_message) {
-                                switch (portalStatus.last_action_completed) {
-                                    case 'SAVE_WIFI': 
-                                        successMsg = 'WiFi configuration saved. Device will attempt to connect.'; 
-                                        if (data.wifi && data.wifi.is_connected) {
-                                            successMsg += ` Connected to ${data.wifi.connected_ssid}.`;
-                                        } else if (data.wifi) {
-                                            successMsg += ' Checking connection...';
-                                        }
-                                        break;
-                                    case 'SAVE_DEVICE_CONFIG': successMsg = 'Device configuration saved.'; break;
-                                    case 'SAVE_INSIGHT': successMsg = 'New insight saved.'; break;
-                                    case 'DELETE_INSIGHT': successMsg = 'Insight deleted.'; break;
-                                }
-                            }
-                            globalActionStatusEl.textContent = successMsg;
-                            globalActionStatusEl.className = 'status-message success';
-                            globalActionStatusEl.style.display = 'block';
-
-                            setTimeout(() => {
-                                if (globalActionStatusEl.textContent === successMsg && !globalActionStatusEl.className.includes('info')) { 
-                                    globalActionStatusEl.style.display = 'none';
-                                    globalActionStatusEl.textContent = '';
-                                    globalActionStatusEl.className = 'status-message';
-                                }
-                            }, 7000); 
-
-                        } else if (portalStatus.last_action_status === 'ERROR') {
-                            const errorMsgText = portalStatus.last_action_message || "An unknown error occurred with " + portalStatus.last_action_completed + ".";
-                            console.error("Action failed:", errorMsgText);
-                            if (globalActionStatusEl) {
-                                globalActionStatusEl.textContent = `Status: ${errorMsgText}`;
-                                globalActionStatusEl.className = 'status-message error';
-                                globalActionStatusEl.style.display = 'block';
-                                setTimeout(() => {
-                                    if (globalActionStatusEl.className.includes('error')) {
-                                        globalActionStatusEl.style.display = 'none';
-                                        globalActionStatusEl.textContent = '';
-                                        globalActionStatusEl.className = 'status-message';
-                                    }
-                                }, 10000); 
-                            }
-                        }
-                        lastProcessedAction = completedActionKey;
-                    }
-                } else {
-                    if (globalActionStatusEl.className.includes('info') && globalActionStatusEl.textContent.startsWith('Processing:')) {
-                    } 
-                }
-            } else if (globalActionStatusEl && portalStatus === null) { 
-                 if (globalActionStatusEl.style.display !== 'none' && !globalActionStatusEl.className.includes('success') && !globalActionStatusEl.className.includes('error')){
-                    globalActionStatusEl.style.display = 'none';
-                    globalActionStatusEl.textContent = '';
-                    globalActionStatusEl.className = 'status-message';
-                 }
-            }
-
-            // 2. Update WiFi Info
-            if (data.wifi) {
-                // Update WiFi networks list only if enough time has passed
-                const currentTime = Date.now();
-                if (currentTime - lastWifiUpdateTime >= WIFI_UPDATE_INTERVAL) {
-                    _updateNetworksListUI(data.wifi.networks);
-                    lastWifiUpdateTime = currentTime;
-                }
-                
-                // Always update connection status
-                const wifiStatusEl = document.getElementById('wifi-connection-status');
-                if (wifiStatusEl) {
-                    if (data.wifi.is_connected) {
-                        wifiStatusEl.textContent = `Connected to ${data.wifi.connected_ssid} (${data.wifi.ip_address})`;
-                    } else if (portalStatus && portalStatus.action_in_progress === 'SAVE_WIFI') {
-                        wifiStatusEl.textContent = "Attempting to connect...";
-                    } else {
-                        wifiStatusEl.textContent = "Not Connected";
-                    }
-                }
-            }
-
-            // 3. Update Device Config Info
-            if (data.device_config) {
-                _updateDeviceConfigUI(data.device_config);
-            }
-
-            
-            // 4a. Refresh card configuration periodically
-            // Note: We refresh cards on successful completion of card-related actions
-            if (portalStatus && portalStatus.last_action_completed && 
-                (portalStatus.last_action_completed.includes('CARD') || 
-                 portalStatus.last_action_status === 'SUCCESS')) {
-                // Refresh card data when actions complete
-                loadConfiguredCards();
-            }
-
-            // 5. Update OTA Firmware Info & UI State
-            if (data.ota) {
-                updateOtaUI(data.ota, data.portal);
-            }
-
-        })
-        .catch(error => {
-            console.error('Error polling /api/status:', error);
-            const globalActionStatusEl = document.getElementById('global-action-status');
-            if(globalActionStatusEl) {
-                globalActionStatusEl.textContent = 'Lost connection to device. Please check and refresh.';
-                globalActionStatusEl.className = 'status-message error';
-                globalActionStatusEl.style.display = 'block';
-            }
-        });
-}
-
-// Load current configuration - UI update part will be in pollApiStatus
-function _updateDeviceConfigUI(config) {
-    if (!initialDeviceConfigLoaded) {
-        if (config.team_id !== undefined) {
-            const teamIdField = document.getElementById('teamId');
-            // Only set value if field exists and is empty
-            if (teamIdField && !teamIdField.value) {
-                teamIdField.value = config.team_id;
-            }
-        }
-        if (config.api_key_display !== undefined) { 
-            const apiKeyField = document.getElementById('apiKey');
-            // Only set value if field exists and is empty
-            if (apiKeyField && !apiKeyField.value) {
-                apiKeyField.value = config.api_key_display;
-            }
-        }
-        if (config.region !== undefined) {
-            // Handle region - set radio button or dropdown depending on UI
-            const regionRadios = document.querySelectorAll('input[name="region"]');
-            regionRadios.forEach(radio => {
-                if (radio.value === config.region) {
-                    radio.checked = true;
-                }
-            });
-            // Also handle dropdown if it exists
-            const regionSelect = document.getElementById('region');
-            if (regionSelect) {
-                regionSelect.value = config.region;
-            }
-        }
-        initialDeviceConfigLoaded = true;
-    }
-}
-
-// Initialize page
-document.addEventListener('DOMContentLoaded', function() {
-    const hash = window.location.hash.substr(1);
-    if (hash && ['config-screen'].includes(hash)) {
-        showScreen(hash);
-    } else {
-        showScreen('config-screen');
-    }
-
-    const checkUpdateBtn = document.getElementById('check-update-btn');
-    const installUpdateBtn = document.getElementById('install-update-btn');
-
-    if (checkUpdateBtn) {
-        checkUpdateBtn.addEventListener('click', requestCheckFirmwareUpdate);
-    }
-    if (installUpdateBtn) {
-        installUpdateBtn.addEventListener('click', requestStartFirmwareUpdate);
-    }
-
-    pollApiStatus();
-    setInterval(pollApiStatus, 3000); // Poll every 3 seconds for responsiveness
-
-    const refreshBtn = document.getElementById('refresh-networks-btn');
-    if(refreshBtn) {
-        refreshBtn.addEventListener('click', requestScanNetworks);
-    }
-    
-    // Initialize card management with a small delay to avoid overwhelming the device
-    setTimeout(() => {
-        loadCardDefinitions();
-        setTimeout(() => {
-            loadConfiguredCards();
-        }, 500);
-    }, 1000);
-});
-
-// Enum for OtaManager::UpdateStatus::State (mirror from C++)
-// This helps in making the JS code more readable when checking status.
-const OTA_STATUS_STATE = {
-    IDLE: 0,
-    CHECKING_VERSION: 1,
-    DOWNLOADING: 2,
-    WRITING: 3,
-    SUCCESS: 4,
-    ERROR_WIFI: 5,
-    ERROR_HTTP_CHECK: 6,
-    ERROR_HTTP_DOWNLOAD: 7,
-    ERROR_JSON: 8,
-    ERROR_UPDATE_BEGIN: 9,
-    ERROR_UPDATE_WRITE: 10,
-    ERROR_UPDATE_END: 11,
-    ERROR_NO_ASSET: 12,
-    ERROR_NO_SPACE: 13
+let state = null;        // GET /api/state
+let deviceStatus = null; // GET /api/status
+const ui = {
+    page: 'cards',
+    openCard: null,       // key of the card in the side pane
+    adding: null,         // null, or {step, plugin, kind}: the side pane shows the "add card" steps
+    openConnection: null, // id of the connection in the side pane
+    openPlugin: null,     // name of the plugin in the editor; '' while it is new and unsaved
+    directorySignature: '',
+    showingDirectory: false, // someone asked for the directory: scroll to it when it is there
+    dragging: false,
+    justDragged: false,
+    choseFirstCard: false,
+    choseFirstConnection: false,
+    cardsSignature: '',
+    cardPaneSignature: '',
+    connectionsSignature: '',
+    connectionPaneSignature: '',
+    pluginsSignature: '',
+    zoneSignature: null,
 };
 
-function requestCheckFirmwareUpdate() {
-    console.log("Requesting firmware update check...");
-    const checkUpdateBtn = document.getElementById('check-update-btn');
-    if(checkUpdateBtn) checkUpdateBtn.disabled = true;
+const pluginByName = name => (state ? state.plugins.find(p => p.name === name) : null);
+const connectionById = id => (state ? state.connections.find(c => c.id === id) : null);
+const cardByKey = key => (state ? state.cards.find(c => c.key === key) : null);
 
-    fetch('/api/actions/check-ota-update', { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'initiated') {
-                console.log('Firmware check initiated.');
-            } else {
-                console.error('Failed to initiate firmware check:', data.message);
-                if(checkUpdateBtn) checkUpdateBtn.disabled = false;
-                const updateStatusTextEl = document.getElementById('update-status-text');
-                if(updateStatusTextEl) updateStatusTextEl.textContent = `${data.message || 'Could not start check.'}`;
-            }
-        })
-        .catch(error => {
-            console.error('Error requesting firmware check:', error);
-            if(checkUpdateBtn) checkUpdateBtn.disabled = false;
-            const updateStatusTextEl = document.getElementById('update-status-text');
-            if(updateStatusTextEl) updateStatusTextEl.textContent = 'Communication error during check request.';
-        });
+/** A connection nobody named is called after its plugin; no need to say that twice. */
+const sameName = (name, plugin) => name === plugin.name || name.toLowerCase() === plugin.title.toLowerCase();
+
+function kindOf(card, plugin) {
+    if (!plugin || !plugin.kinds.length) return null;
+    return plugin.kinds.find(k => k.key === card.kind) || plugin.kinds[0];
 }
 
-function requestStartFirmwareUpdate() {
-    console.log("Requesting firmware update start...");
-    const installUpdateBtn = document.getElementById('install-update-btn');
-    const checkUpdateBtn = document.getElementById('check-update-btn');
-    if(installUpdateBtn) installUpdateBtn.disabled = true;
-    if(checkUpdateBtn) checkUpdateBtn.disabled = true;
-
-    fetch('/api/actions/start-ota-update', { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'initiated') {
-                console.log('Firmware update process initiated.');
-            } else {
-                console.error('Failed to initiate firmware update:', data.message);
-                if(installUpdateBtn) installUpdateBtn.disabled = false;
-                if(checkUpdateBtn) checkUpdateBtn.disabled = false;
-                const updateStatusTextEl = document.getElementById('update-status-text');
-                if(updateStatusTextEl) updateStatusTextEl.textContent = `Error: ${data.message || 'Could not start update.'}`;
-            }
-        })
-        .catch(error => {
-            console.error('Error requesting firmware update start:', error);
-            if(installUpdateBtn) installUpdateBtn.disabled = false;
-            if(checkUpdateBtn) checkUpdateBtn.disabled = false;
-            const updateStatusTextEl = document.getElementById('update-status-text');
-            if(updateStatusTextEl) updateStatusTextEl.textContent = 'Communication error during update request.';
-        });
+/** What a card is called when nobody named it. */
+function defaultCardName(card) {
+    const plugin = pluginByName(card.plugin);
+    if (!plugin) return card.name || 'Card';
+    const kind = kindOf(card, plugin);
+    return plugin.multiCard && kind ? kind.name : plugin.title;
 }
 
-// Helper function to update OTA UI based on status from /api/status
-function updateOtaUI(otaData, portalData) {
-    const currentVersionEl = document.getElementById('current-version');
-    const availableVersionEl = document.getElementById('available-version');
-    const availableVersionContainerEl = document.getElementById('available-version-container');
-    const releaseNotesEl = document.getElementById('release-notes');
-    const updateAvailableSection = document.getElementById('update-available-section');
-    const installUpdateBtn = document.getElementById('install-update-btn');
-    const updateStatusTextEl = document.getElementById('update-status-text');
-    const updateErrorEl = document.getElementById('update-error-message');
-    const checkUpdateBtn = document.getElementById('check-update-btn');
-    const updateProgressContainer = document.getElementById('update-progress-container');
-    const updateProgressBar = document.getElementById('update-progress-bar');
+function cardTitle(card) {
+    if (card.type !== 'PLUGIN') return card.name || card.type;
+    const fallback = defaultCardName(card);
+    const named = card.name && card.name !== fallback && card.name !== card.plugin;
+    // A name someone typed wins. Otherwise use what the plugin calls the card.
+    return named ? card.name : (card.title || fallback);
+}
 
-    let portalOtaMessageDisplayed = false;
-    if (portalData && portalData.portal_ota_action_message) {
-        if (updateStatusTextEl) updateStatusTextEl.textContent = portalData.portal_ota_action_message;
-        portalOtaMessageDisplayed = true;
-        if (portalData.action_in_progress === 'CHECK_OTA_UPDATE' || portalData.action_in_progress === 'START_OTA_UPDATE') {
-            if (checkUpdateBtn) checkUpdateBtn.disabled = true;
-            if (installUpdateBtn) installUpdateBtn.disabled = true;
-        } else {
+function cardSubtitle(card) {
+    if (card.type !== 'PLUGIN') return { text: 'No longer supported', bad: true };
+    const plugin = pluginByName(card.plugin);
+    const connection = connectionById(card.connection);
+    if (!plugin || !connection) return { text: 'Its plugin is missing', bad: true };
+    if (connection.state === 'failed') return { text: 'Crashed: ' + (connection.error || 'unknown error'), bad: true };
+    const parts = [];
+    if (plugin.title !== cardTitle(card)) parts.push(plugin.title);
+    if (plugin.multiCard && !sameName(connection.name, plugin)) parts.push(connection.name);
+    if (card.onScreen) parts.push('on screen now');
+    // Something its plugin said with notify() that nobody has seen yet.
+    const waiting = (state.notifications || []).find(n => n.card === card.config);
+    if (waiting) parts.push(waiting.text ? 'has news: ' + waiting.text : 'has news');
+    return { text: parts.join(', ') };
+}
+
+async function refresh() {
+    if (ui.dragging || document.hidden) return;
+    try {
+        state = await api('GET', '/api/state');
+    } catch (error) {
+        return; // the device is busy or away; the next round will tell
+    }
+    // On a wide screen the pane starts with the card the device is showing.
+    if (!ui.choseFirstCard && state.cards.length) {
+        ui.choseFirstCard = true;
+        if (isWide() && !ui.openCard && !ui.adding) ui.openCard = (state.cards.find(c => c.onScreen) || state.cards[0]).key;
+    }
+    renderCards();
+    renderConnections();
+    renderPlugins();
+    renderDirectory();
+    renderAbout();
+    renderTimeZone();
+    renderDevice();
+    updateScreens();
+    if (ui.page === 'plugins' && ui.openPlugin) showPluginStatus(ui.openPlugin, true);
+}
+
+/** After a change the device rebuilds its cards, which takes a moment. */
+function refreshSoon() {
+    setTimeout(refresh, 700);
+    setTimeout(refresh, 2500);
+}
+
+// ------------------------------------------------------------------ pages
+
+const PAGES = ['cards', 'connections', 'plugins', 'device'];
+
+function showPage(name, remember) {
+    // "#plugins/weather" is the plugins page with that plugin's code open.
+    const [first, detail] = String(name || '').split('/');
+    name = PAGES.includes(first) ? first : 'cards';
+    // ("#plugins/~directory" is an address from when the directory had to be opened first.)
+    if (name === 'plugins' && detail && detail !== '~directory' && detail !== ui.openPlugin) editPlugin(detail);
+    // "#cards/PLUGIN|weather:1" is the cards page with that card in the pane.
+    if (name === 'cards' && detail) {
+        try { ui.openCard = decodeURIComponent(detail); } catch (error) { ui.openCard = null; }
+        ui.choseFirstCard = true;
+        renderCards();
+    }
+    ui.page = name;
+    if (name === 'device') checkFirmware();
+    for (const page of PAGES) $('page-' + page).hidden = page !== name;
+    document.querySelectorAll('.tabs a').forEach(link => {
+        if (link.dataset.page === name) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+    });
+    if (remember) rememberPage();
+    if (state) renderDirectory(); // the plugins page shows the directory: fetch it on the first look
+}
+
+/** Keep the address in step, so reloading comes back to the same place. */
+function rememberPage() {
+    const detail = ui.page === 'plugins' && ui.openPlugin ? '/' + ui.openPlugin
+        : ui.page === 'cards' && ui.openCard && !ui.adding ? '/' + encode(ui.openCard) : '';
+    try { history.replaceState(null, '', '#' + ui.page + detail); } catch (error) { /* a page without history still works */ }
+}
+
+/** A pane's heading, with the button that closes it. */
+function paneHead(title, close) {
+    return el('div', { class: 'pane-head' }, el('h2', {}, title),
+        el('button', { type: 'button', class: 'close', 'aria-label': 'Close', onclick: close }, '✕'));
+}
+
+// ----------------------------------------------------------------- fields
+
+/** How long to wait before asking again for a list the plugin is still working on. */
+function choicePollDelay() { return 400; }
+
+/**
+ * What a plugin offers for a setting that has `choices`: [{value, label}].
+ * The plugin may have to ask the network first, so the device answers
+ * "pending" until it knows; ask again until it does.
+ * @param form What the form holds right now, saved or not: the plugin's function gets it, so a list can
+ *             depend on another setting. It goes in the address, so that asking again is the same request.
+ */
+async function fetchChoices(source, key, form) {
+    const settings = form && Object.keys(form).length ? JSON.stringify(form) : '';
+    const url = '/api/connections/choices?id=' + encode(source.connection) + '&field=' + encode(key)
+        + (source.kind ? '&kind=' + encode(source.kind) : '')
+        + (settings && settings.length <= 1024 ? '&settings=' + encode(settings) : ''); // the device takes 1 KB
+    for (let tries = 0; tries < 40; tries++) {
+        const answer = await api('GET', url);
+        if (answer && !answer.pending) return answer.choices || [];
+        await new Promise(resolve => setTimeout(resolve, choicePollDelay()));
+    }
+    throw new Error('The plugin did not answer in time.');
+}
+
+/**
+ * A setting whose choices the plugin lists: a dropdown filled in by the
+ * device, with a Refresh button. When there is no list (the plugin could not
+ * say, or the connection does not exist yet) it is a text box instead.
+ * @param source {connection, kind}: whose list to ask for. Null while there is no connection to ask.
+ */
+function choiceField(field, current, source) {
+    const text = el('input', { type: 'text', value: current, placeholder: field.default, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    const select = el('select', { hidden: true });
+    const refresh = el('button', { type: 'button' }, 'Refresh');
+    const note = el('small', {});
+    // Whichever of the two shows is the one readFields() reads.
+    const use = input => {
+        for (const other of [text, select]) {
+            other.hidden = other !== input;
+            if (other === input) other.dataset.key = field.key; else delete other.dataset.key;
         }
-    }
-
-    if (currentVersionEl) currentVersionEl.textContent = otaData.current_firmware_version || 'N/A';
-    
-    if (availableVersionContainerEl && availableVersionEl) {
-        if (otaData.update_available && otaData.available_version && otaData.available_version !== 'N/A') {
-            availableVersionEl.textContent = otaData.available_version;
-            availableVersionContainerEl.style.display = '';
-        } else {
-            availableVersionEl.textContent = 'N/A';
-            availableVersionContainerEl.style.display = 'none';
-        }
-    }
-
-    if (releaseNotesEl) releaseNotesEl.textContent = otaData.update_available ? (otaData.release_notes || 'No release notes.') : '';
-
-    if (updateAvailableSection) updateAvailableSection.style.display = otaData.update_available ? 'block' : 'none';
-    
-    if (installUpdateBtn) {
-        installUpdateBtn.disabled = !otaData.update_available || 
-                                  (portalData && (portalData.action_in_progress === 'START_OTA_UPDATE' || portalData.action_in_progress === 'CHECK_OTA_UPDATE')) ||
-                                  otaData.status_code === OTA_STATUS_STATE.DOWNLOADING || 
-                                  otaData.status_code === OTA_STATUS_STATE.WRITING;
-    }
-    
-    if (checkUpdateBtn) {
-        checkUpdateBtn.disabled = (portalData && (portalData.action_in_progress === 'CHECK_OTA_UPDATE' || portalData.action_in_progress === 'START_OTA_UPDATE')) ||
-                                otaData.status_code === OTA_STATUS_STATE.CHECKING_VERSION || 
-                                otaData.status_code === OTA_STATUS_STATE.DOWNLOADING || 
-                                otaData.status_code === OTA_STATUS_STATE.WRITING;
-    }
-
-    if (!portalOtaMessageDisplayed || (portalData && portalData.portal_ota_action_message && portalData.portal_ota_action_message.includes("Successfully dispatched"))) {
-        if (updateStatusTextEl) {
-            let displayMessage = otaData.status_message || 'Idle';
-            if (portalOtaMessageDisplayed && otaData.status_message && otaData.status_message !== "Idle") {
-                updateStatusTextEl.textContent = displayMessage;
-            } else if (!portalOtaMessageDisplayed) {
-                 updateStatusTextEl.textContent = displayMessage;
+    };
+    use(text);
+    const label = el('label', { class: 'field' }, el('span', {}, field.label), el('div', { class: 'pick' }, text, select, refresh), note);
+    const load = async () => {
+        const value = select.hidden ? text.value : select.value;
+        refresh.disabled = true;
+        note.textContent = 'Asking the plugin what there is to pick from…';
+        try {
+            // The fields next to this one, as they are filled in right now. Secrets stay here.
+            const list = await fetchChoices(source, field.key, readFields(label.parentElement, true));
+            const listed = wanted => list.some(choice => choice.value === wanted);
+            const options = list.map(choice => el('option', { value: choice.value, selected: choice.value === value }, choice.label || choice.value));
+            // A setting that may be left empty can always be emptied again.
+            const optional = field.default === '';
+            // What is saved stays, also when the plugin no longer lists it.
+            if (!listed(value) && !(optional && value === '')) {
+                options.unshift(el('option', { value, selected: true }, value ? value + ' (not in the list)' : 'Choose…'));
             }
+            if (optional && !listed('')) options.unshift(el('option', { value: '', selected: value === '' }, '—'));
+            select.replaceChildren(...options);
+            use(select);
+            note.textContent = list.length ? '' : 'The plugin has nothing to pick from right now.';
+        } catch (error) {
+            text.value = value;
+            use(text);
+            note.textContent = 'No list to pick from: ' + error.message + ' You can type the value instead.';
         }
-    }
-    
-    if (updateErrorEl) {
-        updateErrorEl.textContent = otaData.error_message || '';
-    }
-
-    if (otaData.status_code === OTA_STATUS_STATE.DOWNLOADING || otaData.status_code === OTA_STATUS_STATE.WRITING) {
-        if (updateProgressContainer) updateProgressContainer.style.display = 'block';
-        if (updateProgressBar) updateProgressBar.style.width = `${otaData.progress || 0}%`;
+        refresh.disabled = false;
+    };
+    if (source && source.connection) {
+        refresh.addEventListener('click', load);
+        // Once the form is put together, so that the first list knows the other fields too.
+        Promise.resolve().then(load);
     } else {
-        if (otaData.status_code !== OTA_STATUS_STATE.SUCCESS && updateProgressContainer) {
-        }
+        // The list comes from the plugin running with this connection's settings, and that does not exist yet.
+        refresh.hidden = true;
+        note.textContent = 'Type it for now. Once the card is added, this becomes a list to pick from.';
     }
-    
-    if (otaData.status_code === OTA_STATUS_STATE.SUCCESS) {
-        if (updateStatusTextEl) updateStatusTextEl.textContent = otaData.status_message || 'Update successful! Device will reboot.';
-        if (updateProgressBar) updateProgressBar.style.width = '100%';
-        if (updateProgressContainer) updateProgressContainer.style.display = 'block';
-        if (installUpdateBtn) installUpdateBtn.disabled = true;
-        if (checkUpdateBtn) checkUpdateBtn.disabled = true;
+    return label;
+}
+
+/**
+ * One form field for a plugin setting.
+ * @param source For a setting the plugin lists the choices for: {connection, kind}, see choiceField().
+ */
+function fieldInput(field, value, secretIsSet, source) {
+    const current = value === undefined || value === null ? field.default : value;
+    let input;
+    if (field.choices) {
+        return choiceField(field, current, source);
+    } else if (field.options && field.options.length) {
+        input = el('select', {}, field.options.map(option => el('option', { value: option, selected: option === current }, option)));
+    } else if (field.type === 'boolean') {
+        input = el('input', { type: 'checkbox', checked: current === 'true' });
+        input.dataset.key = field.key;
+        input.dataset.kind = 'boolean';
+        return el('label', { class: 'field check' }, input, el('span', {}, field.label));
+    } else if (field.type === 'timezone') {
+        // The plugin gets a POSIX string; people pick a place. Empty means the device's own zone.
+        input = zoneSelect(current, '', 'Same as the DeskHog');
+        input.dataset.kind = 'timezone';
+    } else if (field.secret) {
+        input = el('input', { type: 'password', autocomplete: 'off', placeholder: secretIsSet ? 'Saved. Leave empty to keep it.' : '' });
+        input.dataset.kind = 'secret';
+    } else {
+        input = el('input', {
+            type: 'text', value: current, placeholder: field.default, autocomplete: 'off', autocapitalize: 'off',
+            spellcheck: 'false', inputmode: field.type === 'number' ? 'decimal' : null,
+        });
+    }
+    input.dataset.key = field.key;
+    return el('label', { class: 'field' }, el('span', {}, field.label), input);
+}
+
+function fieldInputs(fields, values, secretsSet, source) {
+    return (fields || []).map(field => fieldInput(field, (values || {})[field.key], (secretsSet || []).includes(field.key), source));
+}
+
+/**
+ * Read the values back out of fields made by fieldInputs().
+ * @param withoutSecrets Leave out what was typed into a secret field.
+ */
+function readFields(container, withoutSecrets) {
+    const values = {};
+    if (!container) return values;
+    container.querySelectorAll('[data-key]').forEach(input => {
+        if (withoutSecrets && input.dataset.kind === 'secret') return;
+        if (input.dataset.kind === 'boolean') values[input.dataset.key] = input.checked ? 'true' : 'false';
+        else if (input.dataset.kind === 'secret') { if (input.value) values[input.dataset.key] = input.value; }
+        else if (input.dataset.kind === 'timezone') values[input.dataset.key] = zoneValue(input).posix;
+        else values[input.dataset.key] = input.value;
+    });
+    return values;
+}
+
+// ------------------------------------------------------------- time zones
+
+// The device keeps a time zone as a POSIX string ("CET-1CEST,M3.5.0,M10.5.0/3")
+// and has no list of places. This page has the list (TIME_ZONES, at the end
+// of this file): people pick "Europe/Brussels", the device gets the string.
+
+/** The time zone of the computer or phone showing this page, if the list has it. */
+function browserZone() {
+    try {
+        const name = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return TIME_ZONES[name] ? name : '';
+    } catch (error) {
+        return '';
     }
 }
+
+/** Many places share a POSIX string. Which one to show: the one that was picked, else where this browser is, else the first. */
+function zoneNameFor(posix, picked) {
+    if (!posix) return '';
+    if (picked && TIME_ZONES[picked] === posix) return picked;
+    const here = browserZone();
+    if (here && TIME_ZONES[here] === posix) return here;
+    return Object.keys(TIME_ZONES).find(name => TIME_ZONES[name] === posix) || '';
+}
+
+const zoneLabel = name => name.slice(name.indexOf('/') + 1).replace(/_/g, ' ').replace(/\//g, ', ');
+
+/**
+ * A dropdown of places, by continent. Read the choice back with zoneValue().
+ * @param posix  The saved POSIX string.
+ * @param picked The place it was picked by, if that is known.
+ * @param first  An extra first choice that stands for "no zone", e.g. "Same as the DeskHog".
+ */
+function zoneSelect(posix, picked, first) {
+    const chosen = zoneNameFor(posix, picked);
+    const select = el('select', {});
+    if (first) select.appendChild(el('option', { value: '', selected: !posix }, first));
+    // A zone the list has no place for (set through the API) stays what it is.
+    if (posix && !chosen) select.appendChild(el('option', { value: '=' + posix, selected: true }, posix));
+    const regions = new Map();
+    for (const name of Object.keys(TIME_ZONES)) {
+        const region = name.includes('/') ? name.slice(0, name.indexOf('/')) : 'Universal';
+        if (!regions.has(region)) regions.set(region, []);
+        regions.get(region).push(name);
+    }
+    for (const [region, names] of regions) {
+        select.appendChild(el('optgroup', { label: region },
+            names.map(name => el('option', { value: name, selected: name === chosen }, zoneLabel(name)))));
+    }
+    return select;
+}
+
+/** What a zoneSelect() says: {posix, name}. Both are '' for its "no zone" choice. */
+function zoneValue(select) {
+    const value = select.value;
+    if (!value) return { posix: '', name: '' };
+    if (value[0] === '=') return { posix: value.slice(1), name: '' };
+    return { posix: TIME_ZONES[value] || '', name: value };
+}
+
+/** The device's own time zone, on the Device page. */
+function renderTimeZone() {
+    if (!state || !state.timezone) return;
+    const zone = state.timezone;
+    const signature = zone.posix + '|' + zone.name;
+    if (signature === ui.zoneSignature) return; // leave an open dropdown alone
+    ui.zoneSignature = signature;
+
+    const save = async value => {
+        if (await attempt(() => api('POST', '/api/timezone', value), 'Time zone saved.')) await refresh();
+    };
+    const select = zoneSelect(zone.posix, zone.name);
+    select.id = 'timezone-select';
+    select.addEventListener('change', () => save(zoneValue(select)));
+    // Most of the time the DeskHog is where the person looking at this page is.
+    const here = browserZone();
+    const offer = here && TIME_ZONES[here] !== zone.posix
+        ? el('div', { class: 'row-buttons' }, el('button', { type: 'button', onclick: () => save({ posix: TIME_ZONES[here], name: here }) }, 'Use ' + zoneLabel(here)))
+        : null;
+    $('timezone-form').replaceChildren(...[
+        el('label', { class: 'field' }, el('span', {}, 'Where this DeskHog is'), select,
+            el('small', {}, 'Clocks and other cards tell local time by it, summer time included.')),
+        offer].filter(Boolean));
+}
+
+// ----------------------------------------------------------- device settings
+
+const level = value => (value === '0' ? 'off' : value + '%');
+const ROTATE_STEPS = [0, 15, 30, 60, 120, 300];
+const rotateLabel = seconds => (seconds === 0 ? 'Off' : seconds % 60 === 0 ? seconds / 60 + ' min' : seconds + ' s');
+const nested = (path, value) => path.reduceRight((inner, key) => ({ [key]: inner }), value);
+const shownValue = control => (control.type === 'checkbox' ? String(control.checked) : control.value);
+
+/** Put the device's value into a control, unless someone is working on it (focused, or holding what the device has not confirmed). */
+function showValue(control, value) {
+    const idle = control.dataset.shown === undefined || shownValue(control) === control.dataset.shown;
+    if (String(value) === shownValue(control) || (idle && (control.type === 'checkbox' || document.activeElement !== control))) {
+        if (control.type === 'checkbox') control.checked = value;
+        else control.value = value;
+        control.dataset.shown = shownValue(control);
+    }
+}
+
+async function saveDevice(body, doneText) {
+    return attempt(async () => {
+        state.device = await api('POST', '/api/device', body);
+        renderDevice();
+        renderAbout();
+    }, doneText);
+}
+
+/** Where the page goes after the device is renamed: its new .local address, if it was opened at one. */
+function renamedAddress(name, where) {
+    return where.hostname.endsWith('.local') ? 'http://' + name + '.local/' + where.hash : null;
+}
+function goTo(address) { location.assign(address); }
+
+let deviceControls = null;
+
+/** The controls, built once and updated in place, so a slider is never rebuilt under a finger. Keyed by their setting. */
+function buildDevice() {
+    const controls = {};
+    const bind = (path, input) => {
+        controls[path] = input;
+        const read = () => (input.type === 'checkbox' ? input.checked : input.type === 'time' ? input.value : Number(input.value));
+        input.addEventListener('change', () => input.value && saveDevice(nested(path.split('.'), read())));
+        return input;
+    };
+    // Saves where it is let go and, while dragged, at most every 150 ms; the night ones also preview.
+    const slider = (label, path, min) => {
+        const input = bind(path, el('input', { type: 'range', min, max: '100', step: '1' }));
+        const output = el('output');
+        let last = 0;
+        let timer = null;
+        const send = () => {
+            timer = null;
+            last = Date.now();
+            saveDevice({ ...nested(path.split('.'), Number(input.value)), preview: path.endsWith('night') ? 'night' : undefined });
+        };
+        input.addEventListener('input', () => {
+            output.textContent = level(input.value);
+            if (!timer) timer = setTimeout(send, Math.max(0, 150 - (Date.now() - last)));
+        });
+        // Letting go saves the value itself, so a held-back preview must not follow it.
+        input.addEventListener('change', () => { clearTimeout(timer); timer = null; last = 0; });
+        return el('label', { class: 'field' }, el('span', {}, label), el('div', { class: 'pick' }, input, output));
+    };
+    // The old address stops answering once mDNS moves, so the page follows, after the notice has been seen.
+    const rename = async () => {
+        const wanted = controls.name.value.trim();
+        const saved = await saveDevice({ name: wanted }, 'Saved. This device is now at http://' + wanted + '.local');
+        const address = saved && renamedAddress(wanted, location);
+        if (address) setTimeout(() => goTo(address), 2000);
+        return saved;
+    };
+    controls.name = el('input', { type: 'text', maxlength: '24', autocapitalize: 'none', spellcheck: 'false' });
+    controls.name.addEventListener('keydown', event => { if (event.key === 'Enter') rename(); });
+    const rotate = bind('rotate.seconds', el('select'));
+    controls.address = el('small');
+    controls.hint = el('small');
+
+    $('display-form').replaceChildren(
+        el('div', { class: 'levels' }, slider('Screen', 'screen.day', '5'), slider('Screen at night', 'screen.night', '0')),
+        el('div', { class: 'levels' }, slider('LED', 'led.day', '0'), slider('LED at night', 'led.night', '0')),
+        el('div', { class: 'field times' }, bind('night.enabled', el('input', { type: 'checkbox' })), el('span', {}, 'Night hours from'),
+            bind('night.from', el('input', { type: 'time' })), el('span', {}, 'until'), bind('night.until', el('input', { type: 'time' })),
+            el('small', {}, 'They follow the time zone above.')),
+        el('label', { class: 'field' }, el('span', {}, 'Rotate cards'), rotate,
+            el('small', {}, 'Moves on to the next card by itself. Games and cards you are on wait their turn.')));
+    $('name-form').replaceChildren(el('label', { class: 'field' }, el('span', {}, 'Name on the network'),
+        el('div', { class: 'pick' }, controls.name, el('button', { type: 'button', onclick: rename }, 'Save')), controls.address));
+    $('battery-form').replaceChildren(el('label', { class: 'field check' }, bind('battery', el('input', { type: 'checkbox' })), el('span', {}, 'This device has a battery', controls.hint)));
+    $('restart-btn').addEventListener('click', async () => {
+        if (window.confirm('Restart the DeskHog?')) await attempt(() => api('POST', '/api/restart', {}), 'Restarting. The page picks up again when the device is back.');
+    });
+    return controls;
+}
+
+/** The device's own settings, on the Device page. Not on older firmware, which has none. */
+function renderDevice() {
+    const settings = state && state.device;
+    for (const id of ['display-panel', 'name-panel', 'battery-panel', 'restart-btn']) $(id).hidden = !settings;
+    if (!settings) return;
+    if (!deviceControls) deviceControls = buildDevice();
+    const c = deviceControls;
+    // A value set through the API that the steps lack still has to show.
+    const seconds = settings.rotate.seconds;
+    const steps = [...new Set([...ROTATE_STEPS, seconds])].sort((a, b) => a - b);
+    const rotate = c['rotate.seconds'];
+    if (rotate.dataset.steps !== String(steps)) {
+        rotate.dataset.steps = String(steps);
+        rotate.replaceChildren(...steps.map(step => el('option', { value: String(step) }, rotateLabel(step))));
+        rotate.value = String(seconds);
+        rotate.dataset.shown = rotate.value;
+    }
+    for (const path of Object.keys(c).filter(key => key.includes('.') || key === 'battery')) {
+        showValue(c[path], path.split('.').reduce((inner, key) => inner[key], settings));
+        if (c[path].type === 'range') c[path].nextElementSibling.textContent = level(c[path].value);
+    }
+    showValue(c.name, settings.name);
+    c.address.textContent = 'http://' + settings.name + '.local';
+    c.hint.textContent = settings.status.gauge ? 'A battery gauge was found. Leave this off on USB power alone: the gauge then reads about 100%.'
+        : 'No battery gauge was found.';
+    document.title = document.querySelector('[data-brand]').textContent = settings.name === 'deskhog' ? 'DeskHog' : 'DeskHog · ' + settings.name;
+}
+
+// ------------------------------------------------------------------ cards
+
+function renderCards() {
+    if (!state) return;
+    const list = $('cards-list');
+    const cards = state.cards;
+    // Rebuild the tiles only when the list changes shape; names and status are filled in below.
+    const signature = cards.map(c => c.key).join('\n') + (cards.length ? '' : '|' + state.plugins.length);
+    if (signature !== ui.cardsSignature) {
+        ui.cardsSignature = signature;
+        list.replaceChildren(...cards.map(cardTile));
+        if (!cards.length) {
+            list.appendChild(state.plugins.length
+                ? el('p', { class: 'empty' }, 'No cards yet. Add one to get started.')
+                : el('p', { class: 'empty' }, 'No cards yet, and no plugins to make them with. ',
+                    el('button', { type: 'button', class: 'primary', onclick: showDirectory }, 'Get plugins')));
+        }
+    }
+    $('cards-hint').hidden = cards.length < 2;
+    list.querySelectorAll('.item').forEach(item => {
+        const card = cardByKey(item.dataset.key);
+        if (!card) return;
+        item.querySelector('.item-title').textContent = cardTitle(card);
+        const subtitle = cardSubtitle(card);
+        const sub = item.querySelector('.item-sub');
+        sub.textContent = subtitle.text;
+        sub.className = 'item-sub' + (subtitle.bad ? ' bad' : '');
+        item.classList.toggle('selected', !ui.adding && ui.openCard === card.key);
+        item.classList.toggle('live', !!card.onScreen);
+    });
+    renderCardPane();
+}
+
+function cardTile(card) {
+    const handle = el('span', { class: 'handle', title: 'Drag to reorder', 'aria-hidden': 'true' }, '⠿');
+    const screen = el('span', { class: 'screen' }, card.type === 'PLUGIN' ? screenFor(card.config).canvas : null);
+    const open = el('button', { type: 'button', class: 'item-open' }, screen,
+        el('span', { class: 'item-text' }, el('span', { class: 'item-title' }), el('span', { class: 'item-sub' })));
+    open.addEventListener('click', () => {
+        if (ui.justDragged) return; // that was the end of a drag, not a click
+        ui.adding = null;
+        ui.openCard = card.key;
+        renderCards();
+    });
+    const item = el('div', { class: 'item tile' }, open, handle);
+    item.dataset.key = card.key;
+    item.addEventListener('pointerdown', event => armDrag(event, item, handle));
+    return item;
+}
+
+function closeCardPane() {
+    ui.openCard = null;
+    ui.adding = null;
+    renderCards();
+}
+
+// The pane beside the cards: the card you picked, or the steps to add one.
+function renderCardPane() {
+    const pane = $('card-pane');
+    if (!ui.adding && ui.openCard && !cardByKey(ui.openCard)) ui.openCard = null; // it was removed
+    const card = ui.adding ? null : cardByKey(ui.openCard);
+    const adding = ui.adding;
+    const signature = adding ? 'add|' + adding.step + '|' + (adding.plugin ? adding.plugin.name + '/' + adding.kind.key : offersSignature())
+        : card ? 'card|' + card.key + '|' + (pluginByName(card.plugin) ? '' : 'no plugin') : '';
+    pane.hidden = !signature;
+    // Rebuilt only when it shows something else, so what you typed survives the page refreshing.
+    if (signature !== ui.cardPaneSignature) {
+        ui.cardPaneSignature = signature;
+        for (const screen of Object.values(screens)) screen.mirror = null;
+        pane.replaceChildren(...(adding ? addPanel() : card ? cardPanel(card) : []).filter(Boolean));
+        pane.scrollTop = 0;
+        if (ui.page === 'cards') rememberPage();
+    }
+    if (!card) return;
+    // The live parts.
+    pane.querySelector('.pane-head h2').textContent = cardTitle(card);
+    const status = pane.querySelector('.pane-status');
+    if (status) {
+        const connection = connectionById(card.connection);
+        const failed = connection && connection.state === 'failed';
+        status.textContent = failed ? 'Crashed: ' + (connection.error || 'unknown error')
+            : card.onScreen ? 'On the device\'s screen now. The three buttons work from here.'
+                : 'Not on screen. Press a button to bring it up.';
+        status.className = 'pane-status' + (failed ? ' bad' : '');
+    }
+    const index = state.cards.indexOf(card);
+    const earlier = pane.querySelector('[data-move="-1"]');
+    const later = pane.querySelector('[data-move="1"]');
+    if (earlier) earlier.disabled = index <= 0;
+    if (later) later.disabled = index >= state.cards.length - 1;
+}
+
+function cardPanel(card) {
+    const head = paneHead(cardTitle(card), closeCardPane);
+    const remove = el('button', { type: 'button', class: 'danger', onclick: () => removeCard(card.key) }, 'Remove card');
+    const plugin = pluginByName(card.plugin);
+    const connection = connectionById(card.connection);
+    if (card.type !== 'PLUGIN' || !plugin || !connection) {
+        const why = card.type !== 'PLUGIN' ? 'This kind of card is no longer supported. Remove it and add a card in its place.'
+            : 'This card needs the plugin "' + (card.plugin || '?') + '", which is not on the device.';
+        // A card can be there before its plugin: after an update from older firmware, or when the plugin was deleted.
+        const install = card.type === 'PLUGIN' && card.plugin
+            ? el('button', { type: 'button', class: 'primary', onclick: () => installByName(card.plugin) }, 'Install ' + card.plugin) : null;
+        return [head, el('p', { class: 'hint' }, why), el('div', { class: 'row-buttons' }, install, remove)];
+    }
+
+    // The device, with this card on its screen and buttons that work.
+    const mirror = el('canvas', { width: '233', height: '135' });
+    const screen = screenFor(card.config);
+    screen.mirror = mirror;
+    copyPicture(screen.canvas, mirror);
+    const press = (button, label, glyph) => el('button', {
+        type: 'button', class: 'hw', 'aria-label': label + ' button', title: label,
+        onclick: () => pressButton(card.key, button),
+    }, glyph);
+    const device = el('div', { class: 'device' },
+        el('div', { class: 'hw-buttons' }, press('up', 'Up', '▲'), press('center', 'Centre', '●'), press('down', 'Down', '▼')),
+        el('div', { class: 'screen' }, mirror));
+
+    const kind = kindOf(card, plugin);
+    const fallback = defaultCardName(card);
+    const named = card.name && card.name !== fallback && card.name !== card.plugin;
+    const nameInput = el('input', { type: 'text', value: named ? card.name : '', placeholder: card.title || fallback });
+    const cardFields = el('div', {}, fieldInputs(plugin.multiCard && kind ? kind.config : [], card.settings, [],
+        { connection: connection.id, kind: kind ? kind.key : '' }));
+    // A single-card plugin has no separate connection to speak of: its settings are this card's settings.
+    const ownFields = el('div', {}, plugin.multiCard ? [] : fieldInputs(plugin.config, connection.settings, connection.secretsSet,
+        { connection: connection.id, kind: '' }));
+    // The device's own setting, which every plugin card has: may the plugin put this card on screen?
+    const frontInput = el('input', { type: 'checkbox', checked: card.front !== false });
+    const front = el('label', { class: 'field check' }, frontInput, el('span', {}, 'May come to the front',
+        el('small', {}, 'When its plugin has something to tell you. Off: the light flashes, and the card says it when you get there.')));
+    const skipInput = el('input', { type: 'checkbox', checked: card.rotate === false });
+    const skip = state.device ? el('label', { class: 'field check' }, skipInput, el('span', {}, 'Skip in rotation',
+        el('small', {}, 'The rotation passes this card by, and stays on it when you go there yourself.'))) : null;
+
+    const save = el('button', { type: 'button', class: 'primary' }, 'Save');
+    save.addEventListener('click', async () => {
+        save.disabled = true;
+        const done = await attempt(async () => {
+            await api('POST', '/api/cards/update?key=' + encode(card.config),
+                { name: nameInput.value.trim() || fallback, settings: readFields(cardFields), front: frontInput.checked,
+                    rotate: state.device ? !skipInput.checked : undefined });
+            const own = readFields(ownFields);
+            if (Object.keys(own).length) {
+                await api('POST', '/api/connections/update?id=' + encode(connection.id), { settings: own });
+            }
+        }, 'Saved.');
+        save.disabled = false;
+        if (!done) return;
+        if (!isWide()) ui.openCard = null;  // on a phone, back to the list
+        ui.cardPaneSignature = '';          // show what the device saved
+        await refresh();
+        refreshSoon();
+    });
+    const move = (delta, label) => {
+        const button = el('button', { type: 'button', onclick: () => moveCard(card.key, delta) }, label);
+        button.dataset.move = String(delta);
+        return button;
+    };
+
+    const form = el('div', { class: 'pane-form' },
+        el('label', { class: 'field' }, el('span', {}, 'Name'), nameInput), cardFields, ownFields, front, skip);
+    if (plugin.multiCard && plugin.config.length) {
+        const link = el('a', { href: '#connections', onclick: event => {
+            event.preventDefault();
+            ui.openConnection = connection.id;
+            showPage('connections', true);
+            renderConnections();
+        } }, 'Change them under Connections');
+        form.append(el('p', { class: 'hint' }, 'Shares the settings of "' + connection.name + '". ', link, '.'));
+    }
+    return [head, device, el('p', { class: 'pane-status' }), form,
+        el('div', { class: 'row-buttons' }, save, el('span', { class: 'spacer' }), move(-1, 'Move earlier'), move(1, 'Move later')),
+        el('div', { class: 'row-buttons' }, remove)];
+}
+
+/** Press a button on the device from here. A card that is not on screen is brought up first. */
+async function pressButton(key, button) {
+    const card = cardByKey(key);
+    if (!card) return;
+    await attempt(async () => {
+        if (!card.onScreen) await api('POST', '/api/cards/show?key=' + encode(card.config));
+        await api('POST', '/api/cards/press?key=' + encode(card.config) + '&button=' + button);
+    });
+    setTimeout(refresh, 250);
+    setTimeout(refresh, 1000);
+}
+
+async function saveLayout(keys) {
+    await api('POST', '/api/cards/layout', keys);
+}
+
+async function applyOrder(keys) {
+    state.cards.sort((a, b) => keys.indexOf(a.key) - keys.indexOf(b.key));
+    if (await attempt(() => saveLayout(keys))) refreshSoon();
+    else { ui.cardsSignature = ''; refresh(); }
+}
+
+async function moveCard(key, delta) {
+    const keys = state.cards.map(c => c.key);
+    const from = keys.indexOf(key);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= keys.length) return;
+    keys.splice(to, 0, keys.splice(from, 1)[0]);
+    const order = applyOrder(keys);
+    renderCards();
+    await order;
+}
+
+async function removeCard(key) {
+    const card = cardByKey(key);
+    if (!card || !confirm('Remove "' + cardTitle(card) + '" from your DeskHog?')) return;
+    const keys = state.cards.filter(c => c !== card).map(c => c.key);
+    if (await attempt(() => saveLayout(keys), 'Card removed.')) {
+        ui.openCard = null;
+        await refresh();
+        refreshSoon();
+    }
+}
+
+// Drag a card to reorder. A mouse drags the whole tile once it has moved a
+// little, so a plain click still opens the card. A finger drags by the handle,
+// because dragging a tile is how you scroll the page.
+function armDrag(event, item, handle) {
+    const onHandle = handle.contains(event.target);
+    if (event.pointerType === 'mouse' ? event.button !== 0 : !onHandle) return;
+    const list = $('cards-list');
+    const order = () => [...list.querySelectorAll('.item')].map(i => i.dataset.key);
+    const before = order().join('\n');
+    const startX = event.clientX, startY = event.clientY;
+    let active = false;
+    if (onHandle) event.preventDefault();
+
+    const move = moveEvent => {
+        if (!active) {
+            if (!onHandle && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 6) return;
+            active = true;
+            ui.dragging = true;
+            item.classList.add('dragging');
+        }
+        moveEvent.preventDefault();
+        const x = moveEvent.clientX, y = moveEvent.clientY;
+        const target = [...list.querySelectorAll('.item')].find(other => {
+            if (other === item) return false;
+            const box = other.getBoundingClientRect();
+            return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+        });
+        if (!target) return;
+        const box = target.getBoundingClientRect();
+        const inGrid = list.clientWidth > box.width * 1.5; // tiles side by side, or one per row
+        const after = inGrid ? x > box.left + box.width / 2 : y > box.top + box.height / 2;
+        list.insertBefore(item, after ? target.nextSibling : target);
+    };
+    const drop = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', drop);
+        window.removeEventListener('pointercancel', drop);
+        if (!active) return;
+        item.classList.remove('dragging');
+        ui.dragging = false;
+        ui.justDragged = true;
+        setTimeout(() => { ui.justDragged = false; }, 0);
+        const keys = order();
+        if (keys.join('\n') === before) return;
+        ui.cardsSignature = keys.join('\n'); // the tiles already are in this order
+        applyOrder(keys).then(renderCards);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', drop);
+    window.addEventListener('pointercancel', drop);
+}
+
+// ------------------------------------------------- pictures of the cards
+
+// The device sends a card's pixels as it has them: 16 bits per pixel (RGB565).
+// Each card has a small picture in the list, and a second one (`mirror`) while
+// it is in the side pane.
+const screens = {}; // card config ("connection:card") -> {canvas, mirror, frames, busy}
+
+function screenFor(config) {
+    if (!screens[config]) {
+        screens[config] = { canvas: el('canvas', { width: '233', height: '135' }), mirror: null, frames: -1, version: null, busy: false };
+    }
+    return screens[config];
+}
+
+/** Undo the device's packing: runs of (how many, pixel), three bytes each. */
+function unpackRuns(buffer, pixelCount) {
+    const bytes = new Uint8Array(buffer);
+    const pixels = new Uint16Array(pixelCount);
+    let at = 0;
+    for (let i = 0; i + 2 < bytes.length && at < pixelCount; i += 3) {
+        const end = Math.min(pixelCount, at + bytes[i]);
+        pixels.fill(bytes[i + 1] | (bytes[i + 2] << 8), at, end);
+        at = end;
+    }
+    return pixels.buffer;
+}
+
+function paintScreen(canvas, buffer, width, height) {
+    const pixels = new Uint16Array(buffer, 0, Math.floor(buffer.byteLength / 2));
+    if (pixels.length < width * height) return;
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const image = context.createImageData(width, height);
+    for (let i = 0; i < width * height; i++) {
+        const pixel = pixels[i];
+        image.data[i * 4] = ((pixel >> 11) & 0x1f) * 255 / 31;
+        image.data[i * 4 + 1] = ((pixel >> 5) & 0x3f) * 255 / 63;
+        image.data[i * 4 + 2] = (pixel & 0x1f) * 255 / 31;
+        image.data[i * 4 + 3] = 255;
+    }
+    context.putImageData(image, 0, 0);
+}
+
+function copyPicture(from, to) {
+    const context = to.getContext('2d');
+    if (!context) return;
+    to.width = from.width;
+    to.height = from.height;
+    context.drawImage(from, 0, 0);
+}
+
+let screenQueue = Promise.resolve();
+
+/**
+ * Fetch a card's picture. One at a time: the device is small.
+ * With `ifChanged`, the device only sends it when it has painted the card since.
+ */
+function fetchScreen(config, frames, ifChanged) {
+    const screen = screenFor(config);
+    if (screen.busy) return;
+    screen.busy = true;
+    screenQueue = screenQueue.then(async () => {
+        try {
+            const since = ifChanged && screen.version !== null ? '&since=' + screen.version : '';
+            const response = await fetch('/api/cards/screen?packed=1&key=' + encode(config) + since);
+            if (response.ok && response.status !== 204) {
+                screen.version = response.headers.get('X-Frames');
+                const width = parseInt(response.headers.get('X-Width'), 10) || 233;
+                const height = parseInt(response.headers.get('X-Height'), 10) || 135;
+                let buffer = await response.arrayBuffer();
+                if (response.headers.get('X-Packed') === 'runs') buffer = unpackRuns(buffer, width * height);
+                paintScreen(screen.canvas, buffer, width, height);
+                if (screen.mirror) paintScreen(screen.mirror, buffer, width, height);
+                if (frames !== undefined) screen.frames = frames;
+            }
+        } catch (error) { /* next round */ }
+        screen.busy = false;
+    });
+}
+
+function updateScreens() {
+    for (const card of state.cards) {
+        if (card.type !== 'PLUGIN' || card.frames === undefined) continue;
+        if (screenFor(card.config).frames !== card.frames) fetchScreen(card.config, card.frames);
+    }
+}
+
+/** The card in the side pane is fetched every second, so the buttons feel live. */
+function watchOpenCard() {
+    if (document.hidden || ui.page !== 'cards' || ui.adding || ui.dragging) return;
+    const card = cardByKey(ui.openCard);
+    if (card && card.type === 'PLUGIN' && screenFor(card.config).mirror) fetchScreen(card.config, undefined, true);
+}
+
+// --------------------------------------------------------------- add card
+
+function startAdding() {
+    if (!state) return;
+    ui.adding = { step: 'pick' };
+    renderCards();
+    renderDirectory(); // the choices include what the directory has: fetch it if that has not happened yet
+}
+
+/** Install a plugin from the directory and carry on adding a card of it. */
+async function installAndAdd(entry) {
+    if (!(await installEntry(entry))) return;
+    const plugin = pluginByName(entry.name);
+    if (!plugin || plugin.error || !plugin.kinds.length) return; // the plugins page says what is wrong with it
+    // A plugin with several kinds of card: back to the choices, which now include them.
+    ui.adding = plugin.kinds.length === 1 ? { step: 'plugin', plugin, kind: plugin.kinds[0] } : { step: 'pick' };
+    renderCards();
+}
+
+/** A picture for a choice, when the directory has one. */
+function choicePicture(entry) {
+    const shot = entry ? shotAddress(entry) : null;
+    return shot ? el('img', { class: 'shot', src: shot, alt: '', loading: 'lazy', width: '233', height: '135', onerror: event => event.target.remove() }) : null;
+}
+
+/** What the side pane shows while a card is being added. */
+function addPanel() {
+    const adding = ui.adding;
+    const cancel = el('button', { type: 'button', onclick: closeCardPane }, 'Cancel');
+
+    if (adding.step === 'pick') {
+        const entries = directory.entries || [];
+        const choices = [];
+        for (const plugin of state.plugins) {
+            if (plugin.error) continue;
+            // One picture per plugin: it only says what the card looks like when the plugin has one kind of card.
+            const picture = plugin.kinds.length === 1 ? choicePicture(entries.find(entry => entry.name === plugin.name)) : null;
+            for (const kind of plugin.kinds) {
+                choices.push(el('button', {
+                    type: 'button', class: 'choice',
+                    onclick: () => { ui.adding = { step: 'plugin', plugin, kind }; renderCards(); },
+                }, picture, el('b', {}, plugin.multiCard ? kind.name : plugin.title), plugin.multiCard ? el('span', {}, plugin.title) : null));
+            }
+        }
+        // What the directory has and this device does not: choosing one installs it, then carries on.
+        const more = entries.filter(entry => !pluginByName(entry.name)).map(entry => {
+            const choice = el('button', { type: 'button', class: 'choice', disabled: !!directory.busy, onclick: () => installAndAdd(entry) },
+                choicePicture(entry), el('b', {}, entry.title || entry.name),
+                el('span', {}, directory.busy === entry.name ? 'Installing…' : entry.description || ''));
+            choice.dataset.name = entry.name;
+            return choice;
+        });
+        return [paneHead('Add a card', closeCardPane),
+            el('p', { class: 'hint' }, 'What should the new card show?'),
+            choices.length ? el('div', { class: 'choices' }, choices) : null,
+            choices.length || more.length || directory.loading ? null : el('p', { class: 'empty' }, 'No plugins are installed yet.'),
+            more.length ? el('h3', { class: 'sub' }, choices.length ? 'More, from the plugin directory' : 'From the plugin directory') : null,
+            more.length ? el('p', { class: 'hint' }, 'Choosing one installs its plugin first.') : null,
+            more.length ? el('div', { class: 'choices more' }, more) : null,
+            directory.loading ? el('p', { class: 'hint' }, 'Looking in the plugin directory…') : null,
+            directory.error ? el('p', { class: 'hint' }, directory.error) : null,
+            el('div', { class: 'row-buttons' },
+                el('button', { type: 'button', onclick: showDirectory }, 'Open the plugin directory'))];
+    }
+
+    const { plugin, kind } = adding;
+    const existing = state.connections.filter(c => c.plugin === plugin.name);
+    const shared = plugin.multiCard && plugin.config.length > 0;
+    const nameInput = el('input', { type: 'text', placeholder: plugin.multiCard ? kind.name : plugin.title });
+    // A setting the plugin lists the choices for needs a connection to ask. A
+    // card for an existing connection has one; a new connection does not yet.
+    const newFields = plugin.multiCard ? kind.config : plugin.config;
+    const sourceFor = id => (plugin.multiCard && id ? { connection: id, kind: kind.key } : null);
+    const cardFields = el('div', {}, fieldInputs(newFields, {}, [], sourceFor(shared || !existing.length ? '' : existing[0].id)));
+
+    // Cards of this plugin can share a connection. Ask which one only when there is something to share.
+    let select = null;
+    const connectionName = el('input', { type: 'text', placeholder: plugin.title });
+    const connectionFields = el('div', {}, shared ? fieldInputs(plugin.config, {}) : []);
+    const newConnection = el('div', {},
+        el('label', { class: 'field' }, el('span', {}, 'Name for this connection'), connectionName,
+            el('small', {}, 'For example "Work", if you connect more than one account.')),
+        connectionFields);
+    if (shared) {
+        select = el('select', {},
+            existing.map(c => el('option', { value: c.id }, c.name)),
+            el('option', { value: '' }, existing.length ? 'A new connection…' : 'New connection'));
+        const sync = () => {
+            newConnection.hidden = select.value !== '';
+            // The lists to pick from belong to the connection: ask the one that is chosen now.
+            if (newFields.some(field => field.choices)) {
+                cardFields.replaceChildren(...fieldInputs(newFields, readFields(cardFields), [], sourceFor(select.value)));
+            }
+        };
+        select.addEventListener('change', sync);
+        sync();
+    }
+
+    const add = el('button', { type: 'button', class: 'primary' }, 'Add card');
+    add.addEventListener('click', async () => {
+        const request = { plugin: plugin.name, kind: kind.key, name: nameInput.value.trim() };
+        if (!plugin.multiCard) {
+            request.connectionSettings = readFields(cardFields);
+        } else {
+            request.settings = readFields(cardFields);
+            if (shared) {
+                request.connection = select.value;
+                if (!select.value) {
+                    request.connectionName = connectionName.value.trim();
+                    request.connectionSettings = readFields(connectionFields);
+                }
+            } else {
+                request.connection = existing.length ? existing[0].id : '';
+            }
+        }
+        add.disabled = true;
+        let answer = null;
+        const done = await attempt(async () => { answer = await api('POST', '/api/cards/add', request); }, 'Card added. It is on your DeskHog now.');
+        add.disabled = false;
+        if (!done) return;
+        ui.adding = null;
+        // On a wide screen the new card goes straight into the pane.
+        ui.openCard = isWide() && answer && answer.key ? 'PLUGIN|' + answer.key : null;
+        await refresh();
+        renderCards();
+        refreshSoon();
+    });
+
+    const back = el('button', { type: 'button', onclick: () => { ui.adding = { step: 'pick' }; renderCards(); } }, 'Back');
+    return [paneHead('New card: ' + (plugin.multiCard ? plugin.title + ', ' + kind.name : plugin.title), closeCardPane),
+        shared ? el('label', { class: 'field' }, el('span', {}, 'Connection'), select) : null,
+        shared ? newConnection : null,
+        cardFields,
+        el('label', { class: 'field' }, el('span', {}, 'Name (optional)'), nameInput),
+        el('div', { class: 'row-buttons' }, add, back, cancel)];
+}
+
+// ------------------------------------------------------------ connections
+
+// Only connections with settings to share are worth showing. The rest exist
+// quietly, one per card.
+function sharedConnections() {
+    return state.connections.filter(connection => {
+        const plugin = pluginByName(connection.plugin);
+        return plugin && plugin.multiCard && plugin.config.length > 0;
+    });
+}
+
+function renderConnections() {
+    if (!state) return;
+    const connections = sharedConnections();
+    // On a wide screen the pane starts with the first connection rather than empty.
+    if (!ui.choseFirstConnection && connections.length) {
+        ui.choseFirstConnection = true;
+        if (isWide() && !ui.openConnection) ui.openConnection = connections[0].id;
+    }
+    const list = $('connections-list');
+    const signature = connections.map(c => c.id).join('\n');
+    if (signature !== ui.connectionsSignature) {
+        ui.connectionsSignature = signature;
+        list.replaceChildren(...connections.map(connection => {
+            const open = el('button', { type: 'button', class: 'item-open', onclick: () => { ui.openConnection = connection.id; renderConnections(); } },
+                el('span', { class: 'item-text' }, el('span', { class: 'item-title' }), el('span', { class: 'item-sub' })));
+            const item = el('div', { class: 'item' }, open);
+            item.dataset.id = connection.id;
+            return item;
+        }));
+    }
+    $('connections-empty').hidden = connections.length > 0;
+    list.querySelectorAll('.item').forEach(item => {
+        const connection = connections.find(c => c.id === item.dataset.id);
+        if (!connection) return;
+        const plugin = pluginByName(connection.plugin);
+        item.querySelector('.item-title').textContent = connection.name;
+        const sub = item.querySelector('.item-sub');
+        const failed = connection.state === 'failed';
+        sub.textContent = failed ? 'Crashed: ' + (connection.error || 'unknown error')
+            : plugin.title + ', ' + connection.cards + (connection.cards === 1 ? ' card' : ' cards');
+        sub.className = 'item-sub' + (failed ? ' bad' : '');
+        item.classList.toggle('selected', ui.openConnection === connection.id);
+    });
+
+    const pane = $('connection-pane');
+    const connection = connections.find(c => c.id === ui.openConnection);
+    if (!connection) ui.openConnection = null;
+    pane.hidden = !connection;
+    const paneSignature = connection ? connection.id + '|' + state.cards.filter(c => c.connection === connection.id).map(c => c.key).join(',') : '';
+    if (paneSignature !== ui.connectionPaneSignature) {
+        ui.connectionPaneSignature = paneSignature;
+        pane.replaceChildren(...(connection ? connectionPanel(connection) : []).filter(Boolean));
+    }
+}
+
+function connectionPanel(connection) {
+    const plugin = pluginByName(connection.plugin);
+    const close = () => { ui.openConnection = null; renderConnections(); };
+    const nameInput = el('input', { type: 'text', value: connection.name, placeholder: plugin.title });
+    const fields = el('div', {}, fieldInputs(plugin.config, connection.settings, connection.secretsSet,
+        { connection: connection.id, kind: '' }));
+    const save = el('button', { type: 'button', class: 'primary' }, 'Save');
+    save.addEventListener('click', async () => {
+        save.disabled = true;
+        const done = await attempt(() => api('POST', '/api/connections/update?id=' + encode(connection.id),
+            { name: nameInput.value.trim() || plugin.title, settings: readFields(fields) }), 'Saved. Its cards are restarting.');
+        save.disabled = false;
+        if (!done) return;
+        if (!isWide()) ui.openConnection = null;
+        ui.connectionPaneSignature = '';
+        await refresh();
+        refreshSoon();
+    });
+    const remove = el('button', { type: 'button', class: 'danger' }, 'Delete connection');
+    remove.addEventListener('click', async () => {
+        const cards = connection.cards === 1 ? 'its 1 card' : 'its ' + connection.cards + ' cards';
+        if (!confirm('Delete "' + connection.name + '" and ' + cards + '?')) return;
+        if (await attempt(() => api('POST', '/api/connections/remove?id=' + encode(connection.id)), 'Connection deleted.')) {
+            ui.openConnection = null;
+            await refresh();
+            refreshSoon();
+        }
+    });
+    // The cards that use it. Each one is a way to that card.
+    const cards = state.cards.filter(c => c.connection === connection.id);
+    const usedBy = cards.map(card => el('li', {}, el('button', { type: 'button', onclick: () => {
+        ui.adding = null;
+        ui.openCard = card.key;
+        showPage('cards', true);
+        renderCards();
+    } }, cardTitle(card))));
+    return [paneHead(plugin.title + ' connection', close),
+        el('label', { class: 'field' }, el('span', {}, 'Name'), nameInput), fields,
+        el('div', { class: 'row-buttons' }, save, el('span', { class: 'spacer' }), remove),
+        el('p', { class: 'group-label' }, cards.length ? 'Cards that use it' : 'No cards use it yet.'),
+        el('ul', { class: 'used-by' }, usedBy)];
+}
+
+// ---------------------------------------------------------------- plugins
+
+const NEW_PLUGIN_TEMPLATE = `-- A new plugin. Save it and it shows up as a card.
+
+plugin = { name = "My plugin" }
+
+local presses = 0
+
+function draw()
+  ui.title("My plugin")
+  ui.big(tostring(presses))
+  ui.label("Press the centre button")
+end
+
+function button(name)
+  if name == "center" then
+    presses = presses + 1
+    return true
+  end
+end
+`;
+
+let pluginStatusTimer = null;
+
+function renderPlugins() {
+    const signature = state.plugins.map(p => p.name + (p.error || '') + p.title + (p.version || '')).join('\n');
+    if (signature !== ui.pluginsSignature) {
+        ui.pluginsSignature = signature;
+        const rows = state.plugins.map(plugin => {
+            const sub = plugin.error ? 'Does not load: ' + plugin.error
+                : [plugin.multiCard ? 'Cards: ' + plugin.kinds.map(k => k.name).join(', ') : plugin.name + '.lua',
+                    plugin.version ? 'version ' + plugin.version : null].filter(Boolean).join(', ');
+            const open = el('button', { type: 'button', class: 'item-open', onclick: () => editPlugin(plugin.name) },
+                el('span', { class: 'item-text' },
+                    el('span', { class: 'item-title' }, plugin.title),
+                    el('span', { class: 'item-sub' + (plugin.error ? ' bad' : '') }, sub)));
+            const item = el('div', { class: 'item' }, open);
+            item.dataset.name = plugin.name;
+            return item;
+        });
+        $('plugins-list').replaceChildren(...rows);
+        if (!rows.length) $('plugins-list').appendChild(el('p', { class: 'empty' }, 'No plugins on this device yet.'));
+    }
+    $('plugins-list').querySelectorAll('.item').forEach(item => item.classList.toggle('selected', item.dataset.name === ui.openPlugin));
+}
+
+function setPluginResult(text, kind) {
+    const result = $('plugin-result');
+    result.textContent = text || '';
+    result.className = 'result' + (kind ? ' ' + kind : '');
+}
+
+/** Line numbers beside the code: a crash names the line it happened on. */
+function updateGutter() {
+    const lines = $('plugin-source').value.split('\n').length;
+    const gutter = $('plugin-gutter');
+    if (gutter.dataset.lines === String(lines)) return;
+    gutter.dataset.lines = String(lines);
+    let text = '';
+    for (let line = 1; line <= lines; line++) text += line + '\n';
+    gutter.textContent = text;
+}
+
+function openPluginEditor(name, source, isNew) {
+    $('directory-pane').hidden = true; // the code takes its place
+    ui.openPlugin = isNew ? '' : name;
+    $('plugin-heading').textContent = isNew ? 'New plugin' : name + '.lua';
+    $('plugin-name').value = name;
+    $('plugin-name-field').hidden = !isNew;
+    $('delete-plugin-btn').hidden = isNew;
+    $('plugin-source').value = source;
+    $('plugin-source').scrollTop = 0;
+    updateGutter();
+    setPluginResult('');
+    $('plugin-log').hidden = true;
+    $('plugin-editor').hidden = false;
+    rememberPage();
+    if (state) renderPlugins();
+    if (isNew) $('plugin-name').focus();
+}
+
+function closePluginEditor() {
+    ui.openPlugin = null;
+    $('plugin-editor').hidden = true;
+    clearTimeout(pluginStatusTimer);
+    rememberPage();
+    if (state) renderPlugins();
+    if (state) renderDirectory();
+}
+
+async function editPlugin(name) {
+    await attempt(async () => {
+        openPluginEditor(name, await api('GET', '/api/plugins/' + encode(name)), false);
+        showPluginStatus(name);
+    });
+}
+
+async function savePlugin() {
+    const name = $('plugin-name').value.trim();
+    const source = $('plugin-source').value;
+    if (!/^[a-z0-9_-]{1,32}$/.test(name)) { setPluginResult('Names are 1-32 characters: lowercase letters, digits, - and _.', 'error'); return; }
+    if (!source.trim()) { setPluginResult('The plugin is empty.', 'error'); return; }
+    setPluginResult('Saving…');
+    try {
+        // Not text/plain: the device's web server would read Lua source that way as a form and drop it.
+        await api('PUT', '/api/plugins/' + encode(name), source, 'application/octet-stream');
+    } catch (error) {
+        setPluginResult(error.message, 'error');
+        return;
+    }
+    ui.openPlugin = name;
+    rememberPage();
+    $('plugin-heading').textContent = name + '.lua';
+    $('plugin-name-field').hidden = true;
+    $('delete-plugin-btn').hidden = false;
+    setPluginResult('Saved. Starting on the device…');
+    clearTimeout(pluginStatusTimer);
+    pluginStatusTimer = setTimeout(() => { showPluginStatus(name); refresh(); }, 1500);
+}
+
+/** How the plugin is doing, and what it printed. `quiet` leaves a message about saving alone. */
+async function showPluginStatus(name, quiet) {
+    let status;
+    try { status = await api('GET', '/api/plugins/' + encode(name) + '/status'); } catch (error) { return; }
+    if (ui.openPlugin !== name) return;
+    const busy = /^Sav/.test($('plugin-result').textContent);
+    if (!(quiet && busy)) {
+        if (status.state === 'failed') setPluginResult('Crashed: ' + status.error, 'error');
+        else if (status.state === 'running') setPluginResult('Running (' + Math.round((status.memory || 0) / 1024) + ' KB of memory).', 'success');
+        else setPluginResult('Installed. Add a card for it to run it.');
+    }
+    const log = $('plugin-log');
+    log.hidden = !(status.log && status.log.length);
+    log.textContent = (status.log || []).join('\n');
+}
+
+async function deletePlugin() {
+    const plugin = pluginByName(ui.openPlugin);
+    if (!plugin) return;
+    const used = state.cards.filter(c => c.plugin === plugin.name).length;
+    const what = used ? ' and the ' + used + (used === 1 ? ' card' : ' cards') + ' that use it' : '';
+    if (!confirm('Delete the plugin "' + plugin.title + '"' + what + '?')) return;
+    if (await attempt(() => api('DELETE', '/api/plugins/' + encode(plugin.name)), 'Plugin deleted.')) {
+        closePluginEditor();
+        await refresh();
+        refreshSoon();
+    }
+}
+
+// ------------------------------------------------------- plugin directory
+
+// A plugin directory is a folder of plugins with an index.json that lists them,
+// usually in a git repository. This page fetches it: the browser has the
+// internet connection and checks certificates; the device only remembers where
+// the directory is.
+const directory = { source: null, entries: null, error: '', loading: false, pages: null, base: '', changing: false, busy: '' };
+
+/** Where a directory's index.json is, and where to read a file of it. Mirrors tools/deskhog. */
+function directoryAddress(source) {
+    source = String(source || '').trim();
+    if (/^https?:\/\//.test(source)) {
+        return { index: source.endsWith('.json') ? source : source.replace(/\/+$/, '') + '/index.json', pages: null };
+    }
+    const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:@([A-Za-z0-9_.\/-]+))?$/.exec(source);
+    if (!match) return null;
+    const ref = match[3] || 'HEAD';
+    return {
+        index: 'https://raw.githubusercontent.com/' + match[1] + '/' + match[2] + '/' + ref + '/plugins/index.json',
+        pages: 'https://github.com/' + match[1] + '/' + match[2] + '/blob/' + ref + '/plugins/',
+    };
+}
+
+/** The same fingerprint of a plugin's source that the device reports (FNV-1a, 32 bits). */
+function sourceHash(bytes) {
+    let hash = 2166136261;
+    for (let i = 0; i < bytes.length; i++) hash = Math.imul(hash ^ bytes[i], 16777619) >>> 0;
+    return ('0000000' + hash.toString(16)).slice(-8);
+}
+
+async function loadDirectory() {
+    const source = state && state.directory ? state.directory.source : '';
+    const address = directoryAddress(source);
+    Object.assign(directory, { source, entries: null, error: '', loading: true, pages: address && address.pages, base: address ? address.index : '' });
+    renderDirectory();
+    try {
+        if (!address) throw new Error('"' + source + '" is not a plugin directory. Give "owner/repo" or the address of an index.json.');
+        let response;
+        try {
+            response = await fetch(address.index, { cache: 'no-store' });
+        } catch (error) {
+            throw new Error('Could not reach the plugin directory. That needs internet on the computer or phone you are using now, not on the DeskHog.');
+        }
+        if (!response.ok) throw new Error('There is no plugin directory at ' + source + ' (the answer was ' + response.status + ').');
+        let index = null;
+        try { index = JSON.parse(await response.text()); } catch (error) { index = null; }
+        if (!index || !Array.isArray(index.plugins)) throw new Error('What is at ' + source + ' is not a plugin directory.');
+        if (index.format > 1) throw new Error('That directory is written for newer firmware than this device has.');
+        directory.entries = index.plugins.filter(entry => entry && /^[a-z0-9_-]{1,32}$/.test(entry.name) && typeof entry.file === 'string');
+    } catch (error) {
+        directory.error = error.message;
+    }
+    directory.loading = false;
+    renderDirectory();
+}
+
+/** Where the picture of a directory entry's card is, if it has one. Only a plain path inside the directory counts. */
+function shotAddress(entry) {
+    const shot = entry.screenshot;
+    if (typeof shot !== 'string' || !/^[A-Za-z0-9_./-]+\.png$/.test(shot) || shot.startsWith('/') || shot.includes('..')) return null;
+    return new URL(shot, directory.base).href;
+}
+
+/** How a directory entry relates to what is on the device. */
+function offerState(entry) {
+    const installed = pluginByName(entry.name);
+    if (!installed) return { action: 'Install' };
+    if (installed.hash === entry.hash) return { note: 'Installed' };
+    if ((installed.version || '') !== (entry.version || '')) return { action: 'Update to ' + (entry.version || 'this one'), note: installed.version ? 'You have ' + installed.version : null };
+    return { action: 'Replace with this one', note: 'Changed on this device' };
+}
+
+async function installEntry(entry) {
+    directory.busy = entry.name;
+    renderDirectory();
+    const done = await attempt(async () => {
+        let response;
+        try {
+            response = await fetch(new URL(entry.file, directory.base).href, { cache: 'no-store' });
+        } catch (error) {
+            throw new Error('Could not download ' + entry.file + ' from the directory.');
+        }
+        if (!response.ok) throw new Error('The directory lists ' + entry.file + ', but it is not there (' + response.status + ').');
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (entry.hash && sourceHash(bytes) !== entry.hash) {
+            throw new Error(entry.file + ' is not the file the directory describes. Try again in a few minutes; it may be in the middle of an update.');
+        }
+        // "card=no": installing is not adding a card. That is the next step, with the settings you want.
+        await api('PUT', '/api/plugins/' + encode(entry.name) + '?card=no', bytes, 'application/octet-stream');
+    }, (entry.title || entry.name) + ' is on your DeskHog.');
+    directory.busy = '';
+    if (done) {
+        // The device looks at the new file on its next round.
+        await new Promise(resolve => setTimeout(resolve, 600));
+        await refresh();
+        refreshSoon();
+    }
+    renderDirectory();
+    return done;
+}
+
+/** Install a plugin a card is waiting for. */
+async function installByName(name) {
+    if (!directory.entries || directory.source !== state.directory.source) await loadDirectory();
+    const entry = (directory.entries || []).find(e => e.name === name);
+    if (!entry) {
+        notify(directory.error || 'The plugin directory has no plugin called "' + name + '".', true);
+        return;
+    }
+    await installEntry(entry);
+}
+
+/** From another page: go to where the plugin directory is shown. */
+function showDirectory() {
+    if (ui.openPlugin !== null) closePluginEditor();
+    ui.adding = null;
+    showPage('plugins', true);
+    renderCards();
+    // On a phone it is below the list of installed plugins: go there, also once the list has arrived.
+    ui.showingDirectory = !isWide();
+    scrollToDirectory();
+}
+
+function scrollToDirectory() {
+    const pane = $('directory-pane');
+    if (ui.showingDirectory && pane.scrollIntoView) pane.scrollIntoView();
+    if (!directory.loading) ui.showingDirectory = false;
+}
+
+/** Everything the directory's list depends on: it is rebuilt only when this changes. */
+function offersSignature() {
+    return [directory.source, directory.loading, directory.error, directory.changing, directory.busy,
+        (directory.entries || []).map(entry => { const o = offerState(entry); return entry.name + ':' + (o.action || '') + ':' + (o.note || ''); }).join(',')].join('|');
+}
+
+function renderDirectory() {
+    const pane = $('directory-pane');
+    pane.hidden = ui.openPlugin !== null;
+    if (!state) return;
+    // It is fetched when someone looks: on the plugins page, or when choosing what a new card shows.
+    const choosing = !!ui.adding && ui.adding.step === 'pick';
+    if (ui.page !== 'plugins' && !choosing && directory.source === null) return;
+    // The first look, or the device was pointed at another directory since.
+    if (!directory.loading && directory.source !== state.directory.source) { loadDirectory(); return; }
+    if (choosing) renderCardPane();
+
+    const offers = (directory.entries || []).map(entry => Object.assign({ entry }, offerState(entry)));
+    const signature = offersSignature();
+    if (signature === ui.directorySignature) return;
+    ui.directorySignature = signature;
+
+    const sourceLine = el('p', { class: 'source-line' }, 'From ', el('b', {}, directory.source || ''),
+        el('button', { type: 'button', onclick: () => { directory.changing = !directory.changing; renderDirectory(); } }, directory.changing ? 'Cancel' : 'Change'));
+    let change = null;
+    if (directory.changing) {
+        const input = el('input', { type: 'text', value: directory.source || '', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+        const use = async source => {
+            if (source && !directoryAddress(source)) { notify('Give "owner/repo" as on GitHub, or the address of an index.json.', true); return; }
+            if (await attempt(() => api('POST', '/api/directory', { source }))) {
+                directory.changing = false;
+                await refresh();
+                loadDirectory();
+            }
+        };
+        change = el('div', { class: 'panel' },
+            el('label', { class: 'field' }, el('span', {}, 'Plugin directory'), input,
+                el('small', {}, 'A GitHub repository with a plugins folder, as "owner/repo" or "owner/repo@branch". Or the full address of an index.json. Only use one you trust: plugins can reach the internet and see the settings you give them.')),
+            el('div', { class: 'row-buttons' },
+                el('button', { type: 'button', class: 'primary', onclick: () => use(input.value.trim()) }, 'Use this directory'),
+                state.directory.source !== state.directory.default
+                    ? el('button', { type: 'button', onclick: () => use('') }, 'Back to ' + state.directory.default) : null));
+    }
+
+    const rows = offers.map(offer => {
+        const entry = offer.entry;
+        const facts = [entry.author ? 'By ' + entry.author : null, entry.version ? 'version ' + entry.version : null].filter(Boolean).join(', ');
+        const address = directory.pages ? directory.pages + entry.file : new URL(entry.file, directory.base).href;
+        const installed = pluginByName(entry.name);
+        const busy = directory.busy === entry.name;
+        const shot = shotAddress(entry);
+        const item = el('div', { class: 'item offer' },
+            // The card as the plugin's author showed it. A picture that will not load just goes away.
+            shot ? el('img', { class: 'shot', src: shot, alt: '', loading: 'lazy', width: '233', height: '135', onerror: event => event.target.remove() }) : null,
+            el('span', { class: 'item-text' },
+                el('span', { class: 'item-title' }, entry.title || entry.name),
+                el('span', { class: 'item-sub' }, entry.description || ''),
+                el('span', { class: 'about-plugin' }, facts, facts ? '. ' : '', el('a', { href: address, target: '_blank', rel: 'noopener' }, 'Read the code'))),
+            el('span', { class: 'actions' },
+                offer.note ? el('small', {}, offer.note) : null,
+                offer.action ? el('button', { type: 'button', class: installed ? null : 'primary', disabled: !!directory.busy, onclick: () => installEntry(entry) }, busy ? 'Installing…' : offer.action) : null,
+                installed && !installed.error ? el('button', { type: 'button', onclick: () => addCardOf(entry.name) }, 'Add a card') : null));
+        item.dataset.name = entry.name;
+        return item;
+    });
+
+    pane.replaceChildren(...[
+        el('div', { class: 'pane-head' }, el('h2', {}, 'Get plugins')),
+        sourceLine, change,
+        directory.loading ? el('p', { class: 'empty' }, 'Looking in the directory…') : null,
+        directory.error ? el('p', { class: 'result error' }, directory.error) : null,
+        directory.error ? el('div', { class: 'row-buttons' }, el('button', { type: 'button', onclick: loadDirectory }, 'Try again')) : null,
+        el('div', { class: 'list' }, rows),
+        !directory.loading && !directory.error && !rows.length ? el('p', { class: 'empty' }, 'This directory is empty.') : null,
+    ].filter(Boolean));
+    scrollToDirectory();
+}
+
+/** Go and add a card of a plugin that was just installed. */
+function addCardOf(name) {
+    const plugin = pluginByName(name);
+    if (!plugin || !plugin.kinds.length) return;
+    ui.adding = plugin.kinds.length === 1 ? { step: 'plugin', plugin, kind: plugin.kinds[0] } : { step: 'pick' };
+    showPage('cards', true);
+    renderCards();
+}
+
+// ------------------------------------------------------------------- wifi
+
+const wifi = { selected: '', signature: '', password: null, form: null };
+
+function buildWifiForm() {
+    wifi.password = el('input', { type: 'password', autocomplete: 'off' });
+    wifi.list = el('div', { class: 'networks' });
+    wifi.connect = el('button', { type: 'button', class: 'primary', disabled: true }, 'Connect');
+    wifi.connect.addEventListener('click', connectWifi);
+    const scan = el('button', { type: 'button', onclick: () => attempt(() => api('POST', '/api/actions/start-wifi-scan'), 'Looking for networks…') }, 'Scan again');
+    wifi.form = el('div', {},
+        wifi.list,
+        el('label', { class: 'field' }, el('span', {}, 'Password'), wifi.password,
+            el('small', {}, 'Leave empty if the network has none.')),
+        el('div', { class: 'row-buttons' }, wifi.connect, scan));
+}
+
+function renderWifi() {
+    const info = deviceStatus.wifi || {};
+    const connected = !!info.is_connected;
+    const pill = $('wifi-pill');
+    pill.textContent = connected ? info.connected_ssid + ', ' + info.ip_address : 'No WiFi';
+    pill.className = 'pill' + (connected ? ' ok' : '');
+
+    // The same form is the first thing on every page while offline, and sits on the Device page once online.
+    $('wifi-setup').hidden = connected;
+    $('wifi-panel').hidden = !connected;
+    const home = connected ? $('wifi-change') : $('wifi-form');
+    if (wifi.form.parentNode !== home) home.appendChild(wifi.form);
+
+    // Strongest signal first, one row per network name.
+    const seen = new Set();
+    const networks = (info.networks || []).filter(n => n.ssid).sort((a, b) => b.rssi - a.rssi)
+        .filter(n => !seen.has(n.ssid) && seen.add(n.ssid));
+    const signature = networks.map(n => n.ssid).join('\n') + '|' + wifi.selected + '|' + info.connected_ssid;
+    if (signature === wifi.signature) return;
+    wifi.signature = signature;
+    wifi.list.replaceChildren(...networks.map(network => {
+        const current = connected && network.ssid === info.connected_ssid;
+        return el('button', {
+            type: 'button', class: 'network' + (network.ssid === wifi.selected ? ' selected' : ''),
+            onclick: () => { wifi.selected = network.ssid; wifi.connect.disabled = false; renderWifi(); wifi.password.focus(); },
+        }, el('span', {}, network.ssid), el('small', {}, current ? 'Connected' : (network.encrypted ? 'Secured' : 'Open')));
+    }));
+    if (!networks.length) wifi.list.appendChild(el('p', { class: 'empty' }, 'Looking for networks…'));
+}
+
+async function connectWifi() {
+    const form = new FormData();
+    form.append('ssid', wifi.selected);
+    form.append('password', wifi.password.value);
+    wifi.connect.disabled = true;
+    const done = await attempt(() => api('POST', '/api/actions/save-wifi', form));
+    wifi.connect.disabled = false;
+    if (done) {
+        notify('DeskHog is joining "' + wifi.selected + '". If this page stops loading, put this device back on your own WiFi and open http://deskhog.local.');
+    }
+}
+
+// ------------------------------------------------------ status and extras
+
+async function pollStatus() {
+    if (document.hidden) return;
+    try {
+        deviceStatus = await api('GET', '/api/status');
+    } catch (error) {
+        $('wifi-pill').textContent = 'Not reachable';
+        $('wifi-pill').className = 'pill';
+        return;
+    }
+    renderWifi();
+    renderAbout();
+}
+
+function renderAbout() {
+    const rows = [];
+    const add = (label, value) => { if (value !== undefined && value !== null && value !== '') rows.push(el('dt', {}, label), el('dd', {}, String(value))); };
+    const kb = bytes => Math.round(bytes / 1024) + ' KB';
+    if (deviceStatus) {
+        add('Firmware', deviceStatus.firmware_version);
+        if (deviceStatus.wifi && deviceStatus.wifi.is_connected) add('Address', deviceStatus.wifi.ip_address);
+    }
+    if (state) {
+        add('Cards', state.cards.length + ' of 12');
+        add('Plugins', state.plugins.length);
+        if (state.storage && state.storage.total) add('Plugin storage', kb(state.storage.used) + ' of ' + kb(state.storage.total) + ' used');
+        const battery = state.device && state.device.status.battery;
+        if (battery) add('Battery', battery.percent + '%' + (battery.charging ? ', charging' : ''));
+        if (state.system) add('Memory free', kb(state.system.psram_free) + ' for plugins, ' + kb(state.system.heap_free) + ' internal');
+    }
+    $('about-list').replaceChildren(...rows);
+    renderFirmware();
+    checkFirmware();
+}
+
+// ------------------------------------------------------------------ firmware
+//
+// Updating the firmware over WiFi. The device has no room for its firmware
+// twice, so it has a small second one, the updater. This page fetches the new
+// firmware (the device itself never goes looking), asks the device to restart
+// into its updater, and hands the file over. The updater writes it and
+// restarts. When that fails the device stays in its updater, where it can be
+// tried again; opened there, the device's address shows the updater's own page.
+
+const firmware = { latest: null, checked: false, busy: false, text: '', failed: null, pending: null, drawn: null };
+var firmwarePause = 2000; // ms between looks while the device restarts
+
+/** What the device says about its firmware, or null on firmware that cannot be updated this way. */
+function firmwareInfo() {
+    const status = state && state.device && state.device.status;
+    return status && status.firmware ? status : null;
+}
+
+function newerVersion(a, b) {
+    const parts = v => String(v).split(/[.-]/).map(Number);
+    const x = parts(a), y = parts(b);
+    for (let i = 0; i < 3; i++) {
+        if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+    }
+    return false;
+}
+
+const firmwareAddress = file => 'https://raw.githubusercontent.com/' + firmwareInfo().update_repo + '/firmware/' + file;
+
+/** Once per visit: ask what the newest release is. Without internet there is simply no offer. */
+async function checkFirmware() {
+    const info = firmwareInfo();
+    // Only when someone is on the Device page: nothing is fetched while nobody looks.
+    if (ui.page !== 'device' || !info || firmware.checked || info.layout !== 2 || !info.update_repo) return;
+    firmware.checked = true;
+    try {
+        const response = await fetch(firmwareAddress('latest.json'), { cache: 'no-store' });
+        if (response.ok) firmware.latest = JSON.parse(await response.text());
+    } catch (error) {
+        firmware.latest = null;
+    }
+    renderFirmware();
+}
+
+function renderFirmware() {
+    const info = firmwareInfo();
+    const latest = firmware.latest;
+    const fits = info && latest && latest.layout === info.layout;
+    const offer = fits && newerVersion(latest.version, info.firmware) ? latest : null;
+    // The newest release once more, over what is there: the same version, or a build of your own.
+    const again = fits && !offer ? latest : null;
+    // Only redraw when something changed: a file dialog may be open.
+    const drawn = JSON.stringify([info && [info.firmware, info.layout], offer && offer.version, again && again.version, !!latest, firmware.busy, firmware.text, firmware.failed]);
+    if (drawn === firmware.drawn) return;
+    firmware.drawn = drawn;
+    const box = $('firmware-box');
+    const hint = (...parts) => el('p', { class: 'hint' }, ...parts);
+    if (!info) {
+        box.replaceChildren(hint('Plugins update over WiFi, from this page. Firmware updates are installed over USB: ',
+            el('a', { href: 'https://github.com/TimBroddin/DeskHog/releases/latest', target: '_blank', rel: 'noopener' }, 'see the latest release'), ' for the file and how to install it.'));
+        return;
+    }
+    if (info.layout !== 2) {
+        box.replaceChildren(hint('Firmware updates over WiFi need the newer flash layout. Moving this device to it is done once, over USB, and keeps your plugins and cards: run ',
+            el('code', {}, 'tools/deskhog migrate'), ' from the DeskHog source.'));
+        return;
+    }
+    if (firmware.busy) {
+        box.replaceChildren(el('p', { class: 'hint', role: 'status', id: 'firmware-progress' }, firmware.text));
+        return;
+    }
+    const picker = el('input', { type: 'file', accept: '.bin', hidden: true, id: 'firmware-file' });
+    picker.addEventListener('change', () => {
+        const file = picker.files[0];
+        if (file && window.confirm('Install ' + file.name + ' as the firmware of this DeskHog? It restarts and is back in about two minutes.')) installFirmware(file, '', '');
+    });
+    const parts = [];
+    if (firmware.failed) {
+        parts.push(el('p', { class: 'hint error', id: 'firmware-error' }, 'The update did not work: ' + firmware.failed));
+        if (firmware.pending) parts.push(el('div', { class: 'row-buttons' }, el('button', { type: 'button', id: 'firmware-retry', onclick: () => installFirmware(firmware.pending.file, firmware.pending.sha256, firmware.pending.version) }, 'Try again')));
+    } else if (offer) {
+        parts.push(hint('Firmware ' + offer.version + ' is available. ',
+            offer.notes ? el('a', { href: offer.notes, target: '_blank', rel: 'noopener' }, 'What is new') : null));
+    } else if (again) {
+        parts.push(hint(again.version === info.firmware ? 'This is the newest firmware.' : 'This firmware is newer than the latest release, ' + again.version + '.'));
+    }
+    parts.push(el('div', { class: 'row-buttons' },
+        offer && !firmware.failed ? el('button', { type: 'button', class: 'primary', id: 'firmware-update', onclick: () => updateToLatest('Update this DeskHog to firmware ' + offer.version + '?') }, 'Update to ' + offer.version) : null,
+        again && !firmware.failed ? el('button', { type: 'button', id: 'firmware-reinstall', onclick: () => updateToLatest(again.version === info.firmware
+            ? 'Install firmware ' + again.version + ' again?'
+            : 'Replace firmware ' + info.firmware + ' with the newest release, ' + again.version + '?') }, again.version === info.firmware ? 'Reinstall firmware' : 'Install release ' + again.version) : null,
+        el('button', { type: 'button', id: 'firmware-choose', onclick: () => picker.click() }, 'Install a firmware file...'), picker));
+    box.replaceChildren(...parts);
+}
+
+function firmwareSay(text) {
+    firmware.busy = true;
+    firmware.text = text;
+    renderFirmware();
+}
+
+function firmwareFailed(error) {
+    firmware.busy = false;
+    firmware.failed = error.message;
+    renderFirmware();
+}
+
+/** GET /api/status, from the firmware or from the updater; null while the device is away. */
+async function firmwareStatus() {
+    try {
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        return response.ok ? JSON.parse(await response.text()) : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function waitForFirmware(wanted, tries) {
+    for (let i = 0; i < tries; i++) {
+        await new Promise(resolve => setTimeout(resolve, firmwarePause));
+        const status = await firmwareStatus();
+        if (status && wanted(status)) return status;
+    }
+    return null;
+}
+
+async function updateToLatest(question) {
+    const latest = firmware.latest;
+    if (!window.confirm(question + ' It restarts and is back in about two minutes. Plugins, cards and settings stay.')) return;
+    firmware.failed = null;
+    firmwareSay('Downloading firmware ' + latest.version + '...');
+    try {
+        const response = await fetch(firmwareAddress(latest.file), { cache: 'no-store' });
+        if (!response.ok) throw new Error('The firmware could not be downloaded (' + response.status + ').');
+        const data = new Uint8Array(await response.arrayBuffer());
+        if (latest.size && data.length !== latest.size) throw new Error('The download is incomplete. Try again.');
+        await installFirmware(new Blob([data]), latest.sha256 || '', latest.version);
+    } catch (error) {
+        firmwareFailed(error.message === 'Failed to fetch' ? new Error('The firmware could not be downloaded.') : error);
+    }
+}
+
+async function installFirmware(file, sha256, version) {
+    firmware.failed = null;
+    firmware.pending = { file, sha256, version };
+    try {
+        let status = await firmwareStatus();
+        if (!status || !status.updater) {
+            firmwareSay('Restarting the DeskHog into its updater...');
+            await api('POST', '/api/update/start', {});
+            status = await waitForFirmware(s => s.updater, 45);
+            if (!status) throw new Error('The DeskHog did not come back in its updater. Reload this page in a moment.');
+        }
+        if (status.slot_size && file.size > status.slot_size) throw new Error('That file is too large to be firmware for this device.');
+        firmwareSay('Installing' + (version ? ' firmware ' + version : '') + '. This takes about a minute. Do not unplug the DeskHog.');
+        const body = new FormData();
+        body.append('firmware', file, 'firmware.bin');
+        await api('POST', '/api/firmware?size=' + file.size + (sha256 ? '&sha256=' + sha256 : ''), body);
+        firmwareSay('Installed. The DeskHog is restarting...');
+        const back = await waitForFirmware(s => !s.updater, 60);
+        firmware.busy = false;
+        firmware.pending = null;
+        if (!back) throw new Error('The firmware was installed, but the DeskHog has not come back yet. Reload this page in a moment.');
+        await refresh();
+        const now = firmwareInfo();
+        notify('The DeskHog now runs firmware ' + (now ? now.firmware : version) + '.');
+        renderFirmware();
+    } catch (error) {
+        firmwareFailed(error);
+    }
+}
+
+// ------------------------------------------------------------------ start
+
+function start() {
+    buildWifiForm();
+
+    // Pages: the address remembers which one, so reloading stays put.
+    document.querySelectorAll('a[data-page]').forEach(link => link.addEventListener('click', event => {
+        event.preventDefault();
+        showPage(link.dataset.page, true);
+    }));
+    window.addEventListener('hashchange', () => showPage(location.hash.slice(1)));
+    showPage(location.hash.slice(1));
+
+    $('add-card-btn').addEventListener('click', startAdding);
+    $('cards-get-plugins-btn').addEventListener('click', showDirectory);
+    $('new-plugin-btn').addEventListener('click', () => openPluginEditor('', NEW_PLUGIN_TEMPLATE, true));
+    $('save-plugin-btn').addEventListener('click', savePlugin);
+    $('delete-plugin-btn').addEventListener('click', deletePlugin);
+    $('close-plugin-btn').addEventListener('click', closePluginEditor);
+    $('upload-plugin-btn').addEventListener('click', () => $('upload-plugin-input').click());
+    $('upload-plugin-input').addEventListener('change', event => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const name = file.name.replace(/\.lua$/i, '').toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 32);
+        const reader = new FileReader();
+        reader.onload = () => openPluginEditor(name, reader.result, true);
+        reader.readAsText(file);
+        event.target.value = '';
+    });
+
+    const source = $('plugin-source');
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+    $('save-keys').textContent = mac ? '⌘S' : 'Ctrl+S';
+    source.addEventListener('input', updateGutter);
+    source.addEventListener('scroll', () => { $('plugin-gutter').scrollTop = source.scrollTop; });
+    source.addEventListener('keydown', event => {
+        if (event.key !== 'Tab') return;
+        // Tab indents instead of leaving the editor.
+        event.preventDefault();
+        const at = source.selectionStart;
+        source.value = source.value.slice(0, at) + '  ' + source.value.slice(source.selectionEnd);
+        source.selectionStart = source.selectionEnd = at + 2;
+    });
+    document.addEventListener('keydown', event => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && ui.page === 'plugins' && ui.openPlugin !== null) {
+            event.preventDefault();
+            savePlugin();
+        } else if (event.key === 'Escape') {
+            if (ui.page === 'cards' && (ui.adding || ui.openCard)) closeCardPane();
+            else if (ui.page === 'connections' && ui.openConnection) { ui.openConnection = null; renderConnections(); }
+        }
+    });
+
+    pollStatus();
+    refresh();
+    setInterval(pollStatus, 3000);
+    setInterval(refresh, 3000);
+    setInterval(watchOpenCard, 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollStatus(); refresh(); } });
+}
+
+// The places someone can pick as a time zone, and what the device is told for
+// each: a POSIX TZ string. See "time zones" above.
+// <timezones> Written by tools/timezones from the tz database. Do not edit by hand.
+const TIME_ZONES = {
+"UTC":"UTC0",
+"Africa/Abidjan":"GMT0",
+"Africa/Accra":"GMT0",
+"Africa/Addis_Ababa":"EAT-3",
+"Africa/Algiers":"CET-1",
+"Africa/Asmara":"EAT-3",
+"Africa/Bamako":"GMT0",
+"Africa/Bangui":"WAT-1",
+"Africa/Banjul":"GMT0",
+"Africa/Bissau":"GMT0",
+"Africa/Blantyre":"CAT-2",
+"Africa/Brazzaville":"WAT-1",
+"Africa/Bujumbura":"CAT-2",
+"Africa/Cairo":"EET-2EEST,M4.5.5/0,M10.5.4/24",
+"Africa/Casablanca":"<+00>0",
+"Africa/Ceuta":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Africa/Conakry":"GMT0",
+"Africa/Dakar":"GMT0",
+"Africa/Dar_es_Salaam":"EAT-3",
+"Africa/Djibouti":"EAT-3",
+"Africa/Douala":"WAT-1",
+"Africa/El_Aaiun":"<+00>0",
+"Africa/Freetown":"GMT0",
+"Africa/Gaborone":"CAT-2",
+"Africa/Harare":"CAT-2",
+"Africa/Johannesburg":"SAST-2",
+"Africa/Juba":"CAT-2",
+"Africa/Kampala":"EAT-3",
+"Africa/Khartoum":"CAT-2",
+"Africa/Kigali":"CAT-2",
+"Africa/Kinshasa":"WAT-1",
+"Africa/Lagos":"WAT-1",
+"Africa/Libreville":"WAT-1",
+"Africa/Lome":"GMT0",
+"Africa/Luanda":"WAT-1",
+"Africa/Lubumbashi":"CAT-2",
+"Africa/Lusaka":"CAT-2",
+"Africa/Malabo":"WAT-1",
+"Africa/Maputo":"CAT-2",
+"Africa/Maseru":"SAST-2",
+"Africa/Mbabane":"SAST-2",
+"Africa/Mogadishu":"EAT-3",
+"Africa/Monrovia":"GMT0",
+"Africa/Nairobi":"EAT-3",
+"Africa/Ndjamena":"WAT-1",
+"Africa/Niamey":"WAT-1",
+"Africa/Nouakchott":"GMT0",
+"Africa/Ouagadougou":"GMT0",
+"Africa/Porto-Novo":"WAT-1",
+"Africa/Sao_Tome":"GMT0",
+"Africa/Tripoli":"EET-2",
+"Africa/Tunis":"CET-1",
+"Africa/Windhoek":"CAT-2",
+"America/Adak":"HST10HDT,M3.2.0,M11.1.0",
+"America/Anchorage":"AKST9AKDT,M3.2.0,M11.1.0",
+"America/Anguilla":"AST4",
+"America/Antigua":"AST4",
+"America/Araguaina":"<-03>3",
+"America/Argentina/Buenos_Aires":"<-03>3",
+"America/Argentina/Catamarca":"<-03>3",
+"America/Argentina/Cordoba":"<-03>3",
+"America/Argentina/Jujuy":"<-03>3",
+"America/Argentina/La_Rioja":"<-03>3",
+"America/Argentina/Mendoza":"<-03>3",
+"America/Argentina/Rio_Gallegos":"<-03>3",
+"America/Argentina/Salta":"<-03>3",
+"America/Argentina/San_Juan":"<-03>3",
+"America/Argentina/San_Luis":"<-03>3",
+"America/Argentina/Tucuman":"<-03>3",
+"America/Argentina/Ushuaia":"<-03>3",
+"America/Aruba":"AST4",
+"America/Asuncion":"<-03>3",
+"America/Atikokan":"EST5",
+"America/Bahia":"<-03>3",
+"America/Bahia_Banderas":"CST6",
+"America/Barbados":"AST4",
+"America/Belem":"<-03>3",
+"America/Belize":"CST6",
+"America/Blanc-Sablon":"AST4",
+"America/Boa_Vista":"<-04>4",
+"America/Bogota":"<-05>5",
+"America/Boise":"MST7MDT,M3.2.0,M11.1.0",
+"America/Cambridge_Bay":"MST7MDT,M3.2.0,M11.1.0",
+"America/Campo_Grande":"<-04>4",
+"America/Cancun":"EST5",
+"America/Caracas":"<-04>4",
+"America/Cayenne":"<-03>3",
+"America/Cayman":"EST5",
+"America/Chicago":"CST6CDT,M3.2.0,M11.1.0",
+"America/Chihuahua":"CST6",
+"America/Ciudad_Juarez":"MST7MDT,M3.2.0,M11.1.0",
+"America/Costa_Rica":"CST6",
+"America/Coyhaique":"<-03>3",
+"America/Creston":"MST7",
+"America/Cuiaba":"<-04>4",
+"America/Curacao":"AST4",
+"America/Danmarkshavn":"GMT0",
+"America/Dawson":"MST7",
+"America/Dawson_Creek":"MST7",
+"America/Denver":"MST7MDT,M3.2.0,M11.1.0",
+"America/Detroit":"EST5EDT,M3.2.0,M11.1.0",
+"America/Dominica":"AST4",
+"America/Edmonton":"CST6",
+"America/Eirunepe":"<-05>5",
+"America/El_Salvador":"CST6",
+"America/Fort_Nelson":"MST7",
+"America/Fortaleza":"<-03>3",
+"America/Glace_Bay":"AST4ADT,M3.2.0,M11.1.0",
+"America/Goose_Bay":"AST4ADT,M3.2.0,M11.1.0",
+"America/Grand_Turk":"EST5EDT,M3.2.0,M11.1.0",
+"America/Grenada":"AST4",
+"America/Guadeloupe":"AST4",
+"America/Guatemala":"CST6",
+"America/Guayaquil":"<-05>5",
+"America/Guyana":"<-04>4",
+"America/Halifax":"AST4ADT,M3.2.0,M11.1.0",
+"America/Havana":"CST5CDT,M3.2.0/0,M11.1.0/1",
+"America/Hermosillo":"MST7",
+"America/Indiana/Indianapolis":"EST5EDT,M3.2.0,M11.1.0",
+"America/Indiana/Knox":"CST6CDT,M3.2.0,M11.1.0",
+"America/Indiana/Marengo":"EST5EDT,M3.2.0,M11.1.0",
+"America/Indiana/Petersburg":"EST5EDT,M3.2.0,M11.1.0",
+"America/Indiana/Tell_City":"CST6CDT,M3.2.0,M11.1.0",
+"America/Indiana/Vevay":"EST5EDT,M3.2.0,M11.1.0",
+"America/Indiana/Vincennes":"EST5EDT,M3.2.0,M11.1.0",
+"America/Indiana/Winamac":"EST5EDT,M3.2.0,M11.1.0",
+"America/Inuvik":"CST6",
+"America/Iqaluit":"EST5EDT,M3.2.0,M11.1.0",
+"America/Jamaica":"EST5",
+"America/Juneau":"AKST9AKDT,M3.2.0,M11.1.0",
+"America/Kentucky/Louisville":"EST5EDT,M3.2.0,M11.1.0",
+"America/Kentucky/Monticello":"EST5EDT,M3.2.0,M11.1.0",
+"America/Kralendijk":"AST4",
+"America/La_Paz":"<-04>4",
+"America/Lima":"<-05>5",
+"America/Los_Angeles":"PST8PDT,M3.2.0,M11.1.0",
+"America/Lower_Princes":"AST4",
+"America/Maceio":"<-03>3",
+"America/Managua":"CST6",
+"America/Manaus":"<-04>4",
+"America/Marigot":"AST4",
+"America/Martinique":"AST4",
+"America/Matamoros":"CST6CDT,M3.2.0,M11.1.0",
+"America/Mazatlan":"MST7",
+"America/Menominee":"CST6CDT,M3.2.0,M11.1.0",
+"America/Merida":"CST6",
+"America/Metlakatla":"AKST9AKDT,M3.2.0,M11.1.0",
+"America/Mexico_City":"CST6",
+"America/Miquelon":"<-03>3<-02>,M3.2.0,M11.1.0",
+"America/Moncton":"AST4ADT,M3.2.0,M11.1.0",
+"America/Monterrey":"CST6",
+"America/Montevideo":"<-03>3",
+"America/Montserrat":"AST4",
+"America/Nassau":"EST5EDT,M3.2.0,M11.1.0",
+"America/New_York":"EST5EDT,M3.2.0,M11.1.0",
+"America/Nome":"AKST9AKDT,M3.2.0,M11.1.0",
+"America/Noronha":"<-02>2",
+"America/North_Dakota/Beulah":"CST6CDT,M3.2.0,M11.1.0",
+"America/North_Dakota/Center":"CST6CDT,M3.2.0,M11.1.0",
+"America/North_Dakota/New_Salem":"CST6CDT,M3.2.0,M11.1.0",
+"America/Nuuk":"<-02>2<-01>,M3.5.0/-1,M10.5.0/0",
+"America/Ojinaga":"CST6CDT,M3.2.0,M11.1.0",
+"America/Panama":"EST5",
+"America/Paramaribo":"<-03>3",
+"America/Phoenix":"MST7",
+"America/Port-au-Prince":"EST5EDT,M3.2.0,M11.1.0",
+"America/Port_of_Spain":"AST4",
+"America/Porto_Velho":"<-04>4",
+"America/Puerto_Rico":"AST4",
+"America/Punta_Arenas":"<-03>3",
+"America/Rankin_Inlet":"CST6CDT,M3.2.0,M11.1.0",
+"America/Recife":"<-03>3",
+"America/Regina":"CST6",
+"America/Resolute":"CST6CDT,M3.2.0,M11.1.0",
+"America/Rio_Branco":"<-05>5",
+"America/Santarem":"<-03>3",
+"America/Santiago":"<-04>4<-03>,M9.1.6/24,M4.1.6/24",
+"America/Santo_Domingo":"AST4",
+"America/Sao_Paulo":"<-03>3",
+"America/Scoresbysund":"<-02>2<-01>,M3.5.0/-1,M10.5.0/0",
+"America/Sitka":"AKST9AKDT,M3.2.0,M11.1.0",
+"America/St_Barthelemy":"AST4",
+"America/St_Johns":"NST3:30NDT,M3.2.0,M11.1.0",
+"America/St_Kitts":"AST4",
+"America/St_Lucia":"AST4",
+"America/St_Thomas":"AST4",
+"America/St_Vincent":"AST4",
+"America/Swift_Current":"CST6",
+"America/Tegucigalpa":"CST6",
+"America/Thule":"AST4ADT,M3.2.0,M11.1.0",
+"America/Tijuana":"PST8PDT,M3.2.0,M11.1.0",
+"America/Toronto":"EST5EDT,M3.2.0,M11.1.0",
+"America/Tortola":"AST4",
+"America/Vancouver":"MST7",
+"America/Whitehorse":"MST7",
+"America/Winnipeg":"EST5",
+"America/Yakutat":"AKST9AKDT,M3.2.0,M11.1.0",
+"Antarctica/Casey":"<+08>-8",
+"Antarctica/Davis":"<+07>-7",
+"Antarctica/DumontDUrville":"<+10>-10",
+"Antarctica/Macquarie":"AEST-10AEDT,M10.1.0,M4.1.0/3",
+"Antarctica/Mawson":"<+05>-5",
+"Antarctica/McMurdo":"NZST-12NZDT,M9.5.0,M4.1.0/3",
+"Antarctica/Palmer":"<-03>3",
+"Antarctica/Rothera":"<-03>3",
+"Antarctica/Syowa":"<+03>-3",
+"Antarctica/Troll":"<+00>0<+02>-2,M3.5.0/1,M10.5.0/3",
+"Antarctica/Vostok":"<+05>-5",
+"Arctic/Longyearbyen":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Asia/Aden":"<+03>-3",
+"Asia/Almaty":"<+05>-5",
+"Asia/Amman":"<+03>-3",
+"Asia/Anadyr":"<+12>-12",
+"Asia/Aqtau":"<+05>-5",
+"Asia/Aqtobe":"<+05>-5",
+"Asia/Ashgabat":"<+05>-5",
+"Asia/Atyrau":"<+05>-5",
+"Asia/Baghdad":"<+03>-3",
+"Asia/Bahrain":"<+03>-3",
+"Asia/Baku":"<+04>-4",
+"Asia/Bangkok":"<+07>-7",
+"Asia/Barnaul":"<+07>-7",
+"Asia/Beirut":"EET-2EEST,M3.5.0/0,M10.5.0/0",
+"Asia/Bishkek":"<+06>-6",
+"Asia/Brunei":"<+08>-8",
+"Asia/Chita":"<+09>-9",
+"Asia/Colombo":"<+0530>-5:30",
+"Asia/Damascus":"<+03>-3",
+"Asia/Dhaka":"<+06>-6",
+"Asia/Dili":"<+09>-9",
+"Asia/Dubai":"<+04>-4",
+"Asia/Dushanbe":"<+05>-5",
+"Asia/Famagusta":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Asia/Gaza":"EET-2EEST,M3.4.4/50,M10.4.4/50",
+"Asia/Hebron":"EET-2EEST,M3.4.4/50,M10.4.4/50",
+"Asia/Ho_Chi_Minh":"<+07>-7",
+"Asia/Hong_Kong":"HKT-8",
+"Asia/Hovd":"<+07>-7",
+"Asia/Irkutsk":"<+08>-8",
+"Asia/Jakarta":"WIB-7",
+"Asia/Jayapura":"WIT-9",
+"Asia/Jerusalem":"IST-2IDT,M3.4.4/26,M10.5.0",
+"Asia/Kabul":"<+0430>-4:30",
+"Asia/Kamchatka":"<+12>-12",
+"Asia/Karachi":"PKT-5",
+"Asia/Kathmandu":"<+0545>-5:45",
+"Asia/Khandyga":"<+09>-9",
+"Asia/Kolkata":"IST-5:30",
+"Asia/Krasnoyarsk":"<+07>-7",
+"Asia/Kuala_Lumpur":"<+08>-8",
+"Asia/Kuching":"<+08>-8",
+"Asia/Kuwait":"<+03>-3",
+"Asia/Macau":"CST-8",
+"Asia/Magadan":"<+11>-11",
+"Asia/Makassar":"WITA-8",
+"Asia/Manila":"PST-8",
+"Asia/Muscat":"<+04>-4",
+"Asia/Nicosia":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Asia/Novokuznetsk":"<+07>-7",
+"Asia/Novosibirsk":"<+07>-7",
+"Asia/Omsk":"<+06>-6",
+"Asia/Oral":"<+05>-5",
+"Asia/Phnom_Penh":"<+07>-7",
+"Asia/Pontianak":"WIB-7",
+"Asia/Pyongyang":"KST-9",
+"Asia/Qatar":"<+03>-3",
+"Asia/Qostanay":"<+05>-5",
+"Asia/Qyzylorda":"<+05>-5",
+"Asia/Riyadh":"<+03>-3",
+"Asia/Sakhalin":"<+11>-11",
+"Asia/Samarkand":"<+05>-5",
+"Asia/Seoul":"KST-9",
+"Asia/Shanghai":"CST-8",
+"Asia/Singapore":"<+08>-8",
+"Asia/Srednekolymsk":"<+11>-11",
+"Asia/Taipei":"CST-8",
+"Asia/Tashkent":"<+05>-5",
+"Asia/Tbilisi":"<+04>-4",
+"Asia/Tehran":"<+0330>-3:30",
+"Asia/Thimphu":"<+06>-6",
+"Asia/Tokyo":"JST-9",
+"Asia/Tomsk":"<+07>-7",
+"Asia/Ulaanbaatar":"<+08>-8",
+"Asia/Urumqi":"<+06>-6",
+"Asia/Ust-Nera":"<+10>-10",
+"Asia/Vientiane":"<+07>-7",
+"Asia/Vladivostok":"<+10>-10",
+"Asia/Yakutsk":"<+09>-9",
+"Asia/Yangon":"<+0630>-6:30",
+"Asia/Yekaterinburg":"<+05>-5",
+"Asia/Yerevan":"<+04>-4",
+"Atlantic/Azores":"<-01>1<+00>,M3.5.0/0,M10.5.0/1",
+"Atlantic/Bermuda":"AST4ADT,M3.2.0,M11.1.0",
+"Atlantic/Canary":"WET0WEST,M3.5.0/1,M10.5.0",
+"Atlantic/Cape_Verde":"<-01>1",
+"Atlantic/Faroe":"WET0WEST,M3.5.0/1,M10.5.0",
+"Atlantic/Madeira":"WET0WEST,M3.5.0/1,M10.5.0",
+"Atlantic/Reykjavik":"GMT0",
+"Atlantic/South_Georgia":"<-02>2",
+"Atlantic/St_Helena":"GMT0",
+"Atlantic/Stanley":"<-03>3",
+"Australia/Adelaide":"ACST-9:30ACDT,M10.1.0,M4.1.0/3",
+"Australia/Brisbane":"AEST-10",
+"Australia/Broken_Hill":"ACST-9:30ACDT,M10.1.0,M4.1.0/3",
+"Australia/Darwin":"ACST-9:30",
+"Australia/Eucla":"<+0845>-8:45",
+"Australia/Hobart":"AEST-10AEDT,M10.1.0,M4.1.0/3",
+"Australia/Lindeman":"AEST-10",
+"Australia/Lord_Howe":"<+1030>-10:30<+11>-11,M10.1.0,M4.1.0",
+"Australia/Melbourne":"AEST-10AEDT,M10.1.0,M4.1.0/3",
+"Australia/Perth":"AWST-8",
+"Australia/Sydney":"AEST-10AEDT,M10.1.0,M4.1.0/3",
+"Europe/Amsterdam":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Andorra":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Astrakhan":"<+04>-4",
+"Europe/Athens":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Belgrade":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Berlin":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Bratislava":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Brussels":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Bucharest":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Budapest":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Busingen":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Chisinau":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Copenhagen":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Dublin":"GMT0IST,M3.5.0/1,M10.5.0",
+"Europe/Gibraltar":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Guernsey":"GMT0BST,M3.5.0/1,M10.5.0",
+"Europe/Helsinki":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Isle_of_Man":"GMT0BST,M3.5.0/1,M10.5.0",
+"Europe/Istanbul":"<+03>-3",
+"Europe/Jersey":"GMT0BST,M3.5.0/1,M10.5.0",
+"Europe/Kaliningrad":"EET-2",
+"Europe/Kirov":"MSK-3",
+"Europe/Kyiv":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Lisbon":"WET0WEST,M3.5.0/1,M10.5.0",
+"Europe/Ljubljana":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/London":"GMT0BST,M3.5.0/1,M10.5.0",
+"Europe/Luxembourg":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Madrid":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Malta":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Mariehamn":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Minsk":"<+03>-3",
+"Europe/Monaco":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Moscow":"MSK-3",
+"Europe/Oslo":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Paris":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Podgorica":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Prague":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Riga":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Rome":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Samara":"<+04>-4",
+"Europe/San_Marino":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Sarajevo":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Saratov":"<+04>-4",
+"Europe/Simferopol":"MSK-3",
+"Europe/Skopje":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Sofia":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Stockholm":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Tallinn":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Tirane":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Ulyanovsk":"<+04>-4",
+"Europe/Vaduz":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Vatican":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Vienna":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Vilnius":"EET-2EEST,M3.5.0/3,M10.5.0/4",
+"Europe/Volgograd":"MSK-3",
+"Europe/Warsaw":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Zagreb":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Europe/Zurich":"CET-1CEST,M3.5.0,M10.5.0/3",
+"Indian/Antananarivo":"EAT-3",
+"Indian/Chagos":"<+06>-6",
+"Indian/Christmas":"<+07>-7",
+"Indian/Cocos":"<+0630>-6:30",
+"Indian/Comoro":"EAT-3",
+"Indian/Kerguelen":"<+05>-5",
+"Indian/Mahe":"<+04>-4",
+"Indian/Maldives":"<+05>-5",
+"Indian/Mauritius":"<+04>-4",
+"Indian/Mayotte":"EAT-3",
+"Indian/Reunion":"<+04>-4",
+"Pacific/Apia":"<+13>-13",
+"Pacific/Auckland":"NZST-12NZDT,M9.5.0,M4.1.0/3",
+"Pacific/Bougainville":"<+11>-11",
+"Pacific/Chatham":"<+1245>-12:45<+1345>,M9.5.0/2:45,M4.1.0/3:45",
+"Pacific/Chuuk":"<+10>-10",
+"Pacific/Easter":"<-06>6<-05>,M9.1.6/22,M4.1.6/22",
+"Pacific/Efate":"<+11>-11",
+"Pacific/Fakaofo":"<+13>-13",
+"Pacific/Fiji":"<+12>-12",
+"Pacific/Funafuti":"<+12>-12",
+"Pacific/Galapagos":"<-06>6",
+"Pacific/Gambier":"<-09>9",
+"Pacific/Guadalcanal":"<+11>-11",
+"Pacific/Guam":"ChST-10",
+"Pacific/Honolulu":"HST10",
+"Pacific/Kanton":"<+13>-13",
+"Pacific/Kiritimati":"<+14>-14",
+"Pacific/Kosrae":"<+11>-11",
+"Pacific/Kwajalein":"<+12>-12",
+"Pacific/Majuro":"<+12>-12",
+"Pacific/Marquesas":"<-0930>9:30",
+"Pacific/Midway":"SST11",
+"Pacific/Nauru":"<+12>-12",
+"Pacific/Niue":"<-11>11",
+"Pacific/Norfolk":"<+11>-11<+12>,M10.1.0,M4.1.0/3",
+"Pacific/Noumea":"<+11>-11",
+"Pacific/Pago_Pago":"SST11",
+"Pacific/Palau":"<+09>-9",
+"Pacific/Pitcairn":"<-08>8",
+"Pacific/Pohnpei":"<+11>-11",
+"Pacific/Port_Moresby":"<+10>-10",
+"Pacific/Rarotonga":"<-10>10",
+"Pacific/Saipan":"ChST-10",
+"Pacific/Tahiti":"<-10>10",
+"Pacific/Tarawa":"<+12>-12",
+"Pacific/Tongatapu":"<+13>-13",
+"Pacific/Wake":"<+12>-12",
+"Pacific/Wallis":"<+12>-12",
+};
+// </timezones>
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+else start();

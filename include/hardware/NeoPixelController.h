@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Arduino.h>
+#include <atomic>
 #include <FastLED.h>
 
 // Define the data pin for the NeoPixel. 
@@ -14,6 +16,21 @@ public:
     void begin();
     void update();
 
+    /**
+     * Show a fixed color instead of the breathing animation. Safe to call from any task.
+     * @param durationMs How long to hold it; 0 holds it until clearOverride().
+     */
+    void setOverride(uint8_t r, uint8_t g, uint8_t b, uint32_t durationMs);
+
+    /** Go back to the breathing animation. */
+    void clearOverride();
+
+    /**
+     * How bright everything the LED shows is, in percent: the breathing, the
+     * fixed colors and notify flashes alike. 0 is dark. Safe to call from any task.
+     */
+    void setLevel(uint8_t percent);
+
 private:
     static constexpr uint8_t NUM_PIXELS = 1;
     static constexpr uint16_t UPDATE_INTERVAL_MS = 16;  // ~60fps
@@ -23,6 +40,11 @@ private:
     // static constexpr uint8_t DATA_PIN = 33; // Explicitly define data pin for FastLED
 
     CRGB leds[NUM_PIXELS]; // Changed from Adafruit_NeoPixel pixel;
+
+    static constexpr uint32_t OVERRIDE_ACTIVE = 0x01000000;
+    std::atomic<uint32_t> overrideColor{0};  ///< OVERRIDE_ACTIVE | 0xRRGGBB, or 0
+    std::atomic<uint32_t> overrideUntil{0};  ///< millis() deadline, or 0 for none
+    std::atomic<uint8_t> level{100};         ///< Percent
     unsigned long lastUpdate;
     float breathPhase;
 }; 

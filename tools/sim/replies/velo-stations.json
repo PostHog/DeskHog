@@ -1,0 +1,32 @@
+{
+ "ttl": 60,
+ "version": "2.0",
+ "data": {
+  "stations": [
+   {
+    "station_id": "001",
+    "name": "001- Centraal Station - Astrid",
+    "short_name": "001",
+    "lat": 51.21782,
+    "lon": 4.42065,
+    "capacity": 33
+   },
+   {
+    "station_id": "002",
+    "name": "002- Centraal Station - Astrid 2",
+    "short_name": "002",
+    "lat": 51.21756,
+    "lon": 4.42073,
+    "capacity": 36
+   },
+   {
+    "station_id": "036",
+    "name": "036- Groenplaats",
+    "short_name": "036",
+    "lat": 51.21897,
+    "lon": 4.40164,
+    "capacity": 36
+   }
+  ]
+ }
+}

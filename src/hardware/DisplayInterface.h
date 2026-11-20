@@ -89,9 +89,9 @@ public:
     /**
      * @brief Set display backlight brightness
      * 
-     * @param brightness Brightness level (0-255)
+     * @param percent 0 to 100; 0 switches the backlight off
      */
-    void setBrightness(uint8_t brightness);
+    void setBrightness(uint8_t percent);
 
 private:
     uint16_t _screen_width;

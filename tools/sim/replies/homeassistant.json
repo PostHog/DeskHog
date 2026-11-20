@@ -1,0 +1,1 @@
+{"entity_id":"sensor.office_temperature","state":"21.4","attributes":{"friendly_name":"Office","unit_of_measurement":"°C","device_class":"temperature"}}

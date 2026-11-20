@@ -1,6 +1,19 @@
 #include "WifiInterface.h"
 #include "ui/ProvisioningCard.h"
 
+namespace {
+
+// The name the router lists the device under. WiFi.setHostname takes effect
+// when station mode starts; a station that is already started takes it
+// directly, for the next time it asks for an address.
+void useDeviceName(ConfigManager& config) {
+    const std::string name = config.getDeviceSettings().name;
+    WiFi.setHostname(name.c_str());
+    WiFi.STA.setHostname(name.c_str());
+}
+
+}  // namespace
+
 WiFiInterface* WiFiInterface::_instance = nullptr;
 WiFiStateCallback WiFiInterface::_stateCallback = nullptr;
 
@@ -52,18 +65,18 @@ void WiFiInterface::updateState(WiFiState newState) {
     if (_eventQueue != nullptr) {
         switch (newState) {
             case WiFiState::CONNECTING:
-                _eventQueue->publishEvent(EventType::WIFI_CONNECTING, "");
+                _eventQueue->publishEvent(EventType::WIFI_CONNECTING);
                 break;
             case WiFiState::CONNECTED:
-                _eventQueue->publishEvent(EventType::WIFI_CONNECTED, "");
+                _eventQueue->publishEvent(EventType::WIFI_CONNECTED);
                 break;
             case WiFiState::DISCONNECTED:
                 if (!_configManager.hasWiFiCredentials()) {
-                    _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS, "");
+                    _eventQueue->publishEvent(EventType::NEED_WIFI_CREDENTIALS);
                 }
                 break;
             case WiFiState::AP_MODE:
-                _eventQueue->publishEvent(EventType::WIFI_AP_STARTED, "");
+                _eventQueue->publishEvent(EventType::WIFI_AP_STARTED);
                 break;
         }
     }
@@ -82,6 +95,7 @@ void WiFiInterface::begin() {
     WiFi.onEvent(onWiFiEvent);
     
     // Initialize WiFi
+    useDeviceName(_configManager);
     WiFi.mode(WIFI_STA);
     
     // Enable WiFi power save mode
@@ -109,15 +123,19 @@ bool WiFiInterface::connectToStoredNetwork(unsigned long timeout) {
     Serial.print("Connecting to WiFi: ");
     Serial.println(_ssid);
     
-    updateState(WiFiState::CONNECTING);
+    // Set the clock before the state: process() runs on another task and
+    // checks the timeout as soon as it sees CONNECTING. With the old order it
+    // could see a timeout of zero and give up at once.
     _connectionStartTime = millis();
     _connectionTimeout = timeout;
+    updateState(WiFiState::CONNECTING);
     
     if (_ui) {
         _ui->updateConnectionStatus("Connecting");
     }
     
     // Start connection attempt
+    useDeviceName(_configManager);
     WiFi.begin(_ssid.c_str(), _password.c_str());
     
     return true;
@@ -143,6 +161,7 @@ void WiFiInterface::startAccessPoint() {
         }
     }
     
+    _apStartedAt = millis();
     updateState(WiFiState::AP_MODE);
     
     if (_ui) {
@@ -189,10 +208,25 @@ void WiFiInterface::process() {
         _dnsServer->processNextRequest();
     }
     
+    // Fell back to the setup hotspot although a network is saved (the router
+    // was still starting, say)? Try the saved network again every minute, as
+    // long as nobody is using the hotspot to set the device up.
+    if (_state == WiFiState::AP_MODE && millis() - _apStartedAt > 60000) {
+        _apStartedAt = millis();
+        if (WiFi.softAPgetStationNum() == 0 && _configManager.hasWiFiCredentials()) {
+            Serial.println("WiFiInterface: retrying the saved network");
+            _attemptingNewConnectionAfterPortal = true;  // stop the hotspot once connected
+            connectToStoredNetwork(30000);
+        }
+    }
+
     if (_state == WiFiState::CONNECTING) {
-        unsigned long now = millis();
+        // Read the start time first: it can be set from another task, and
+        // "now - start" must not go negative.
+        const unsigned long started = _connectionStartTime;
+        const unsigned long now = millis();
         
-        if (now - _connectionStartTime >= _connectionTimeout) {
+        if (now - started >= _connectionTimeout) {
             Serial.println("WiFi connection timeout");
             WiFi.disconnect();
             updateState(WiFiState::DISCONNECTED);
@@ -202,7 +236,7 @@ void WiFiInterface::process() {
             }
             
             if (_eventQueue != nullptr) {
-                _eventQueue->publishEvent(EventType::WIFI_CONNECTION_FAILED, "");
+                _eventQueue->publishEvent(EventType::WIFI_CONNECTION_FAILED);
             }
             
             startAccessPoint();

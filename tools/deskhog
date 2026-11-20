@@ -1,0 +1,1216 @@
+#!/usr/bin/env python3
+"""Command-line companion for DeskHog plugins.
+
+    tools/deskhog push weather.lua           install or update a plugin, then report how it started
+    tools/deskhog watch weather.lua          push again every time the file is saved
+    tools/deskhog list                       plugins, connections and cards on the device
+    tools/deskhog status weather             how a plugin is running, its last error and print() output
+    tools/deskhog logs weather -f            follow print() output
+    tools/deskhog config weather             show a connection's settings
+    tools/deskhog config weather unit=F      change them (its cards restart)
+    tools/deskhog config weather:2 city=Oslo change one card's settings
+    tools/deskhog screenshot weather:2       save what a card shows right now as a PNG
+    tools/deskhog press flappy:1 center      press a button for a card (up, center or down)
+    tools/deskhog show weather:2             bring a card to the front on the device
+    tools/deskhog send doorbell "Pizza!"     push a message to a card's plugin: text, JSON, or @file
+    tools/deskhog config timers:1 front=no   stop a card from coming to the front by itself (front=yes: let it)
+    tools/deskhog config timers:1 rotate=no  auto-rotate skips the card, and stays on it when you go there yourself
+                                             (rotate=yes: back in the rotation)
+    tools/deskhog pull weather               print the source that is on the device
+    tools/deskhog rm weather                 remove a plugin with its connections and cards
+    tools/deskhog system                     memory and stack headroom on the device
+    tools/deskhog timezone Europe/Brussels   set the time zone plugins tell local time by (no name: show it)
+    tools/deskhog device                     the device's own settings: name, brightness, night hours, auto-rotate, battery
+    tools/deskhog device screen.night=5 night.enabled=yes   change some of them (keys as `device` prints them)
+    tools/deskhog restart                    restart the device and wait until it answers again
+    tools/deskhog update                     install the newest firmware release, over WiFi
+    tools/deskhog update firmware.bin        install this firmware file (e.g. .pio/build/<env>/firmware.bin)
+    tools/deskhog migrate --port /dev/...    once per device, over USB: move it to the flash layout that
+                                             can update over WiFi, keeping its plugins, cards and settings
+    tools/deskhog sim weather.lua            run a plugin on this computer and save a screenshot
+    tools/deskhog image walk1.png walk2.png  turn PNG files into gfx.image() source for a plugin
+
+    tools/deskhog directory                  what the plugin directory offers, and what of it is on the device
+    tools/deskhog install clock              install or update a plugin from the directory
+    tools/deskhog index                      write plugins/index.json, the directory's list (run after changing a plugin)
+
+Cards are named "<connection>:<card>", as `list` shows them. Where a card is
+expected you can also give a plugin's name, which means its first card.
+
+A plugin directory is a folder of plugins with an index.json, usually in a git
+repository on GitHub: "owner/repo" means plugins/index.json on its default
+branch, "owner/repo@branch" another branch, and a full address works for
+anything else. The device remembers which one to use; --from overrides it.
+
+The device is found at http://deskhog.local. If that does not resolve on your
+network, pass --host with the IP shown on the device's status card, or set
+DESKHOG_HOST.
+
+Only the Python standard library is used.
+"""
+
+import argparse
+import hashlib
+import html
+import json
+import os
+import re
+import struct
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import zlib
+
+NAME_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+class DeviceError(Exception):
+    status = 0  # the HTTP status, when the device answered with an error
+
+
+class Device:
+    def __init__(self, host):
+        if not host.startswith("http://") and not host.startswith("https://"):
+            host = "http://" + host
+        self.base = host.rstrip("/")
+
+    def request(self, method, path, body=None, content_type=None, raw=False):
+        data = body.encode("utf-8") if isinstance(body, str) else body
+        request = urllib.request.Request(self.base + path, data=data, method=method)
+        if content_type:
+            request.add_header("Content-Type", content_type)
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = response.read()
+                return (data, response.headers) if raw else data.decode("utf-8")
+        except urllib.error.HTTPError as error:
+            text = error.read().decode("utf-8", "replace")
+            try:
+                message = json.loads(text).get("error") or text
+            except ValueError:
+                message = text or str(error)
+            failure = DeviceError(message)
+            failure.status = error.code
+            raise failure
+        except (urllib.error.URLError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            raise DeviceError(
+                "could not reach the device at %s (%s). Pass --host with its IP address." % (self.base, reason)
+            )
+
+    def json(self, method, path, body=None, content_type=None):
+        text = self.request(method, path, body, content_type)
+        try:
+            return json.loads(text)
+        except ValueError:
+            raise DeviceError("unexpected answer from the device: %s" % text[:200])
+
+    def plugin_path(self, name, action=None):
+        path = "/api/plugins/" + urllib.parse.quote(name)
+        return path + "/" + action if action else path
+
+    def state(self):
+        return self.json("GET", "/api/state")
+
+    def card_key(self, text):
+        """Accept "connection:card", or a plugin name for that plugin's first card."""
+        if ":" in text:
+            return text
+        for card in self.state()["cards"]:
+            if card.get("plugin") == text or card.get("connection") == text:
+                return card["config"]
+        raise DeviceError('no card runs "%s". See `deskhog list`.' % text)
+
+
+def plugin_name(text):
+    """Accept a plugin name or a path to its .lua file."""
+    name = os.path.basename(text)
+    if name.endswith(".lua"):
+        name = name[:-4]
+    if not NAME_PATTERN.match(name):
+        raise DeviceError('"%s" is not a valid plugin name: use 1-32 characters of a-z, 0-9, - and _' % name)
+    return name
+
+
+def print_status(status, show_log=True):
+    line = "%s: %s" % (status.get("title") or status["name"], status["state"])
+    if status["state"] == "running":
+        line += " (%d KB of memory, %d frames drawn, %s)" % (
+            round(status.get("memory", 0) / 1024),
+            status.get("frames", 0),
+            "on screen" if status.get("on_screen") else "not on screen",
+        )
+    print(line)
+    if status.get("error"):
+        print("  error: " + status["error"])
+    if show_log:
+        for entry in status.get("log", []):
+            print("  | " + entry)
+
+
+def push(device, path, name=None):
+    name = name or plugin_name(path)
+    with open(path, "r", encoding="utf-8") as handle:
+        source = handle.read()
+    # Not text/plain: the device's web server would try to read Lua source
+    # that way as a form submission and drop the body.
+    device.json("PUT", device.plugin_path(name), source, "application/octet-stream")
+    # The device restarts the plugin on its next screen update.
+    status = None
+    for _ in range(10):
+        time.sleep(0.4)
+        status = device.json("GET", device.plugin_path(name, "status"))
+        if status["state"] != "no card":
+            break
+    print_status(status)
+    return status["state"] != "failed"
+
+
+def command_list(device, args):
+    state = device.state()
+    print("Plugins")
+    for plugin in state["plugins"]:
+        kinds = ", ".join(kind["key"] for kind in plugin["kinds"]) if plugin["multiCard"] else "one card"
+        line = "  %-16s %-18s %s" % (plugin["name"], plugin["title"], kinds)
+        print(line.rstrip())
+        if plugin.get("error"):
+            print("      does not load: " + plugin["error"])
+    if not state["plugins"]:
+        print("  none")
+
+    print("Cards")
+    for card in state["cards"]:
+        if card["type"] != "PLUGIN":
+            print("  %-16s no longer supported; remove it" % card["type"].lower())
+            continue
+        connection = next((c for c in state["connections"] if c["id"] == card.get("connection")), {})
+        what = card.get("title") or card.get("name") or ""
+        if what == card.get("plugin"):  # nobody named it: say what the plugin is called
+            what = next((p["title"] for p in state["plugins"] if p["name"] == what), what)
+        status = connection.get("state", "?")
+        if card.get("onScreen"):
+            status += ", on screen"
+        print("  %-16s %-18s %s" % (card["config"], what, status))
+        if connection.get("error"):
+            print("      error: " + connection["error"])
+    if not state["cards"]:
+        print("  none")
+
+    storage = state.get("storage") or {}
+    if storage.get("total"):
+        print("Storage: %d KB of %d KB used" % (storage["used"] // 1024, storage["total"] // 1024))
+    return 0
+
+
+def command_push(device, args):
+    return 0 if push(device, args.file, args.name) else 1
+
+
+def command_watch(device, args):
+    name = args.name or plugin_name(args.file)
+    print("Watching %s. Press Ctrl-C to stop." % args.file)
+    last = None
+    try:
+        while True:
+            try:
+                modified = os.stat(args.file).st_mtime
+            except OSError:
+                modified = last  # mid-save: the editor is replacing the file
+            if modified != last:
+                last = modified
+                print("--- %s" % time.strftime("%H:%M:%S"))
+                try:
+                    push(device, args.file, name)
+                except DeviceError as error:
+                    print("error: %s" % error)
+            time.sleep(0.3)
+    except KeyboardInterrupt:
+        return 0
+
+
+def command_status(device, args):
+    status = device.json("GET", device.plugin_path(plugin_name(args.name), "status"))
+    print_status(status)
+    return 1 if status["state"] == "failed" else 0
+
+
+def command_logs(device, args):
+    name = plugin_name(args.name)
+    seen = 0
+    previous = []
+    try:
+        while True:
+            log = device.json("GET", device.plugin_path(name, "status")).get("log", [])
+            # The device keeps the last 30 lines. Print only what is new.
+            if log[:seen] != previous[:seen] or len(log) < seen:
+                seen = 0
+            for entry in log[seen:]:
+                print(entry)
+            seen = len(log)
+            previous = log
+            if not args.follow:
+                return 0
+            time.sleep(1)
+    except KeyboardInterrupt:
+        return 0
+
+
+def parse_settings(pairs):
+    settings = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise DeviceError('settings look like key=value, got "%s"' % pair)
+        key, value = pair.split("=", 1)
+        settings[key] = value
+    return settings
+
+
+def parse_yes_no(text, what):
+    answer = text.lower()
+    if answer not in ("yes", "no", "true", "false", "on", "off", "1", "0"):
+        raise DeviceError("%s is yes or no" % what)
+    return answer in ("yes", "true", "on", "1")
+
+
+def command_config(device, args):
+    target = args.target
+    settings = parse_settings(args.settings)
+    front = rotate = None
+    if ":" in target:
+        # One card's own settings. Every card also has one of the device's own:
+        # "front", whether it may come to the front when its plugin calls notify().
+        state = device.state()
+        card = next((c for c in state["cards"] if c["config"] == target), None)
+        if not card:
+            raise DeviceError('no card "%s". See `deskhog list`.' % target)
+        plugin = next((p for p in state["plugins"] if p["name"] == card.get("plugin")), None)
+        kind = next((k for k in (plugin or {}).get("kinds", []) if k["key"] == card.get("kind")), None)
+        fields = (kind or {}).get("config", [])
+        update = {}
+        # Both are the device's own, kept for every card; a plugin's field of the same name wins.
+        for own in ("front", "rotate"):
+            if own in settings and not any(field["key"] == own for field in fields):
+                update[own] = parse_yes_no(settings.pop(own), own)
+        if settings:
+            update["settings"] = settings
+        if update:
+            device.json("POST", "/api/cards/update?key=" + urllib.parse.quote(target), json.dumps(update), "application/json")
+            if settings:
+                time.sleep(1.5)  # its connection restarts with the new values
+            card = next((c for c in device.state()["cards"] if c["config"] == target), card)
+        values, secrets = card.get("settings", {}), []
+        front, rotate = card.get("front", True), card.get("rotate", True)
+    else:
+        if settings:
+            device.json("POST", "/api/connections/update?id=" + urllib.parse.quote(target), json.dumps({"settings": settings}), "application/json")
+            time.sleep(1.5)
+        state = device.state()
+        connection = next((c for c in state["connections"] if c["id"] == target), None)
+        if not connection:
+            raise DeviceError('no connection "%s". See `deskhog list`: a card "weather:2" belongs to the connection "weather".' % target)
+        plugin = next((p for p in state["plugins"] if p["name"] == connection["plugin"]), None)
+        fields, values, secrets = (plugin or {}).get("config", []), connection["settings"], connection.get("secretsSet", [])
+
+    if not fields and front is None:
+        print("%s has no settings." % target)
+    for field in fields:
+        if field.get("secret"):
+            shown = "(set)" if field["key"] in secrets else "(not set)"
+        else:
+            shown = values.get(field["key"], field["default"])
+        note = "" if field.get("secret") or shown == field["default"] else "  (default: %s)" % field["default"]
+        print("%-12s = %s%s    # %s" % (field["key"], shown, note, field["label"]))
+    if front is not None:
+        print("%-12s = %s    # %s" % ("front", "yes" if front else "no", "May come to the front (when its plugin calls notify)"))
+    if rotate is not None:
+        print("%-12s = %s    # %s" % ("rotate", "yes" if rotate else "no", "Auto-rotate visits it (no: it skips the card, and stays on it once you go there yourself)"))
+    return 0
+
+
+def write_png(path, width, height, rgb565):
+    """Save RGB565 pixels as a PNG."""
+    rows = []
+    for y in range(height):
+        row = bytearray([0])  # filter: none
+        for x in range(width):
+            pixel = struct.unpack_from("<H", rgb565, (y * width + x) * 2)[0]
+            row += bytes(((pixel >> 11 & 0x1F) * 255 // 31, (pixel >> 5 & 0x3F) * 255 // 63, (pixel & 0x1F) * 255 // 31))
+        rows.append(bytes(row))
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    with open(path, "wb") as handle:
+        handle.write(b"\x89PNG\r\n\x1a\n")
+        handle.write(chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)))
+        handle.write(chunk(b"IDAT", zlib.compress(b"".join(rows))))
+        handle.write(chunk(b"IEND", b""))
+
+
+def command_screenshot(device, args):
+    key = device.card_key(args.card)
+    path = "/api/cards/screen?key=" + urllib.parse.quote(key)
+    # The first request asks the device to paint the card even if it is not
+    # on screen. Give it a moment, then take the picture.
+    device.request("GET", path, raw=True)
+    time.sleep(1.2)
+    data, headers = device.request("GET", path, raw=True)
+    width = int(headers.get("X-Width", 233))
+    height = int(headers.get("X-Height", 135))
+    out = args.out or key.replace(":", "-") + ".png"
+    write_png(out, width, height, data)
+    print("Saved %s (%dx%d)" % (out, width, height))
+    return 0
+
+
+def read_png(path):
+    """Decode a PNG into (width, height, rows of RGBA bytes). Handles the common 8-bit RGB and RGBA kinds."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise DeviceError("%s is not a PNG file" % path)
+    position, packed, width, height, channels = 8, b"", 0, 0, 0
+    while position < len(data):
+        length, kind = struct.unpack(">I4s", data[position:position + 8])
+        body = data[position + 8:position + 8 + length]
+        position += 12 + length
+        if kind == b"IHDR":
+            width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            if depth != 8 or color not in (2, 6) or interlace:
+                raise DeviceError("%s: only 8-bit RGB or RGBA PNGs without interlacing are supported" % path)
+            channels = 4 if color == 6 else 3
+        elif kind == b"IDAT":
+            packed += body
+    raw = zlib.decompress(packed)
+    stride = width * channels
+    rows, previous, at = [], bytearray(stride), 0
+    for _ in range(height):
+        kind = raw[at]
+        line = bytearray(raw[at + 1:at + 1 + stride])
+        at += 1 + stride
+        for x in range(stride):
+            left = line[x - channels] if x >= channels else 0
+            up = previous[x]
+            corner = previous[x - channels] if x >= channels else 0
+            if kind == 1:
+                line[x] = (line[x] + left) & 255
+            elif kind == 2:
+                line[x] = (line[x] + up) & 255
+            elif kind == 3:
+                line[x] = (line[x] + (left + up) // 2) & 255
+            elif kind == 4:
+                guess = left + up - corner
+                a, b, c = abs(guess - left), abs(guess - up), abs(guess - corner)
+                line[x] = (line[x] + (left if a <= b and a <= c else up if b <= c else corner)) & 255
+        previous = line
+        if channels == 3:
+            rgba = bytearray()
+            for x in range(width):
+                rgba += line[x * 3:x * 3 + 3] + b"\xff"
+            rows.append(bytes(rgba))
+        else:
+            rows.append(bytes(line))
+    return width, height, rows
+
+
+def command_image(device, args):
+    """Turn PNG files into gfx.image() source, sharing one palette."""
+    frames = [read_png(path) for path in args.files]
+    width, height = frames[0][0], frames[0][1]
+    if any(frame[0] != width or frame[1] != height for frame in frames):
+        raise DeviceError("the images are not all the same size")
+
+    def pixel(frame, x, y):
+        r, g, b, a = frame[2][y][x * 4:x * 4 + 4]
+        return None if a < 128 else (r, g, b)
+
+    # Trim the transparent border all frames have in common.
+    left, top, right, bottom = 0, 0, width - 1, height - 1
+    if not args.no_crop:
+        used = [(x, y) for frame in frames for y in range(height) for x in range(width) if pixel(frame, x, y)]
+        if not used:
+            raise DeviceError("the images are entirely transparent")
+        left, right = min(x for x, _ in used), max(x for x, _ in used)
+        top, bottom = min(y for _, y in used), max(y for _, y in used)
+
+    counts = {}
+    for frame in frames:
+        for y in range(top, bottom + 1):
+            for x in range(left, right + 1):
+                color = pixel(frame, x, y)
+                if color:
+                    counts[color] = counts.get(color, 0) + 1
+    letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    if len(counts) > len(letters):
+        raise DeviceError("the images use %d colors; at most %d fit. Reduce the colors first (pixel art works best)." % (len(counts), len(letters)))
+    palette = {color: letters[i] for i, color in enumerate(sorted(counts, key=lambda c: -counts[c]))}
+
+    print("-- Made by `tools/deskhog image` from %s" % ", ".join(os.path.basename(path) for path in args.files))
+    print("local colors = {")
+    print('  ["."] = "none",')
+    for color, letter in palette.items():
+        print('  %s = "#%02x%02x%02x",' % ((letter,) + color))
+    print("}")
+    print("local %s = {" % args.name)
+    for frame in frames:
+        print("  gfx.image({")
+        print("    colors = colors,")
+        for y in range(top, bottom + 1):
+            row = "".join(palette.get(pixel(frame, x, y), ".") if pixel(frame, x, y) else "." for x in range(left, right + 1))
+            print('    "%s",' % row)
+        print("  }),")
+    print("}")
+    return 0
+
+
+def command_show(device, args):
+    device.json("POST", "/api/cards/show?key=" + urllib.parse.quote(device.card_key(args.card)))
+    return 0
+
+
+def command_send(device, args):
+    """Push a message to a plugin: its message(msg) function gets it."""
+    body = args.message
+    if body.startswith("@"):
+        with open(body[1:], "rb") as handle:
+            body = handle.read().decode("utf-8")
+    if len(body.encode("utf-8")) > 4096:
+        raise DeviceError("that message is larger than 4 KB, the most a plugin takes")
+    try:
+        is_json = isinstance(json.loads(body), (dict, list))
+    except ValueError:
+        is_json = False
+    content_type = "application/json" if is_json else "text/plain; charset=utf-8"
+    key = device.card_key(args.card)
+    try:
+        device.json("POST", "/api/cards/message?key=" + urllib.parse.quote(key), body, content_type)
+    except DeviceError as error:
+        if error.status != 404:
+            raise
+        # This kind of card takes no messages. The plugin itself may: its global message().
+        try:
+            device.json("POST", "/api/connections/message?id=" + urllib.parse.quote(key.split(":")[0]), body, content_type)
+        except DeviceError as second:
+            raise second if second.status != 404 else error
+    print("Sent to %s." % key)
+    return 0
+
+
+def command_pull(device, args):
+    sys.stdout.write(device.request("GET", device.plugin_path(plugin_name(args.name))))
+    return 0
+
+
+def command_rm(device, args):
+    name = plugin_name(args.name)
+    device.json("DELETE", device.plugin_path(name))
+    print("Removed %s." % name)
+    return 0
+
+
+def command_press(device, args):
+    key = device.card_key(args.card)
+    device.json("POST", "/api/cards/press?key=%s&button=%s" % (urllib.parse.quote(key), args.button))
+    return 0
+
+
+def command_system(device, args):
+    system = device.json("GET", "/api/plugins").get("system") or {}
+    labels = (
+        ("plugin_cards", "Plugin cards", ""),
+        ("heap_free", "Internal RAM free", "KB"),
+        ("heap_lowest", "Internal RAM, lowest ever free", "KB"),
+        ("psram_free", "PSRAM free", "KB"),
+        ("ui_stack_unused", "UI task stack never used", "KB"),
+        ("http_stack_unused", "Network task stack never used", "KB"),
+        ("lvgl_heap_peak", "Graphics heap, peak use", "KB"),
+        ("lvgl_heap_total", "Graphics heap, size", "KB"),
+    )
+    for key, label, unit in labels:
+        if key not in system:
+            continue
+        value = system[key]
+        print("%-32s %s" % (label, "%.1f KB" % (value / 1024) if unit else value))
+    return 0
+
+
+def posix_zone(name):
+    """The POSIX TZ string for a place such as Europe/Brussels, from this computer's time zone database."""
+    if not re.match(r"^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$", name):
+        return None
+    try:
+        with open(os.path.join(os.environ.get("ZONEINFO", "/usr/share/zoneinfo"), name), "rb") as file:
+            data = file.read()
+    except OSError:
+        return None
+    if data[:4] != b"TZif" or data[4:5] == b"\0":
+        return None
+    # Every compiled zone file ends with its rules as a POSIX string, on a line of its own.
+    return data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii") or None
+
+
+# The device's settings as `device` shows and changes them, by the kind of value the device takes.
+DEVICE_KEYS = (
+    ("name", "text"),
+    ("screen.day", "number"),
+    ("screen.night", "number"),
+    ("led.day", "number"),
+    ("led.night", "number"),
+    ("night.enabled", "yesno"),
+    ("night.from", "text"),
+    ("night.until", "text"),
+    ("rotate.seconds", "number"),
+    ("battery", "yesno"),
+)
+
+
+def device_value(settings, key):
+    for part in key.split("."):
+        settings = settings[part]
+    return settings
+
+
+def print_device(settings):
+    for key, kind in DEVICE_KEYS:
+        value = device_value(settings, key)
+        print("%-15s = %s" % (key, str(value).lower() if kind == "yesno" else value))
+    status = settings.get("status") or {}
+    gauge, battery = status.get("gauge"), status.get("battery")
+    if battery:
+        print("battery status: %d%%, %.2f V%s" % (battery["percent"], battery["volts"], ", charging" if battery["charging"] else ""))
+    elif gauge:
+        print("battery status: not counted (battery = false); a gauge reads %d%%, %.2f V" % (gauge["percent"], gauge["volts"]))
+    else:
+        print("battery status: no battery gauge found")
+    print("night mode now: %s%s" % ("on" if status.get("night") else "off", " (switched by hand)" if status.get("manual") else ""))
+
+
+def command_device(device, args):
+    kinds = dict(DEVICE_KEYS)
+    update = {}
+    for key, text in parse_settings(args.settings).items():
+        if key not in kinds:
+            raise DeviceError('"%s" is not a device setting. They are: %s.' % (key, ", ".join(k for k, _ in DEVICE_KEYS)))
+        if kinds[key] == "yesno":
+            value = parse_yes_no(text, key)
+        elif kinds[key] == "number":
+            if not re.match(r"^[0-9]+$", text):
+                raise DeviceError("%s takes a whole number, got \"%s\"" % (key, text))
+            value = int(text)
+        else:
+            value = text  # the key decides the kind: name=123 is the text "123"
+        node = update
+        *path, last = key.split(".")
+        for part in path:
+            node = node.setdefault(part, {})
+        node[last] = value
+    if update:
+        settings = device.json("POST", "/api/device", json.dumps(update), "application/json")
+    else:
+        settings = device.json("GET", "/api/device")
+    print_device(settings)
+    if "name" in update:
+        name = settings["name"]
+        print("The device is now at http://%s.local. Use --host %s.local to reach it from now on." % (name, name))
+    return 0
+
+
+def command_restart(device, args):
+    device.json("POST", "/api/restart")
+    print("Restarting.", end=" ", flush=True)
+    time.sleep(2)  # it goes down half a second after it answers; do not catch it still up
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        try:
+            device.request("GET", "/api/status")
+            print("The device is back.")
+            return 0
+        except DeviceError:
+            time.sleep(1)
+    print()
+    raise DeviceError("the device did not answer within 30 seconds. Check it, or its new address if you renamed it.")
+
+
+# ------------------------------------------------------------------ firmware
+#
+# The device cannot hold its firmware twice, so it has a small second firmware,
+# the updater, in a slot of its own (partitions.csv, updater/). An update goes:
+# ask the device to restart into the updater, send the file to the updater,
+# wait for the device to come back. A failed update leaves the device in its
+# updater, where `deskhog update` can simply be run again.
+
+def version_key(text):
+    return [int(part) if part.isdigit() else 0 for part in re.split(r"[.-]", str(text))[:3]]
+
+
+def updater_status(device):
+    """The updater's status, or None when the device runs its firmware (or is away)."""
+    try:
+        status = json.loads(device.request("GET", "/api/status"))
+    except (DeviceError, ValueError):
+        return None
+    return status if status.get("updater") else None
+
+
+def wait_for(what, seconds, check):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        found = check()
+        if found:
+            return found
+        time.sleep(1)
+    raise DeviceError("%s within %d seconds. Run `deskhog update` again in a moment." % (what, seconds))
+
+
+def multipart(name, filename, data):
+    boundary = "deskhog" + hashlib.sha256(data).hexdigest()[:24]
+    head = ('--%s\r\nContent-Disposition: form-data; name="%s"; filename="%s"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n' % (boundary, name, filename)).encode("ascii")
+    return head + data + ("\r\n--%s--\r\n" % boundary).encode("ascii"), "multipart/form-data; boundary=" + boundary
+
+
+def install_firmware(device, data, label):
+    if len(data) < 1024 or data[0] != 0xE9:
+        raise DeviceError("%s is not a firmware file" % label)
+    digest = hashlib.sha256(data).hexdigest()
+    status = updater_status(device)
+    if not status:
+        device.json("POST", "/api/update/start")
+        print("Restarting into the updater.", flush=True)
+        time.sleep(2)
+        status = wait_for("the device did not come back in its updater", 60, lambda: updater_status(device))
+    if status.get("slot_size") and len(data) > status["slot_size"]:
+        raise DeviceError("%s is %d bytes, more than the %d this device has room for" % (label, len(data), status["slot_size"]))
+    print("Installing %s (%d KB). Do not unplug the device." % (label, len(data) // 1024), flush=True)
+    body, content_type = multipart("firmware", "firmware.bin", data)
+    request = urllib.request.Request(
+        "%s/api/firmware?size=%d&sha256=%s" % (device.base, len(data), digest), data=body, method="POST")
+    request.add_header("Content-Type", content_type)
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            response.read()
+    except urllib.error.HTTPError as error:
+        try:
+            reason = json.loads(error.read().decode("utf-8", "replace")).get("error")
+        except ValueError:
+            reason = None
+        raise DeviceError("the update failed: %s The device is still in its updater: run this again."
+                          % (reason or "the updater refused the file."))
+    except (urllib.error.URLError, OSError) as error:
+        raise DeviceError("the connection broke while installing (%s). The device stays in its updater: run this again."
+                          % getattr(error, "reason", error))
+
+    def firmware_back():
+        try:
+            return device.json("GET", "/api/device").get("status", {}).get("firmware")
+        except DeviceError:
+            return None
+    time.sleep(2)
+    version = wait_for("the firmware was installed, but the device did not come back", 90, firmware_back)
+    print("The device is back, on firmware %s." % version)
+    return 0
+
+
+def command_update(device, args):
+    if args.file:
+        with open(args.file, "rb") as handle:
+            return install_firmware(device, handle.read(), os.path.basename(args.file))
+    if updater_status(device):
+        raise DeviceError("the device is in its updater and cannot say which release it wants. Give the firmware file: deskhog update <file>")
+    try:
+        status = device.json("GET", "/api/device").get("status", {})
+    except DeviceError as error:
+        if error.status == 404:
+            raise DeviceError("this device's firmware is too old to update over WiFi. Install the new one over USB once.")
+        raise
+    if status.get("layout") != 2:
+        raise DeviceError("this device has the old flash layout. Move it over once, over USB: deskhog migrate --port <port>")
+    base = "https://raw.githubusercontent.com/%s/firmware/" % (args.repo or status.get("update_repo"))
+    try:
+        latest = json.loads(fetch(base + "latest.json").decode("utf-8"))
+    except ValueError:
+        raise DeviceError("%slatest.json is not a release description" % base)
+    if latest.get("layout") != status.get("layout"):
+        raise DeviceError("release %s is for another flash layout than this device has" % latest.get("version"))
+    if version_key(latest["version"]) <= version_key(status.get("firmware")) and not args.force:
+        print("The device runs firmware %s, which is the newest." % status.get("firmware"))
+        return 0
+    print("Firmware %s is available (the device runs %s). Downloading." % (latest["version"], status.get("firmware")), flush=True)
+    data = fetch(base + latest["file"])
+    if hashlib.sha256(data).hexdigest() != latest.get("sha256"):
+        raise DeviceError("the download does not match the release's fingerprint. Try again.")
+    return install_firmware(device, data, "firmware " + latest["version"])
+
+
+# Moving a device to the flash layout with an updater. The partition table
+# changes, and plugin storage moves and shrinks, so this goes over USB, once.
+# The storage is read from the device, copied file by file into an image of the
+# new size (tools/repack_storage.py) and written back with everything else. Settings in NVS (WiFi,
+# brightness, time zone) do not move and are not touched.
+
+def platformio_tool(*parts):
+    path = os.path.join(os.path.expanduser("~/.platformio"), *parts)
+    if not os.path.exists(path):
+        raise DeviceError("%s is missing. Build the firmware once with PlatformIO (`pio run`) and try again." % path)
+    return path
+
+
+def partition_csv(root):
+    table = {}
+    with open(os.path.join(root, "partitions.csv")) as handle:
+        for line in handle:
+            columns = [column.strip() for column in line.split("#")[0].split(",")]
+            if len(columns) >= 5:
+                table[columns[0]] = (int(columns[3], 16), int(columns[4], 16))
+    return table
+
+
+def partition_table(data):
+    """The entries of a partition table as it sits in flash: {label: (type, subtype, offset, size)}."""
+    table = {}
+    for at in range(0, len(data) - 31, 32):
+        magic, kind, subtype, offset, size = struct.unpack_from("<HBBII", data, at)
+        if magic != 0x50AA:
+            break
+        label = data[at + 12:at + 28].split(b"\0")[0].decode("ascii", "replace")
+        table[label] = (kind, subtype, offset, size)
+    return table
+
+
+def command_migrate(device, args):
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    build = os.path.join(root, ".pio", "build")
+    python = platformio_tool("penv", "bin", "python")
+    esptool = platformio_tool("packages", "tool-esptoolpy", "esptool.py")
+    boot_app0 = platformio_tool("packages", "framework-arduinoespressif32", "tools", "partitions", "boot_app0.bin")
+    main_env = "adafruit_feather_esp32s3_reversetft"
+    pieces = {name: os.path.join(build, env, name + ".bin") for name, env in
+              (("bootloader", main_env), ("partitions", main_env), ("firmware", main_env))}
+    pieces["updater"] = os.path.join(build, "updater", "firmware.bin")
+    for path in pieces.values():
+        if not os.path.exists(path):
+            raise DeviceError("%s is missing. Build the firmware first: pio run" % path)
+    new = partition_csv(root)
+    for name in ("otadata", "updater", "ota_0", "spiffs"):
+        if name not in new:
+            raise DeviceError("partitions.csv has no %s: this source has no updater to move to" % name)
+
+    def run_esptool(*command):
+        full = [python, esptool, "--chip", "esp32s3", "--port", args.port, "--baud", "460800"] + list(command)
+        if subprocess.call(full) != 0:
+            raise DeviceError("esptool failed. Nothing further was done.")
+
+    work = args.keep or ("deskhog-migrate-" + time.strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(work, exist_ok=True)
+    table_file = os.path.join(work, "old-partitions.bin")
+    print("Reading the device's flash layout.", flush=True)
+    run_esptool("read_flash", "0x8000", "0xC00", table_file)
+    with open(table_file, "rb") as handle:
+        old = partition_table(handle.read())
+    if "spiffs" not in old:
+        raise DeviceError("the device has no plugin storage where DeskHog keeps it. Is this a DeskHog?")
+    if any(kind == 0 and subtype == 0 for kind, subtype, _, _ in old.values()):
+        print("This device already has the layout with an updater. Nothing to move.")
+        return 0
+    _, _, old_offset, old_size = old["spiffs"]
+
+    image = os.path.join(work, "old-storage.bin")
+    print("Reading plugin storage (%d KB). This takes a minute or two." % (old_size // 1024), flush=True)
+    run_esptool("read_flash", hex(old_offset), hex(old_size), image)
+    new_offset, new_size = new["spiffs"]
+    packed = os.path.join(work, "new-storage.bin")
+    if os.path.exists(packed):
+        os.remove(packed)
+    repack = os.path.join(os.path.dirname(os.path.abspath(__file__)), "repack_storage.py")
+    result = subprocess.run([python, repack, image, packed, str(new_size)], capture_output=True, text=True)
+    if result.returncode != 0 or not os.path.exists(packed) or os.path.getsize(packed) != new_size:
+        raise DeviceError("%s. The device was not changed; a copy of its storage is in %s."
+                          % ((result.stderr.strip() or "could not repack the plugin storage").splitlines()[-1], work))
+    print("Plugin storage: %s, copied to its new size (%d KB) and checked. The old storage is kept in %s."
+          % (result.stdout.strip(), new_size // 1024, work))
+    if args.dry_run:
+        print("Dry run: the device was not changed.")
+        return 0
+
+    print("Writing the new layout, the updater, the firmware and the plugin storage.", flush=True)
+    run_esptool("write_flash", "0x0", pieces["bootloader"], "0x8000", pieces["partitions"],
+                hex(new["otadata"][0]), boot_app0, hex(new["updater"][0]), pieces["updater"],
+                hex(new["ota_0"][0]), pieces["firmware"], hex(new_offset), packed)
+    print("Done. The device restarts with its plugins, cards and settings, and can now update over WiFi.")
+    return 0
+
+
+def command_timezone(device, args):
+    if args.zone is None:
+        zone = device.state().get("timezone") or {}
+        print("%s  %s" % (zone.get("posix", "UTC0"), zone.get("name", "")))
+        return 0
+    # A place ("Europe/Brussels") if this computer knows it, else a POSIX string as it is. "UTC" clears it.
+    posix = "" if args.zone.upper() == "UTC" else posix_zone(args.zone)
+    name = args.zone if posix else ""
+    if posix is None:
+        posix = args.zone
+    answer = device.json("POST", "/api/timezone", json.dumps({"posix": posix, "name": name}).encode(), "application/json")
+    print("Time zone set to %s%s." % (answer.get("posix", posix), " (%s)" % name if name else ""))
+    return 0
+
+
+# ------------------------------------------------------------ plugin directory
+
+DEFAULT_DIRECTORY = "TimBroddin/DeskHog"
+INDEX_FORMAT = 1
+
+
+def source_hash(data):
+    """The fingerprint the device reports for a plugin's source (FNV-1a, 32 bits)."""
+    value = 2166136261
+    for byte in data:
+        value = ((value ^ byte) * 16777619) & 0xFFFFFFFF
+    return "%08x" % value
+
+
+def directory_address(source):
+    """Where a directory's index.json is. Returns (index address, address of a file's page or None)."""
+    source = source.strip()
+    if re.match(r"^https?://", source):
+        index = source if source.endswith(".json") else source.rstrip("/") + "/index.json"
+        return index, None
+    match = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)(?:@([A-Za-z0-9_./-]+))?$", source)
+    if not match:
+        raise DeviceError('"%s" is not a plugin directory. Give "owner/repo" or the address of an index.json.' % source)
+    owner, repo, ref = match.group(1), match.group(2), match.group(3) or "HEAD"
+    index = "https://raw.githubusercontent.com/%s/%s/%s/plugins/index.json" % (owner, repo, ref)
+    return index, "https://github.com/%s/%s/blob/%s/plugins/" % (owner, repo, ref)
+
+
+def fetch(address):
+    try:
+        with urllib.request.urlopen(address, timeout=20) as response:
+            return response.read()
+    except (urllib.error.URLError, OSError) as error:
+        raise DeviceError("could not fetch %s (%s)" % (address, getattr(error, "reason", error)))
+
+
+def fetch_directory(source):
+    """Returns (index, index address)."""
+    address, _ = directory_address(source)
+    try:
+        index = json.loads(fetch(address).decode("utf-8"))
+    except ValueError:
+        raise DeviceError("%s is not a plugin directory: it is not JSON" % address)
+    if not isinstance(index, dict) or not isinstance(index.get("plugins"), list):
+        raise DeviceError("%s is not a plugin directory: it has no list of plugins" % address)
+    if index.get("format", 1) > INDEX_FORMAT:
+        raise DeviceError("that directory is written for a newer version of this tool")
+    return index, address
+
+
+def directory_source(device, args):
+    """The directory to use: --from, else what the device has saved, else the default."""
+    try:
+        state = device.state()
+    except DeviceError:
+        state = None
+    if args.source:
+        return args.source, state
+    return (state or {}).get("directory", {}).get("source") or DEFAULT_DIRECTORY, state
+
+
+def read_plugin_table(text):
+    """The text fields of a plugin's `plugin = { ... }` table, e.g. name and version."""
+    table = re.search(r"^plugin\s*=\s*\{(.*?)^\}|^plugin\s*=\s*\{(.*?)\}", text, re.S | re.M)
+    if not table:
+        return {}
+    body = table.group(1) if table.group(1) is not None else table.group(2)
+    fields = {}
+    for key, value in re.findall(r'(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"', body):
+        fields[key] = value.replace('\\"', '"').replace("\\\\", "\\")
+    return fields
+
+
+def build_index(folder):
+    plugins = []
+    for file_name in sorted(os.listdir(folder)):
+        name, extension = os.path.splitext(file_name)
+        if extension != ".lua":
+            continue
+        if not NAME_PATTERN.match(name):
+            raise DeviceError("%s: plugin file names are 1-32 characters: a-z, 0-9, - and _" % file_name)
+        with open(os.path.join(folder, file_name), "rb") as handle:
+            data = handle.read()
+        if len(data) > 64 * 1024:
+            raise DeviceError("%s is larger than 64 KB, the most a device takes" % file_name)
+        about = read_plugin_table(data.decode("utf-8"))
+        missing = [key for key in ("name", "description", "version") if not about.get(key)]
+        if missing:
+            raise DeviceError(
+                '%s: its `plugin = { ... }` table needs %s, written as text ("...")' % (file_name, " and ".join(missing))
+            )
+        entry = {
+            "name": name,
+            "title": about["name"],
+            "description": about["description"],
+            "author": about.get("author", ""),
+            "version": about["version"],
+            "file": file_name,
+            "size": len(data),
+            "hash": source_hash(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        # A picture of the card, if there is one: screenshots/<name>.png.
+        if os.path.exists(os.path.join(folder, "screenshots", name + ".png")):
+            entry["screenshot"] = "screenshots/%s.png" % name
+        plugins.append(entry)
+    plugins.sort(key=lambda plugin: plugin["title"].lower())
+    return {"format": INDEX_FORMAT, "plugins": plugins}
+
+
+LIST_START = "<!-- plugin-list:start (written by `tools/deskhog index`; do not edit by hand) -->"
+LIST_END = "<!-- plugin-list:end -->"
+LIST_COLUMNS = 3
+
+
+def plugin_list(index, prefix):
+    """The directory as a grid for a README: a picture, the name and one line about each plugin."""
+    cells = []
+    for plugin in index["plugins"]:
+        title, link = html.escape(plugin["title"]), prefix + plugin["file"]
+        picture = ""
+        if plugin.get("screenshot"):
+            picture = '<a href="%s"><img src="%s" width="233" alt="%s"></a><br>' % (link, prefix + plugin["screenshot"], title)
+        cells.append(
+            '<td width="33%%" valign="top">%s<b><a href="%s">%s</a></b><br>%s</td>'
+            % (picture, link, title, html.escape(plugin["description"]))
+        )
+    rows = ["<tr>\n%s\n</tr>" % "\n".join(cells[at:at + LIST_COLUMNS]) for at in range(0, len(cells), LIST_COLUMNS)]
+    return "%s\n<table>\n%s\n</table>\n%s" % (LIST_START, "\n".join(rows), LIST_END)
+
+
+def readme_with_list(folder, index):
+    """(path, current text, text with the list brought up to date) of the README that lists this folder, or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(folder)), "README.md")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        current = handle.read()
+    start, end = current.find("<!-- plugin-list:start"), current.find(LIST_END)
+    if start < 0 or end < start:
+        return None
+    prefix = os.path.basename(os.path.abspath(folder)) + "/"
+    return path, current, current[:start] + plugin_list(index, prefix) + current[end + len(LIST_END):]
+
+
+def command_index(device, args):
+    folder = args.folder
+    index = build_index(folder)
+    files = [(os.path.join(folder, "index.json"), None, json.dumps(index, indent=2, ensure_ascii=False) + "\n")]
+    if os.path.exists(files[0][0]):
+        with open(files[0][0], "r", encoding="utf-8") as handle:
+            files[0] = (files[0][0], handle.read(), files[0][2])
+    # The README next to the folder lists the plugins too, between two marker comments.
+    readme = readme_with_list(folder, index)
+    if readme:
+        files.append(readme)
+
+    result = 0
+    for path, current, content in files:
+        if current == content:
+            print("%s is up to date" % path)
+        elif args.check:
+            print("%s is out of date. Run `tools/deskhog index` and commit the result." % path, file=sys.stderr)
+            result = 1
+        else:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            print("Wrote %s (%d plugins)" % (path, len(index["plugins"])))
+    without = [plugin["name"] for plugin in index["plugins"] if "screenshot" not in plugin]
+    if without and not args.check:
+        print("No picture yet for: %s. Make them with `tools/screenshots %s`." % (", ".join(without), " ".join(without)))
+    return result
+
+
+def compare(entry, installed):
+    """How a directory entry relates to what is on the device."""
+    if installed is None:
+        return "not installed"
+    if installed.get("hash") == entry.get("hash"):
+        return "installed"
+    if installed.get("version") != entry.get("version"):
+        return "update: %s -> %s" % (installed.get("version") or "?", entry.get("version") or "?")
+    return "installed, but changed on the device"
+
+
+def command_directory(device, args):
+    source, state = directory_source(device, args)
+    index, address = fetch_directory(source)
+    installed = {plugin["name"]: plugin for plugin in state["plugins"]} if state else None
+    print("Plugin directory %s" % source)
+    for entry in index["plugins"]:
+        status = compare(entry, installed.get(entry["name"])) if installed is not None else ""
+        print("  %-12s %-14s %-6s %s" % (entry["name"], entry.get("title", ""), entry.get("version", ""), status))
+        if entry.get("description"):
+            print("               %s" % entry["description"])
+    if not index["plugins"]:
+        print("  it is empty")
+    if installed is None:
+        print("(The device was not reachable, so this does not say what is installed.)")
+    return 0
+
+
+def command_install(device, args):
+    source, _ = directory_source(device, args)
+    index, address = fetch_directory(source)
+    result = 0
+    for name in args.names:
+        entry = next((plugin for plugin in index["plugins"] if plugin["name"] == name), None)
+        if not entry or not NAME_PATTERN.match(name):
+            raise DeviceError('the directory %s has no plugin "%s". See `deskhog directory`.' % (source, name))
+        data = fetch(urllib.parse.urljoin(address, entry["file"]))
+        if entry.get("sha256") and hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            raise DeviceError("%s is not the file the directory's index describes; not installing it" % entry["file"])
+        device.json("PUT", device.plugin_path(name) + "?card=no", data, "application/octet-stream")
+        print("Installed %s %s" % (entry.get("title", name), entry.get("version", "")))
+        cards = [card for card in device.state()["cards"] if card.get("plugin") == name]
+        if not cards:
+            print("  No card shows it yet. Add one on the device's web page.")
+        else:
+            time.sleep(1.5)
+            status = device.json("GET", device.plugin_path(name, "status"))
+            print_status(status, show_log=False)
+            if status["state"] == "failed":
+                result = 1
+    return result
+
+
+def command_sim(device, args):
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sim", "run.sh")
+    return subprocess.call([script, args.file] + args.options)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Work with DeskHog plugins.")
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("DESKHOG_HOST", "deskhog.local"),
+        help="device address (default: $DESKHOG_HOST or deskhog.local)",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    commands.add_parser("list", help="plugins, connections and cards on the device").set_defaults(run=command_list)
+
+    for name, run, description in (
+        ("push", command_push, "install or update a plugin"),
+        ("watch", command_watch, "push whenever the file is saved"),
+    ):
+        sub = commands.add_parser(name, help=description)
+        sub.add_argument("file", help="path to the .lua file")
+        sub.add_argument("--name", help="install under this name instead of the file name")
+        sub.set_defaults(run=run)
+
+    sub = commands.add_parser("status", help="state, last error and print() output")
+    sub.add_argument("name")
+    sub.set_defaults(run=command_status)
+
+    sub = commands.add_parser("logs", help="print() output")
+    sub.add_argument("name")
+    sub.add_argument("-f", "--follow", action="store_true", help="keep printing new lines")
+    sub.set_defaults(run=command_logs)
+
+    sub = commands.add_parser("config", help="show or change the settings of a connection or a card")
+    sub.add_argument("target", help='a connection ("weather") or a card ("weather:2")')
+    sub.add_argument("settings", nargs="*", metavar="key=value")
+    sub.set_defaults(run=command_config)
+
+    sub = commands.add_parser("screenshot", help="save what a card shows right now as a PNG")
+    sub.add_argument("card")
+    sub.add_argument("out", nargs="?", help="file to write (default: <card>.png)")
+    sub.set_defaults(run=command_screenshot)
+
+    sub = commands.add_parser("image", help="turn PNG files into gfx.image() source for a plugin")
+    sub.add_argument("files", nargs="+", help="one PNG, or several of the same size for an animation")
+    sub.add_argument("--name", default="frames", help="name of the Lua variable (default: frames)")
+    sub.add_argument("--no-crop", action="store_true", help="keep the transparent border")
+    sub.set_defaults(run=command_image)
+
+    sub = commands.add_parser("show", help="bring a card to the front on the device")
+    sub.add_argument("card")
+    sub.set_defaults(run=command_show)
+
+    sub = commands.add_parser("send", help="push a message to a card's plugin (its message() function)")
+    sub.add_argument("card")
+    sub.add_argument("message", help="text, JSON, or @file to send a file's contents")
+    sub.set_defaults(run=command_send)
+
+    sub = commands.add_parser("pull", help="print the source that is on the device")
+    sub.add_argument("name")
+    sub.set_defaults(run=command_pull)
+
+    sub = commands.add_parser("press", help="press a button for a card")
+    sub.add_argument("card")
+    sub.add_argument("button", choices=["up", "center", "down"])
+    sub.set_defaults(run=command_press)
+
+    commands.add_parser("system", help="memory and stack headroom on the device").set_defaults(run=command_system)
+
+    sub = commands.add_parser("timezone", help="show or set the time zone plugins tell local time by")
+    sub.add_argument("zone", nargs="?", help="a place such as Europe/Brussels, a POSIX string such as CET-1CEST,M3.5.0,M10.5.0/3, or UTC")
+    sub.set_defaults(run=command_timezone)
+
+    sub = commands.add_parser("device", help="show or change the device's own settings (name, brightness, night hours, auto-rotate, battery)")
+    sub.add_argument("settings", nargs="*", metavar="key=value", help="e.g. screen.day=60 night.enabled=yes night.from=22:30")
+    sub.set_defaults(run=command_device)
+
+    commands.add_parser("restart", help="restart the device and wait until it is back").set_defaults(run=command_restart)
+
+    sub = commands.add_parser("update", help="install new firmware over WiFi: the newest release, or a file")
+    sub.add_argument("file", nargs="?", help="a firmware file; leave out for the newest release")
+    sub.add_argument("--repo", help="owner/repository to take the release from (default: the one the device names)")
+    sub.add_argument("--force", action="store_true", help="install the release even when the device already runs it")
+    sub.set_defaults(run=command_update)
+
+    sub = commands.add_parser("migrate", help="once, over USB: move a device to the flash layout that updates over WiFi")
+    sub.add_argument("--port", required=True, help="the device's serial port, e.g. /dev/cu.usbmodem101")
+    sub.add_argument("--dry-run", action="store_true", help="read and repack the plugin storage, but do not write to the device")
+    sub.add_argument("--keep", help="folder for the copy of the old storage (default: deskhog-migrate-<time>)")
+    sub.set_defaults(run=command_migrate)
+
+    sub = commands.add_parser("rm", help="remove a plugin and its cards")
+    sub.add_argument("name")
+    sub.set_defaults(run=command_rm)
+
+    sub = commands.add_parser("directory", help="what the plugin directory offers")
+    sub.add_argument("--from", dest="source", help='"owner/repo", "owner/repo@branch" or the address of an index.json')
+    sub.set_defaults(run=command_directory)
+
+    sub = commands.add_parser("install", help="install or update plugins from the plugin directory")
+    sub.add_argument("names", nargs="+", metavar="name")
+    sub.add_argument("--from", dest="source", help='"owner/repo", "owner/repo@branch" or the address of an index.json')
+    sub.set_defaults(run=command_install)
+
+    sub = commands.add_parser("index", help="write index.json for a folder of plugins")
+    sub.add_argument("folder", nargs="?", default=os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "plugins")))
+    sub.add_argument("--check", action="store_true", help="only say whether index.json is up to date (for CI)")
+    sub.set_defaults(run=command_index)
+
+    sub = commands.add_parser("sim", help="run a plugin on this computer and save a screenshot")
+    sub.add_argument("file", help="path to the .lua file")
+    sub.add_argument("options", nargs=argparse.REMAINDER, help="options for the simulator, e.g. --seconds 4")
+    sub.set_defaults(run=command_sim)
+
+    args = parser.parse_args()
+    try:
+        return args.run(Device(args.host), args)
+    except DeviceError as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 1
+    except FileNotFoundError as error:
+        print("error: %s" % error, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

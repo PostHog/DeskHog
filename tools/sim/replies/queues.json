@@ -1,0 +1,7 @@
+{"lands":[{"id":1,"name":"Sample land","rides":[
+{"id":1,"name":"The Big Dipper","is_open":true,"wait_time":45,"last_updated":"x"},
+{"id":2,"name":"Log Flume","is_open":true,"wait_time":30,"last_updated":"x"},
+{"id":3,"name":"Ghost Train","is_open":true,"wait_time":20,"last_updated":"x"},
+{"id":4,"name":"Carousel","is_open":true,"wait_time":5,"last_updated":"x"},
+{"id":5,"name":"Ferris Wheel","is_open":true,"wait_time":10,"last_updated":"x"},
+{"id":6,"name":"Bumper Cars","is_open":false,"wait_time":0,"last_updated":"x"}]}],"rides":[]}

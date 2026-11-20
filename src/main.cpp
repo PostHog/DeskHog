@@ -1,15 +1,17 @@
 /**
- * DeskHog - PostHog Analytics Display
- * ===================================
- * 
- * An ESP32-S3-based project that displays PostHog analytics insights on a 240x135 TFT screen.
- * Built for the Adafruit ESP32-S3 Reverse TFT Feather, this project provides a compact, desk-friendly way to monitor your PostHog analytics in real-time.
- * 
+ * DeskHog
+ * =======
+ *
+ * A palm-sized desk display on the Adafruit ESP32-S3 Reverse TFT Feather
+ * (240x135 screen, three buttons, one LED). What it shows comes from plugins:
+ * small Lua programs that provide the cards you page through.
+ *
  * Components:
  * - Hardware: ESP32-S3 with integrated 240x135 TFT display
- * - UI: LVGL-based card interface for displaying insights
- * - Network: WiFi connectivity with captive portal for configuration
- * 
+ * - UI: LVGL-based stack of cards
+ * - Plugins: Lua programs stored on flash, see src/plugins and plugins/README.md
+ * - Network: WiFi with a captive portal for setup and a web page for managing cards
+ *
  * Development note:
  * Keep this main.cpp file lean, tidy and simple. Do not leak implementation details into the main file.
  * Keep main.cpp focused on setup and task creation. Encapsulate and isolate components into their own files.
@@ -25,15 +27,15 @@
 #include "ui/ProvisioningCard.h"
 #include "hardware/DisplayInterface.h"
 #include "ui/CardNavigationStack.h"
-#include "ui/InsightCard.h"
 #include "hardware/Input.h"
-#include "posthog/PostHogClient.h"
 #include "Style.h"
 #include "esp_heap_caps.h" // For PSRAM management
 #include "ui/CardController.h"
 #include "EventQueue.h"
 #include "esp_partition.h" // Include for partition functions
-#include "OtaManager.h"
+#include "plugins/PluginManager.h"
+#include "DeskManners.h"
+#include "hardware/BatteryGauge.h"
 #include <esp_sleep.h> // Added for deep sleep functionality
 #include <esp_pm.h> // Added for power management
 
@@ -61,15 +63,15 @@ ConfigManager* configManager;
 WiFiInterface* wifiInterface;
 CaptivePortal* captivePortal;
 CardController* cardController; // Replace individual card objects with controller
-PostHogClient* posthogClient;
 EventQueue* eventQueue; // Add global EventQueue
 NeoPixelController* neoPixelController;  // Renamed from neoPixelManager
-OtaManager* otaManager;
+PluginManager* pluginManager;
+DeskManners* deskManners;  // Brightness and night hours
+BatteryGauge* batteryGauge;  // Fuel gauge, read on its own task
 
 // Task handles
 TaskHandle_t wifiTask;
 TaskHandle_t portalTask;
-TaskHandle_t insightTask;
 TaskHandle_t neoPixelTask;
 
 // WiFi connection timeout in milliseconds
@@ -95,18 +97,10 @@ void portalTaskFunction(void* parameter) {
     }
 }
 
-// Insight processing task
-void insightTaskFunction(void* parameter) {
-    while (1) {
-        posthogClient->process();  // Use the global instance
-        vTaskDelay(pdMS_TO_TICKS(100));  // Check every 100ms
-    }
-}
-
 // LVGL handler task that includes button polling - added here to consolidate UI operations
 void lvglHandlerTask(void* parameter) {
     TickType_t lastButtonCheck = xTaskGetTickCount();
-    const TickType_t buttonCheckInterval = pdMS_TO_TICKS(50); // Check buttons every 50ms
+    const TickType_t buttonCheckInterval = pdMS_TO_TICKS(10); // Check buttons every 10ms
     
     static unsigned long powerOffPressStartTime = 0;
     // static bool upPressedState = false; // Unused
@@ -117,6 +111,8 @@ void lvglHandlerTask(void* parameter) {
         displayInterface->handleLVGLTasks();
 
         cardController->processUIQueue();
+
+        deskManners->tick();
         
         // Poll buttons at regular intervals
         TickType_t currentTime = xTaskGetTickCount();
@@ -140,8 +136,10 @@ void lvglHandlerTask(void* parameter) {
                 } else {
                     if (millis() - powerOffPressStartTime >= 2000) { // Held for 2 seconds
                         Serial.println("Simultaneous CENTER and DOWN hold for 2s detected. Entering deep sleep.");
-                        // Optional: Turn off display backlight or other peripherals before sleep
-                        // displayInterface->setBacklight(0); // Example if such a function exists
+                        // Dark before sleeping. The LED task shows the new level within 16 ms.
+                        displayInterface->setBrightness(0);
+                        neoPixelController->setLevel(0);
+                        vTaskDelay(pdMS_TO_TICKS(50));
 			esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
                         esp_deep_sleep_start();
                     }
@@ -153,16 +151,17 @@ void lvglHandlerTask(void* parameter) {
                 // Process individual button presses if power-off sequence is not active or completed.
                 // Check .pressed() for single press actions (triggers on state change).
                 // This ensures that navigation still works if the power-off combo isn't fully executed.
-                if (buttons[Input::BUTTON_UP].pressed()) {
+                // A press that only wakes a dark screen at night goes no further.
+                if (buttons[Input::BUTTON_UP].pressed() && !deskManners->buttonPressed(Input::BUTTON_UP)) {
                     // Ensure this doesn't trigger if it was part of the combo that just got released
                     // However, .pressed() fires on the transition, so if it was held and released, 
                     // it won't fire again here unless pressed again separately.
                     cardController->getCardStack()->handleButtonPress(Input::BUTTON_UP);
                 }
-                if (buttons[Input::BUTTON_DOWN].pressed()) {
+                if (buttons[Input::BUTTON_DOWN].pressed() && !deskManners->buttonPressed(Input::BUTTON_DOWN)) {
                     cardController->getCardStack()->handleButtonPress(Input::BUTTON_DOWN);
                 }
-                if (buttons[Input::BUTTON_CENTER].pressed()) {
+                if (buttons[Input::BUTTON_CENTER].pressed() && !deskManners->buttonPressed(Input::BUTTON_CENTER)) {
                     cardController->getCardStack()->handleButtonPress(Input::BUTTON_CENTER);
                 }
             }
@@ -190,8 +189,10 @@ void setup() {
         Serial.printf("Total PSRAM: %d bytes\n", ESP.getPsramSize());
         Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
         
-        // Set memory allocation preference to PSRAM
-        heap_caps_malloc_extmem_enable(4096);
+        // Allocations of 256 bytes and up go to PSRAM. Internal RAM is the scarce
+        // kind: a TLS connection takes about 45 KB of it and cannot use PSRAM, so
+        // everything that can live outside (strings, JSON, buffers) should.
+        heap_caps_malloc_extmem_enable(256);
     } else {
         Serial.println("PSRAM initialization failed!");
         while(1); // Stop here if PSRAM init fails
@@ -252,9 +253,6 @@ void setup() {
     configManager = new ConfigManager(*eventQueue);
     configManager->begin();
     
-    // Initialize PostHog client with event queue
-    posthogClient = new PostHogClient(*configManager, *eventQueue);
-    
     // Initialize display manager
     displayInterface = new DisplayInterface(
         SCREEN_WIDTH, SCREEN_HEIGHT, LVGL_BUFFER_ROWS, 
@@ -276,6 +274,15 @@ void setup() {
     esp_sleep_enable_gpio_wakeup();
     Serial.println("GPIO wakeup configured for buttons");
     
+    // Lua plugins: storage, the network task and the cards that run them
+    pluginManager = new PluginManager(*configManager, *neoPixelController, *eventQueue);
+    pluginManager->begin();
+
+    // Screen and LED levels, night hours. Lights the screen, still blank, at its level.
+    deskManners = new DeskManners(*configManager, *displayInterface, *neoPixelController, *pluginManager);
+    deskManners->begin();
+    pluginManager->setDeskManners(deskManners);
+
     // Create and initialize card controller
     cardController = new CardController(
         lv_scr_act(),
@@ -283,18 +290,19 @@ void setup() {
         SCREEN_HEIGHT,
         *configManager,
         *wifiInterface,
-        *posthogClient,
         *eventQueue
     );
     
     // Initialize with display interface directly
+    cardController->setPluginManager(pluginManager);
     cardController->initialize(displayInterface);
-    
-    // Initialize OtaManager
-    otaManager = new OtaManager(CURRENT_FIRMWARE_VERSION, "PostHog", "DeskHog");
-    
+    batteryGauge = new BatteryGauge();
+    batteryGauge->begin();
+    deskManners->setBatteryGauge(batteryGauge);
+    deskManners->setCardController(cardController);  // auto-rotate, and ● on the status card
+
     // Initialize captive portal
-    captivePortal = new CaptivePortal(*configManager, *wifiInterface, *eventQueue, *otaManager, *cardController);
+    captivePortal = new CaptivePortal(*configManager, *wifiInterface, *eventQueue, *pluginManager);
     captivePortal->begin();
     
     // Create task for WiFi operations
@@ -319,17 +327,6 @@ void setup() {
         1
     );
     
-    // Create task for insight processing
-    xTaskCreatePinnedToCore(
-        insightTaskFunction,
-        "insightTask",
-        8192,
-        NULL,
-        1,
-        &insightTask,
-        0
-    );
-    
     // Create LVGL tick task
     xTaskCreatePinnedToCore(
         DisplayInterface::tickTask,
@@ -345,7 +342,8 @@ void setup() {
     xTaskCreatePinnedToCore(
         lvglHandlerTask,
         "lvglTask",
-        8192,
+        32768,  // Lua plugins run on this task. Measured on this CPU, the deepest
+                // nesting Lua allows (LUAI_MAXCCALLS in lib/lua) needs about 20 KB.
         NULL,
         2,
         NULL,
