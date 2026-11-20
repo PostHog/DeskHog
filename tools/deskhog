@@ -14,7 +14,8 @@
     tools/deskhog show weather:2             bring a card to the front on the device
     tools/deskhog send doorbell "Pizza!"     push a message to a card's plugin: text, JSON, or @file
     tools/deskhog config timers:1 front=no   stop a card from coming to the front by itself (front=yes: let it)
-    tools/deskhog config timers:1 rotate=no  auto-rotate skips the card and stays on it once you are there (rotate=yes: no)
+    tools/deskhog config timers:1 rotate=no  auto-rotate skips the card, and stays on it when you go there yourself
+                                             (rotate=yes: back in the rotation)
     tools/deskhog pull weather               print the source that is on the device
     tools/deskhog rm weather                 remove a plugin with its connections and cards
     tools/deskhog system                     memory and stack headroom on the device

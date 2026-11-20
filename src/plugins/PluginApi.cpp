@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
+#include <WiFi.h>
 
 #include <atomic>
 #include <cmath>
@@ -250,6 +251,15 @@ bool flattenSettings(JsonObjectConst body, std::vector<std::pair<std::string, st
     return true;
 }
 
+// Plugins reach the API through the device's own address. They must not change
+// the device's settings or restart it, so those requests are refused.
+bool refusedFromDevice(AsyncWebServerRequest* request) {
+    const IPAddress from = request->client()->remoteIP();
+    if (from[0] != 127 && from != WiFi.localIP() && from != WiFi.softAPIP()) return false;
+    sendError(request, 403, "not from the device itself");
+    return true;
+}
+
 void sendDevice(AsyncWebServerRequest* request, DeskManners& manners) {
     DynamicJsonDocument doc(1024);
     deviceToJson(doc.to<JsonObject>(), manners);
@@ -264,6 +274,7 @@ void handleDevice(AsyncWebServerRequest* request, PluginManager& manager) {
     if (!manners) return sendError(request, 503, "the device is still starting");
     if (request->method() == HTTP_GET) return sendDevice(request, *manners);
     if (request->method() != HTTP_POST) return sendError(request, 405, "GET or POST /api/device");
+    if (refusedFromDevice(request)) return;
 
     DynamicJsonDocument doc(2048);
     if (!readJson(request, doc)) return;
@@ -295,6 +306,7 @@ void handleDevice(AsyncWebServerRequest* request, PluginManager& manager) {
 void handleRestart(AsyncWebServerRequest* request, PluginManager&) {
     if (answerPreflight(request)) return;
     if (request->method() != HTTP_POST) return sendError(request, 405, "POST /api/restart");
+    if (refusedFromDevice(request)) return;
     sendOk(request);
     static std::atomic<bool> restarting{false};
     if (restarting.exchange(true)) return;

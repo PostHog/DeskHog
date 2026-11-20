@@ -165,6 +165,9 @@ DeskRules::Levels DeskRules::levelsFor(bool night, bool manual, uint32_t nowMs) 
 }
 
 DeskRules::Levels DeskRules::tick(int64_t epochSeconds, const std::string& posixZone, uint32_t nowMs) {
+    // A wake that is over is forgotten, so that ~49.7 days later, when the
+    // millisecond counter comes round again, it does not look fresh.
+    if (wakeActive_ && !woken(nowMs)) wakeActive_ = false;
     scheduled_ = scheduledNight(epochSeconds, posixZone);
     if (manual_ && scheduled_ != scheduleAtManual_) manual_ = false;
     night_ = manual_ ? manualNight_ : scheduled_;
@@ -219,8 +222,10 @@ int Rotation::tick(const Input& input, uint32_t nowMs) {
         lastOnScreen_ = input.onScreen;
         since_ = nowMs;
     }
+    // Forgotten once over, like the wake in DeskRules, so it cannot come back when the counter wraps.
+    if (handActive_ && nowMs - handAt_ >= kHandPauseMs) handActive_ = false;
     if (seconds_ <= 0 || input.playing || input.banner || input.screenOff) return -1;
-    if (handActive_ && nowMs - handAt_ < kHandPauseMs) return -1;
+    if (handActive_) return -1;
     if (nowMs - since_ < static_cast<uint32_t>(seconds_) * 1000u) return -1;
 
     const int count = static_cast<int>(input.rotates.size());

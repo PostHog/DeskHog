@@ -83,7 +83,7 @@ public:
      */
     void showWiFiStatus();
 
-    /** ● calls this; ▲ and ▼ move between cards as on any card. UI task. */
+    /** ● went down on this card (DeskManners decides on its release what it did); ▲ and ▼ move between cards as on any card. UI task. */
     void setOnCenter(std::function<void()> callback) { _onCenter = std::move(callback); }
     bool handleButtonPress(uint8_t button_index) override;
 

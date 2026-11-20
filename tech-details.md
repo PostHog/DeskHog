@@ -29,7 +29,7 @@ We have to keep this stuff carefully isolated or we're going to crash.
 
 <img width="500" alt="diagram" src="https://github.com/user-attachments/assets/14ea2440-90d8-4540-bebb-045c18fbbc99" />
 
-▲ and ▼ move between cards; ● belongs to the card on screen. A plugin may claim all three buttons, so two combinations never reach it: ● held with ▲ always goes to the previous card (`PluginCard::handleButtonPress`), and ● with ▼ held for two seconds powers the device off (deep sleep, in the main loop; reset wakes it).
+Buttons are read every 10 ms. ▲ and ▼ move between cards; ● belongs to the card on screen. A plugin may claim all three buttons, so two combinations never reach it: ● held with ▲ always goes to the previous card (`PluginCard::handleButtonPress`), and ● with ▼ held for two seconds powers the device off (deep sleep, in the main loop; reset wakes it).
 
 If the board isn't responding:
 
@@ -67,7 +67,7 @@ It is three hand-written files in `html/` with no dependencies, inlined into one
 
 To work on it without flashing, run `node test/portal/serve.js` and open `http://localhost:8080`. It serves `html/` as it is on disk, against a pretend device, or against your real one with `--device <address>`. `test/portal/run.sh` runs its tests.
 
-**Web portal budget:** the page is about 118 KB (120,797 bytes) before it is inlined. The budget was 100 KB, and the device settings took it past that; the limit that counts is the flash, where the firmware leaves room. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
+**Web portal budget:** the page is about 119 KB (121,371 bytes) before it is inlined. The budget was 100 KB, and the device settings took it past that; the limit that counts is the flash, where the firmware leaves room. Everything it needs must be in those files, since the page has to work when the device has no internet (that is when you set up WiFi).
 
 ### Device settings
 
@@ -76,7 +76,7 @@ How bright the screen and the LED are, night hours, rotation, the battery and th
 - `lib/plugin_core/src/DeskRules.h` has the rules without any hardware: `DeviceSettings` and their checks, `DeskRules` (is it night, which levels now, the wake on a press, night mode by hand until the next boundary) and `Rotation` (when to move on, and every reason to wait). It has no Arduino, LVGL or FreeRTOS in it, and `test/native` covers it.
 - `src/DeskManners` applies the rules. The UI task calls `tick()` every loop: it fades the backlight and hands the LED its level through atomics, rotates the cards, and gives the status card its night and battery lines. The web server (core 0) changes settings under a lock and sets a flag that `tick()` picks up; it never calls LVGL. The press that wakes a dark screen is swallowed in `buttonPressed()`.
 - `src/hardware/BatteryGauge` reads the MAX17048 on the I2C bus every 30 seconds on its own task (core 0), so a slow or missing chip cannot hold up the UI. It publishes one atomic word. The gauge cannot tell that no battery is connected, which is why plugins and the status card only get the reading when the `battery` setting is on.
-- `PluginApi` serves `/api/device` and `/api/restart`; a new name changes the mDNS name and the WiFi hostname at once, after the answer has gone out. Buttons are read every 10 ms.
+- `PluginApi` serves `/api/device` and `/api/restart`; a new name changes the mDNS name at once, after the answer has gone out. The router learns the new hostname at the next WiFi connection.
 
 ### Card system
 

@@ -4557,6 +4557,16 @@ TEST(wake_timer_survives_millis_wrapping) {
     CHECK_EQ(rules.tick(utcAt(2026, 3, 1, 12, 0), "UTC0", 0x00000010u).screen, 10);
 }
 
+TEST(an_old_wake_stays_over_when_millis_comes_round_again) {
+    DeskRules rules = nightRules();
+    const int64_t late = utcAt(2026, 3, 1, 23, 0);
+    rules.tick(late, "UTC0", 1000);
+    rules.press(1000);
+    CHECK_EQ(rules.tick(late, "UTC0", 1000 + DeskRules::kWakeMs).screen, 10);
+    // About 49.7 days later the counter is back inside the old wake's window.
+    CHECK_EQ(rules.tick(late, "UTC0", 6000).screen, 10);
+}
+
 
 namespace {
 
@@ -4681,6 +4691,18 @@ TEST(rotation_timer_survives_millis_wrapping) {
     rotation.movedByHand(0xFFFFFFF0u);
     CHECK_EQ(rotation.tick(input, 0x00000010u), -1);
     CHECK_EQ(rotation.tick(input, 0xFFFFFFF0u + Rotation::kHandPauseMs), 2);
+}
+
+TEST(an_old_hand_pause_stays_over_when_millis_comes_round_again) {
+    Rotation rotation = rotationEvery(10);
+    Rotation::Input input = rotationInput({false, true, true}, 1);
+    rotation.tick(input, 0);
+    rotation.movedByHand(0);
+    CHECK_EQ(rotation.tick(input, Rotation::kHandPauseMs), 2);
+    input.onScreen = 2;
+    rotation.tick(input, Rotation::kHandPauseMs);
+    // About 49.7 days later the counter is back inside the old pause's window.
+    CHECK_EQ(rotation.tick(input, 30000), 1);
 }
 
 

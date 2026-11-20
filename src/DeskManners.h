@@ -75,6 +75,7 @@ private:
     void rotate(bool screenOff, uint32_t now);
     void showNightLine(const deskhog::DeskRules::Levels& levels, bool settingsChanged);
     void showBatteryLine(uint32_t now, bool settingsChanged);
+    void statusCenter();
 
     ConfigManager& config_;
     DisplayInterface& display_;
@@ -106,4 +107,5 @@ private:
     int screenMilli_ = 0, ledMilli_ = 0;  ///< Applied levels, in thousandths of a percent, mid-fade
     int screenShown_ = -1, ledShown_ = -1;
     uint8_t swallowed_ = 0;  ///< One bit per button
+    bool centerOnStatus_ = false;  ///< ● went down on the status card, and no ▲ or ▼ yet
 };

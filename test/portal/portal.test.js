@@ -35,7 +35,7 @@ async function openPage(device, options) {
     // jsdom has no canvas; the page copes, so its "not implemented" notes are just noise.
     const quiet = new VirtualConsole();
     options = options || {};
-    const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://deskhog.local/' + (options.hash || ''), virtualConsole: quiet });
+    const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: (options.origin || 'http://deskhog.local/') + (options.hash || ''), virtualConsole: quiet });
     const window = dom.window;
     // jsdom has no idea how wide it is. Tests say whether the page is on a desktop.
     window.matchMedia = () => ({ matches: !!options.wide });
@@ -1030,6 +1030,30 @@ test('renaming sends you to the new address', async () => {
     check(document.getElementById('notice').textContent.includes('http://kitchen.local'), 'and the notice gives the address');
     equal(document.title, 'DeskHog · kitchen', 'the title shows the new name');
     equal(document.querySelector('[data-brand]').textContent, 'DeskHog · kitchen', 'and so does the header');
+});
+
+test('after a rename the page goes to the new .local address, not when opened by IP address', async () => {
+    const to = (await openPage(makeDevice())).window.renamedAddress;
+    const where = (hostname, hash) => ({ hostname, hash });
+    equal(to('kitchen', where('deskhog.local', '#device')), 'http://kitchen.local/#device', 'from a .local address');
+    equal(to('kitchen', where('deskhog.local', '')), 'http://kitchen.local/', 'without a hash');
+    equal(to('kitchen', where('192.168.1.20', '#device')), null, 'from an IP address');
+    equal(to('kitchen', where('localhost', '')), null, 'from anything else');
+
+    for (const [origin, expected] of [['http://deskhog.local/', ['http://kitchen.local/#device']], ['http://192.168.1.20/', []]]) {
+        const device = makeDevice();
+        const { window, document } = await openPage(device, { hash: '#device', origin });
+        const went = [];
+        window.goTo = address => went.push(address);
+        const name = document.querySelector('#name-form input');
+        name.value = 'kitchen';
+        name.dispatchEvent(new window.Event('input', { bubbles: true }));
+        await click(window, buttonNamed(document.getElementById('name-form'), 'Save'));
+        check(document.getElementById('notice').textContent.includes('http://kitchen.local'), origin + ': the notice shows first');
+        equal(went, [], origin + ': nothing happens at once');
+        await new Promise(resolve => window.setTimeout(resolve, 2100));
+        equal(went, expected, origin + ': two seconds later');
+    }
 });
 
 test('a bad name shows the device\'s reason', async () => {

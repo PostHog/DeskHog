@@ -678,10 +678,12 @@ Your plugin only asks. The device decides, by rules a plugin cannot change:
 
 The LED flashes three times: in the `led` colour if you gave one, otherwise in white,
 and then only when the card had to wait. After that it goes back to normal, also when
-you had set it with `led.set`. The flash follows the LED level of the device: with
-the default night level of 0 it stays dark at night, and a notify that brings its
-card to the front lights the screen for the time the bar shows. If your card is already on screen it just gets the
+you had set it with `led.set`. If your card is already on screen it just gets the
 bar. A press that your card uses takes the bar away.
+
+The flash follows the LED level of the device: with the default night level of 0 it
+stays dark at night. A notify that brings its card to the front lights the screen for
+the time the bar shows.
 
 In a plugin with card kinds, use `card.notify`: plain `notify` cannot know which card
 is meant, and stops the plugin with an error saying so. Timers and `http` callbacks
@@ -811,6 +813,8 @@ GET    /api/connections/choices?id=<c>&field=<key>[&kind=<kind>][&settings=<JSON
                                         settings for what the form holds: {"advanced":"true"}, 1 KB at most.
                                         Answers 202 {pending: true} while the plugin is working on it: ask again
 ```
+
+`POST /api/device` and `POST /api/restart` answer 403 to a request that comes from the device itself, so a plugin cannot change the device's settings or restart it.
 
 `/api/device` takes and gives nested JSON:
 

@@ -64,7 +64,7 @@ void DeskManners::setCardController(CardController* cards) {
         cards_->getCardStack()->setOnMovedByHand([this]() { rotation_.movedByHand(millis()); });
     }
     if (cards_->getProvisioningCard()) {
-        cards_->getProvisioningCard()->setOnCenter([this]() { toggleNight(); });
+        cards_->getProvisioningCard()->setOnCenter([this]() { centerOnStatus_ = true; });
     }
 }
 
@@ -81,6 +81,7 @@ void DeskManners::tick() {
         rotation_.setSeconds(applied_.rotateSeconds);
         settingsChanged = true;
     }
+    statusCenter();
     const int preview = previewWanted_.exchange(0);
     if (preview) rules_.preview(preview == 2, now);
 
@@ -173,7 +174,24 @@ void DeskManners::fadeToward(int& milli, int target, int step) {
     else if (milli > target) milli = milli - step > target ? milli - step : target;
 }
 
+// ● on the status card switches night mode when it comes up, so that ● held
+// for ▲ (the previous card) or for ▼ (power off) switches nothing. ▲ and ▼ are
+// read here as well as in buttonPressed(), which does not hear ▼ while the
+// power-off combination is held.
+void DeskManners::statusCenter() {
+    if (!centerOnStatus_) return;
+    if (buttons[Input::BUTTON_UP].isPressed() || buttons[Input::BUTTON_DOWN].isPressed()) {
+        centerOnStatus_ = false;
+    } else if (!buttons[Input::BUTTON_CENTER].isPressed()) {
+        centerOnStatus_ = false;
+        toggleNight();
+    }
+}
+
 bool DeskManners::buttonPressed(uint8_t button) {
+    // ▲ or ▼ cancels a ● on the status card; a new ● starts over, and the card
+    // says again if it went down there.
+    centerOnStatus_ = false;
     // The rules say whether the screen is meant to be dark; only a screen that
     // is dark already, not one still fading down, keeps the press for itself.
     const bool swallow = rules_.press(millis()) && screenShown_ == 0;

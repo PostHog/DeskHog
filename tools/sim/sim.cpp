@@ -508,6 +508,10 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--battery" && hasValue) {
             const char* value = argv[++i];
+            if (!*value) {
+                usage();
+                return 2;
+            }
             const int percent = atoi(value);
             services.hasBattery = true;
             services.batteryStatus.percent = percent < 0 ? 0 : (percent > 100 ? 100 : percent);

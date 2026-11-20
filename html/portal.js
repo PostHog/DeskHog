@@ -466,6 +466,12 @@ async function saveDevice(body, doneText) {
     }, doneText);
 }
 
+/** Where the page goes after the device is renamed: its new .local address, if it was opened at one. */
+function renamedAddress(name, where) {
+    return where.hostname.endsWith('.local') ? 'http://' + name + '.local/' + where.hash : null;
+}
+function goTo(address) { location.assign(address); }
+
 let deviceControls = null;
 
 /** The controls, built once and updated in place, so a slider is never rebuilt under a finger. Keyed by their setting. */
@@ -496,9 +502,13 @@ function buildDevice() {
         input.addEventListener('change', () => { clearTimeout(timer); timer = null; last = 0; });
         return el('label', { class: 'field' }, el('span', {}, label), el('div', { class: 'pick' }, input, output));
     };
-    const rename = () => {
+    // The old address stops answering once mDNS moves, so the page follows, after the notice has been seen.
+    const rename = async () => {
         const wanted = controls.name.value.trim();
-        return saveDevice({ name: wanted }, 'Saved. This device is now at http://' + wanted + '.local');
+        const saved = await saveDevice({ name: wanted }, 'Saved. This device is now at http://' + wanted + '.local');
+        const address = saved && renamedAddress(wanted, location);
+        if (address) setTimeout(() => goTo(address), 2000);
+        return saved;
     };
     controls.name = el('input', { type: 'text', maxlength: '24', autocapitalize: 'none', spellcheck: 'false' });
     controls.name.addEventListener('keydown', event => { if (event.key === 'Enter') rename(); });
